@@ -6,6 +6,8 @@ from MAPS.arch import L1Memory, L2Memory, Mesh
 from MAPS.hw.chips import magia_mesh
 from MAPS.core.graph import Edge, Graph, Node, OpKind
 from MAPS.core.layout import TensorRange, TensorSlice, tile_tensor_slice
+from MAPS.pipeline import Layer, Pipeline, Stage
+from MAPS.pipeline.execution import ExecutionContract
 from MAPS.pipeline.layer import ExternalInput, LocalInput, TransitionInput
 from MAPS.core.submesh import Submesh
 from MAPS.core.tensor import Tensor
@@ -17,7 +19,7 @@ from MAPS.planner.passes.pipeline_lowering import lower_pipeline
 from MAPS.planner.passes.validation import validate_constraints
 from MAPS.planner.plan import build_pipeline
 from MAPS.planner.validation.contracts import PlannerConstraints
-from MAPS.utils.pipeline_json import write_pipeline_json
+from MAPS.utils.pipeline_json import pipeline_json_payload, write_pipeline_json
 from tests.noc_utils import rectangular_test_noc, rectangular_test_tiles
 
 
@@ -47,6 +49,39 @@ def _identity_placements(
             },
         )
         for stage_id, plan in plans.items()
+    }
+
+
+def test_pipeline_json_omits_redundant_nested_mesh_state() -> None:
+    mesh = magia_mesh(width=4, height=4)
+    stage = Stage(
+        name="stage",
+        submesh=Submesh(mesh=mesh, submesh_id=0, tile_ids={0}),
+        layers=(Layer(Node("node", OpKind.CUSTOM)),),
+    )
+
+    payload = pipeline_json_payload(Pipeline("pipeline", mesh, stages=(stage,)))
+
+    assert payload["execution"] == {"num_token_slots": 2}
+    assert set(payload["mesh"]) == {"width", "height", "l2_memory", "tiles"}
+    assert set(payload["mesh"]["l2_memory"]) == {"size"}
+    assert set(payload["mesh"]["tiles"][0]) == {"tile_id", "x", "y"}
+    assert payload["stages"][0]["submesh"] == {
+        "submesh_id": 0,
+        "tile_ids": [0],
+    }
+
+
+def test_pipeline_json_carries_planner_selected_token_slots() -> None:
+    mesh = magia_mesh(width=1, height=1)
+    pipeline = Pipeline(
+        "pipeline",
+        mesh,
+        execution=ExecutionContract(num_token_slots=3),
+    )
+
+    assert pipeline_json_payload(pipeline)["execution"] == {
+        "num_token_slots": 3,
     }
 
 
@@ -422,7 +457,7 @@ def test_build_pipeline_lowers_softmax_into_one_grouped_stage() -> None:
     assert report.is_valid, report.violations
 
 
-def test_build_pipeline_exports_conv_as_one_grouped_gemm_dataflow(tmp_path: Path) -> None:
+def test_build_pipeline_exports_direct_conv_semantics(tmp_path: Path) -> None:
     try:
         import onnx
         from onnx import TensorProto, helper
@@ -452,28 +487,18 @@ def test_build_pipeline_exports_conv_as_one_grouped_gemm_dataflow(tmp_path: Path
     )
 
     assert len(pipeline.stages) == 1
-    assert tuple(layer.node.name for layer in pipeline.stages[0].layers) == (
-        "conv_0__im2col",
-        "conv_0__weight_pack",
-        "conv_0__gemm",
-        "conv_0__bias_add",
-        "conv_0__output_reformat",
-    )
+    assert tuple(layer.node.name for layer in pipeline.stages[0].layers) == ("conv_0",)
     assert len(pipeline.transitions) == 0
     assert {init.name for init in pipeline.initializations} == {"init_x", "init_w", "init_b"}
     assert pipeline.finalizations[0].name == "output_y"
-    assert isinstance(pipeline.stages[0].layers[2].inputs[0].source, LocalInput)
-    assert isinstance(pipeline.stages[0].layers[4].inputs[0].source, LocalInput)
 
     payload = json.loads(json_path.read_text(encoding="utf-8"))
-    layers = payload["stages"][0]["layers"]
-    assert int(OpKind.CONV) not in {layer["node"]["kind"] for layer in layers}
-    assert {layer["node"]["payload"].get("op_name") for layer in layers} >= {
-        "Im2Col",
-        "WeightPack",
-        "Add",
-        "OutputReformat",
-    }
+    layer = payload["stages"][0]["layers"][0]
+    assert layer["node"]["kind"] == int(OpKind.CONV)
+    assert layer["node"]["payload"]["strides"] == [1, 1]
+    assert layer["node"]["payload"]["pads"] == [1, 1, 1, 1]
+    assert layer["node"]["payload"]["dilations"] == [1, 1]
+    assert layer["node"]["payload"]["work_kind"] == "CONV2D"
 
 
 def test_build_pipeline_disables_spatial_mapping_progress_by_default(monkeypatch) -> None:
@@ -494,7 +519,7 @@ def test_build_pipeline_disables_spatial_mapping_progress_by_default(monkeypatch
     monkeypatch.setattr(
         plan_module,
         "lower_pipeline",
-        lambda graph, mesh, plans, placements: built_pipeline,
+        lambda graph, mesh, plans, placements, **kwargs: built_pipeline,
     )
     monkeypatch.setattr(
         plan_module,
@@ -545,7 +570,7 @@ def test_build_pipeline_can_enable_spatial_mapping_progress(monkeypatch) -> None
     monkeypatch.setattr(
         plan_module,
         "lower_pipeline",
-        lambda graph, mesh, plans, placements: built_pipeline,
+        lambda graph, mesh, plans, placements, **kwargs: built_pipeline,
     )
     monkeypatch.setattr(
         plan_module,

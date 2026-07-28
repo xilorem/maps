@@ -8,8 +8,12 @@ version = "0.0.1"
 description = "MAGIA mesh scheduler"
 requires-python = ">=3.10"
 dependencies = [
+  "numpy==2.1.2",
   "onnx==1.20.1",
 ]
+
+[project.scripts]
+maps = "MAPS.cli:main"
 
 [project.optional-dependencies]
 dev = [

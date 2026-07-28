@@ -3,8 +3,11 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+import pytest
+
 from MAPS.core.graph import Graph
 from MAPS.importers.onnx.importer import import_onnx_graph
+from MAPS.importers.onnx.preprocess import prepare_onnx_model
 from MAPS.ops.defs.gemm import GemmPayload
 
 
@@ -35,6 +38,83 @@ def test_import_onnx_graph_returns_scheduler_graph_ir() -> None:
         assert lowered_graph.name == "tiny_matmul"
         assert len(lowered_graph.nodes) == 1
         assert isinstance(lowered_graph.nodes[0].payload, GemmPayload)
+
+
+def test_prepare_onnx_model_specializes_input_before_shape_inference() -> None:
+    from onnx import TensorProto, helper
+
+    x = helper.make_tensor_value_info("x", TensorProto.FLOAT, ["batch", 3])
+    w = helper.make_tensor_value_info("w", TensorProto.FLOAT, [3, 4])
+    y = helper.make_tensor_value_info("y", TensorProto.FLOAT, ["batch", 4])
+    node = helper.make_node("MatMul", inputs=["x", "w"], outputs=["y"])
+    model = helper.make_model(helper.make_graph([node], "dynamic", [x, w], [y]))
+
+    prepared = prepare_onnx_model(model, {"x": (2, 3)})
+
+    input_dims = prepared.graph.input[0].type.tensor_type.shape.dim
+    output_dims = prepared.graph.output[0].type.tensor_type.shape.dim
+    assert tuple(dimension.dim_value for dimension in input_dims) == (2, 3)
+    assert tuple(dimension.dim_value for dimension in output_dims) == (2, 4)
+    assert model.graph.input[0].type.tensor_type.shape.dim[0].dim_param == "batch"
+
+
+def test_import_onnx_graph_accepts_input_shape_overrides(tmp_path: Path) -> None:
+    import onnx
+    from onnx import TensorProto, helper
+
+    x = helper.make_tensor_value_info("x", TensorProto.FLOAT, ["batch", 3])
+    w = helper.make_tensor_value_info("w", TensorProto.FLOAT, [3, 4])
+    y = helper.make_tensor_value_info("y", TensorProto.FLOAT, ["batch", 4])
+    model = helper.make_model(
+        helper.make_graph(
+            [helper.make_node("MatMul", inputs=["x", "w"], outputs=["y"])],
+            "dynamic",
+            [x, w],
+            [y],
+        )
+    )
+    model_path = tmp_path / "dynamic.onnx"
+    onnx.save(model, model_path)
+
+    graph = import_onnx_graph(model_path, input_shapes={"x": (2, 3)})
+
+    assert graph.inputs[0].dims == (2, 3)
+    assert graph.outputs[0].dims == (2, 4)
+
+
+def test_prepare_onnx_model_rejects_remaining_dynamic_dimensions() -> None:
+    from onnx import TensorProto, helper
+
+    x = helper.make_tensor_value_info("x", TensorProto.FLOAT, ["batch", 3])
+    y = helper.make_tensor_value_info("y", TensorProto.FLOAT, ["batch", 3])
+    model = helper.make_model(
+        helper.make_graph(
+            [helper.make_node("Identity", inputs=["x"], outputs=["y"])],
+            "dynamic",
+            [x],
+            [y],
+        )
+    )
+
+    with pytest.raises(ValueError, match=r"tensor 'x' has dynamic dimension 'batch'"):
+        prepare_onnx_model(model)
+
+
+def test_prepare_onnx_model_validates_input_shape_overrides() -> None:
+    from onnx import TensorProto, helper
+
+    x = helper.make_tensor_value_info("x", TensorProto.FLOAT, ["batch", 3])
+    y = helper.make_tensor_value_info("y", TensorProto.FLOAT, ["batch", 3])
+    model = helper.make_model(helper.make_graph([], "dynamic", [x], [y]))
+
+    with pytest.raises(ValueError, match="unknown input 'missing'"):
+        prepare_onnx_model(model, {"missing": (2, 3)})
+    with pytest.raises(ValueError, match="has rank 1; expected 2"):
+        prepare_onnx_model(model, {"x": (2,)})
+    with pytest.raises(ValueError, match="must contain positive dimensions"):
+        prepare_onnx_model(model, {"x": (0, 3)})
+    with pytest.raises(ValueError, match="changes concrete dimension 1 from 3 to 4"):
+        prepare_onnx_model(model, {"x": (2, 4)})
 
 
 def _print_graph(graph: Graph) -> None:

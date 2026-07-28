@@ -1,9 +1,4 @@
-"""Top-level planner flow.
-
-This module intentionally contains no planning algorithms.  Reading
-``plan_graph`` shows the complete order of planner passes and the data passed
-between them.  Detailed behavior lives behind the corresponding pass facade.
-"""
+"""Top-level planner flow."""
 
 from __future__ import annotations
 
@@ -11,11 +6,15 @@ from pathlib import Path
 
 from MAPS.arch import Mesh
 from MAPS.core.graph import Graph
-from MAPS.importers.onnx.importer import import_onnx_graph
+from MAPS.deployment.bundle import DeploymentBundle
+from MAPS.importers.onnx.importer import import_onnx_graph, import_onnx_model
+from MAPS.importers.onnx.preprocess import InputShapes
 from MAPS.pipeline.pipeline import Pipeline
+from MAPS.pipeline.execution import ExecutionContract
 from MAPS.planner.contracts.options import (
     PlannerOptions,
     SpatialMappingOptions,
+    StageSelectionOptions,
     WorkloadBalancingOptions,
 )
 from MAPS.planner.passes.pipeline_lowering import lower_pipeline
@@ -51,7 +50,7 @@ def plan_graph(
     """
 
 
-    stage_selection = select_stages(graph)
+    stage_selection = select_stages(graph, options.stage_selection)
 
     stage_plans = balance_workload(
         graph,
@@ -60,6 +59,7 @@ def plan_graph(
         debug=options.workload.print_progress,
         compute_weight=options.workload.compute_weight,
         communication_weight=options.workload.communication_weight,
+        num_token_slots=options.execution.num_token_slots,
     )
 
     placements = map_spatially(
@@ -71,7 +71,13 @@ def plan_graph(
         print_costs=options.spatial_mapping.print_costs,
     )
 
-    pipeline = lower_pipeline(graph, mesh, stage_plans, placements)
+    pipeline = lower_pipeline(
+        graph,
+        mesh,
+        stage_plans,
+        placements,
+        execution=options.execution,
+    )
 
     if options.print_pipeline_cost:
         print_pipeline_stage_cost(graph, mesh, stage_plans, placements)
@@ -86,14 +92,20 @@ def build_pipeline(
     print_spatial_mapping: bool = False,
     print_spatial_mapping_progress: bool = False,
     output_json_path: str | Path | None = None,
+    *,
+    input_shapes: InputShapes | None = None,
+    max_stage_nodes: int = 0,
+    num_token_slots: int = 2,
 ) -> Pipeline:
     """Main planning entry point"""
 
-    graph = import_onnx_graph(model_path)
+    graph = import_onnx_graph(model_path, input_shapes=input_shapes)
     pipeline = plan_graph(
         graph,
         mesh,
         PlannerOptions(
+            execution=ExecutionContract(num_token_slots=num_token_slots),
+            stage_selection=StageSelectionOptions(max_stage_nodes=max_stage_nodes),
             workload=WorkloadBalancingOptions(
                 compute_weight=1.0,
                 communication_weight=10.0,
@@ -111,4 +123,22 @@ def build_pipeline(
     return pipeline
 
 
-__all__ = ["build_pipeline", "plan_graph"]
+def build_pipeline_bundle(
+    model_path: str | Path,
+    arch: Mesh,
+    options: PlannerOptions,
+    *,
+    input_shapes: InputShapes | None = None,
+) -> DeploymentBundle:
+    """Import constants alongside a model and produce its deployment bundle."""
+
+    model = import_onnx_model(model_path, input_shapes=input_shapes)
+    pipeline = plan_graph(model.graph, arch, options)
+    return DeploymentBundle(
+        pipeline=pipeline,
+        graph=model.graph,
+        constants=model.constants,
+    )
+
+
+__all__ = ["build_pipeline", "build_pipeline_bundle", "plan_graph"]
