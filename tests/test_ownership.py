@@ -1,3 +1,5 @@
+import pytest
+
 from MAPS.core.layout import (
     LayoutAxis,
     LayoutAxisMode,
@@ -32,6 +34,23 @@ def test_tensor_slice_num_elements_and_bytes_use_slice_shape() -> None:
 
     assert tensor_slice.num_elements == 8 * 3 * 4
     assert tensor.slice_num_bytes(tensor_slice) == tensor_slice.num_elements * 2
+
+
+def test_tensor_and_slice_support_rank_six() -> None:
+    dims = (1, 2, 3, 4, 5, 6)
+    tensor = Tensor(name="x", rank=6, dims=dims, elem_bytes=2)
+    tensor_slice = TensorSlice(
+        rank=6,
+        dims=tuple(TensorRange(start=0, length=dimension) for dimension in dims),
+    )
+
+    assert tensor.num_elements == 720
+    assert tensor_slice.num_elements == 720
+
+
+def test_tensor_rejects_rank_above_six() -> None:
+    with pytest.raises(ValueError, match=r"rank must be in \[1, 6\]"):
+        Tensor(name="x", rank=7, dims=(1, 1, 1, 1, 1, 1, 1), elem_bytes=2)
 
 
 def test_submesh_tile_helpers_use_global_tile_ids() -> None:

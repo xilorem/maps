@@ -7,6 +7,7 @@ from MAPS.core.tensor import Tensor
 from MAPS.pipeline.layer import ExternalInput, Layer, LocalInput
 from MAPS.pipeline.pipeline import Pipeline
 from MAPS.pipeline.stage import Stage
+from MAPS.planner.workload.memory import permanent_l1_allocation_bytes
 
 
 def estimate_stage_l1_memory_for_tile(
@@ -14,21 +15,11 @@ def estimate_stage_l1_memory_for_tile(
     pipeline: Pipeline,
     tile,
 ) -> int:
-    """Estimate bytes simultaneously resident for one stage on one tile.
+    """Estimate the backend's permanent allocation for one stage tile."""
 
-    Outputs and non-local inputs of every layer are counted.  Local inputs refer
-    to a previous layer's already-counted output and are therefore not counted a
-    second time.  Physical tile ids are translated back to the virtual tiles
-    used by tensor layouts.
-    """
-
-    l1_memory = 0
     virtual_tile = virtual_tile_for_stage_tile(stage, pipeline, tile)
+    allocation_sizes = []
     for layer in stage.layers:
-        for binding in layer.outputs:
-            tensor = pipeline.tensors[binding.tensor_id]
-            tensor_slice = tile_tensor_slice(tensor, binding.layout, virtual_tile)
-            l1_memory += tensor.slice_num_bytes(tensor_slice)
         for binding_idx, binding in enumerate(layer.inputs):
             if isinstance(binding.source, LocalInput):
                 continue
@@ -39,8 +30,20 @@ def estimate_stage_l1_memory_for_tile(
                 pipeline,
                 virtual_tile,
             )
-            l1_memory += tensor.slice_num_bytes(tensor_slice)
-    return l1_memory
+            slot_count = (
+                1
+                if tensor.is_initializer
+                else pipeline.execution.num_token_slots
+            )
+            allocation_sizes.append(tensor.slice_num_bytes(tensor_slice) * slot_count)
+        for binding in layer.outputs:
+            tensor = pipeline.tensors[binding.tensor_id]
+            tensor_slice = tile_tensor_slice(tensor, binding.layout, virtual_tile)
+            allocation_sizes.append(
+                tensor.slice_num_bytes(tensor_slice)
+                * pipeline.execution.num_token_slots
+            )
+    return permanent_l1_allocation_bytes(allocation_sizes)
 
 
 def estimate_stage_l2_memory(stage: Stage, pipeline: Pipeline) -> int:

@@ -6,7 +6,8 @@ from MAPS.arch import Mesh
 from MAPS.core.graph import Node
 from MAPS.planner.contracts.stages import StagePlan
 from MAPS.planner.workload.cost import cost_estimator
-from MAPS.planner.workload.memory import peak_l1_occupancy_for_stage
+from MAPS.planner.workload.memory import permanent_l1_allocation_for_stage
+from MAPS.planner.workload.layouts import resolve_stage_layouts, verify_stage_locality
 from MAPS.planner.workload.submesh import representative_connected_submesh
 
 
@@ -16,6 +17,7 @@ def best_stage_plan(
     stage_id: int,
     tile_count: int,
     initializer_tensors: frozenset,
+    num_token_slots: int = 2,
 ) -> StagePlan:
     """Choose the lowest-compute L1-feasible layout at one tile count.
 
@@ -29,17 +31,19 @@ def best_stage_plan(
     best_plan: StagePlan | None = None
     best_workload: int | None = None
     for logical_shape in logical_shape_options(tile_count):
-        layouts = tuple(
-            node.payload.output_layouts(submesh, logical_shape=logical_shape)
-            for node in stage_nodes
-        )
-        peak_l1_bytes = peak_l1_occupancy_for_stage(
+        try:
+            layouts = resolve_stage_layouts(stage_nodes, submesh, logical_shape)
+            verify_stage_locality(stage_nodes, layouts, submesh)
+        except ValueError:
+            continue
+        allocated_l1_bytes = permanent_l1_allocation_for_stage(
             stage_nodes,
             layouts,
             submesh,
             initializer_tensors,
+            num_token_slots,
         )
-        if peak_l1_bytes > min(tile.memory.size for tile in submesh.tiles):
+        if allocated_l1_bytes > min(tile.memory.size for tile in submesh.tiles):
             continue
         plan = StagePlan(
             stage_id=stage_id,
@@ -61,7 +65,7 @@ def best_stage_plan(
         names = "+".join(node.name for node in stage_nodes)
         raise ValueError(
             f"stage {names} has no valid logical shape for tile_count={tile_count} "
-            "using full tile-work slices"
+            "using local stage layouts and permanent L1 allocation"
         )
     return best_plan
 

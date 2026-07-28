@@ -11,6 +11,7 @@ from MAPS.core.tensor import Tensor
 
 class TransitionMode(IntEnum):
     DIRECT_REMAP = 1
+    PERMUTED_REMAP = 2
 
 
 @dataclass(frozen=True)

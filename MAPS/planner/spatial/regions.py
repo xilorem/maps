@@ -68,6 +68,7 @@ def grow_stage_region(
     placed_regions: dict[int, set[int]],
     remaining_tile_counts: dict[int, int],
     preferred_seed: int | None = None,
+    exhaustive_future_feasibility: bool = True,
 ) -> set[int]:
     """Grow one connected region while protecting future feasibility.
 
@@ -106,6 +107,7 @@ def grow_stage_region(
                 traffic,
                 placed_regions,
                 remaining_tile_counts,
+                exhaustive_future_feasibility,
             )
         except ValueError as exc:
             failures.append(str(exc))
@@ -118,6 +120,7 @@ def grow_stage_region(
         traffic,
         placed_regions,
         remaining_tile_counts,
+        exhaustive_future_feasibility,
     )
     if region is None:
         raise ValueError(

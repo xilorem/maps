@@ -9,7 +9,7 @@ from MAPS.planner.spatial.diagnostics import (
     print_placement_grid,
     print_spatial_mapping_details,
 )
-from MAPS.planner.spatial.evaluation import evaluate_mapping
+from MAPS.planner.spatial.evaluation import MappingEvaluator
 from MAPS.planner.spatial.ownership import assign_stage_ownerships, stage_order
 from MAPS.planner.spatial.regions import build_initial_stage_placements
 from MAPS.planner.spatial.repair import improve_spatial_mapping
@@ -74,13 +74,13 @@ def map_spatially(
         show_progress,
     )
     placements = assign_stage_ownerships(mesh, stage_plans, placements, traffic)
-    evaluation = evaluate_mapping(
+    evaluator = MappingEvaluator(
         graph,
         mesh,
         stage_plans,
-        placements,
         node_stage_ids,
     )
+    evaluation = evaluator.evaluate(placements)
     _debug(
         show_progress,
         "[spatial_mapping] "
@@ -96,6 +96,7 @@ def map_spatially(
         node_stage_ids,
         evaluation,
         show_progress,
+        evaluator=evaluator,
     )
 
     if print_costs:

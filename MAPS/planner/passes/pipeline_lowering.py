@@ -7,6 +7,7 @@ from dataclasses import replace
 from MAPS.arch import Mesh
 from MAPS.core.graph import Graph
 from MAPS.pipeline.pipeline import Pipeline
+from MAPS.pipeline.execution import ExecutionContract
 from MAPS.planner.contracts.stages import StagePlacement, StagePlan
 from MAPS.planner.lowering.boundaries import build_finalizations, build_initializations
 from MAPS.planner.lowering.context import build_lowering_context
@@ -19,6 +20,8 @@ def lower_pipeline(
     mesh: Mesh,
     stage_plans: dict[int, StagePlan],
     placements: dict[int, StagePlacement],
+    *,
+    execution: ExecutionContract = ExecutionContract(),
 ) -> Pipeline:
     """Lower complete planner decisions into executable Pipeline IR.
 
@@ -60,6 +63,7 @@ def lower_pipeline(
     return Pipeline(
         name=graph.name,
         mesh=mesh,
+        execution=execution,
         tensors=tuple(
             replace(tensor, is_initializer=tensor in graph.initializers)
             for tensor in graph.tensors

@@ -11,8 +11,10 @@ from MAPS.planner.contracts.queries import (
     required_input_slices,
 )
 from MAPS.planner.contracts.stages import StagePlacement, StagePlan
+from MAPS.ops.common.layout_relation import find_layout_relation
 from MAPS.transitions import build_transition
 from MAPS.transitions.model import Transition, TransitionFragment
+from MAPS.transitions.model import TransitionMode
 
 
 def build_transitions(
@@ -47,6 +49,16 @@ def build_transitions(
 
                 source_plan = stage_plans[source_stage_id]
                 source_output_idx = node_output_index(source_node, tensor)
+                destination_input_layout = output_layouts[0]
+                relation = find_layout_relation(
+                    destination_node.payload,
+                    input_index=destination_input_idx,
+                    output_index=0,
+                )
+                if relation is not None:
+                    destination_input_layout = (
+                        relation.input_layout_from_output_layout(output_layouts[0])
+                    )
                 transition = build_transition(
                     name=(
                         f"transition_{source_node.name}_to_"
@@ -59,11 +71,16 @@ def build_transitions(
                     dst_layer_id=destination_stage_id,
                     dst_input_idx=destination_input_idx,
                     src_layout=node_output_layouts(source_plan, source_node)[source_output_idx],
-                    dst_layout=output_layouts[0],
+                    dst_layout=destination_input_layout,
                     dst_required_slices=required_input_slices(
                         tensor=tensor,
                         destination_node=destination_node,
                         destination_output_layouts=output_layouts,
+                    ),
+                    mode=getattr(
+                        destination_node.payload,
+                        "input_transition_mode",
+                        TransitionMode.DIRECT_REMAP,
                     ),
                 )
                 transition_id = len(transitions)

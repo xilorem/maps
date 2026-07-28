@@ -35,7 +35,10 @@ def validate_stage(
             "stage_mesh_mismatch",
             f"stage {stage_id} submesh belongs to a different mesh",
         )
-    if len(stage.layers) > constraints.max_stage_nodes:
+    if (
+        constraints.max_stage_nodes > 0
+        and len(stage.layers) > constraints.max_stage_nodes
+    ):
         append_violation(
             violations,
             "stage_node_limit_exceeded",

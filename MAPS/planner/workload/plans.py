@@ -14,6 +14,7 @@ def plan_all_stages(
     tile_counts: dict[int, int],
     initializer_tensors: frozenset,
     debug: bool,
+    num_token_slots: int = 2,
 ) -> dict[int, StagePlan]:
     """Choose the best feasible logical layout for every fixed tile count."""
 
@@ -25,6 +26,7 @@ def plan_all_stages(
             tile_count=tile_counts[stage_id],
             initializer_tensors=initializer_tensors,
             debug=debug,
+            num_token_slots=num_token_slots,
         )
         for stage_id, stage_nodes in stage_selection.items()
     }
@@ -37,6 +39,7 @@ def best_plan_for_stage(
     tile_count: int,
     initializer_tensors: frozenset,
     debug: bool = False,
+    num_token_slots: int = 2,
 ) -> StagePlan:
     """Return the lowest-cost feasible layout candidate for one stage size."""
 
@@ -46,6 +49,7 @@ def best_plan_for_stage(
         stage_id,
         tile_count,
         initializer_tensors,
+        num_token_slots,
     )
     if debug:
         print(

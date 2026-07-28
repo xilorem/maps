@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 
 from MAPS.arch import Mesh
 from MAPS.core.tensor import Tensor
+from MAPS.pipeline.execution import ExecutionContract
 from MAPS.pipeline.finalization import Finalization
 from MAPS.pipeline.initialization import Initialization
 from MAPS.pipeline.stage import Stage
@@ -23,6 +24,7 @@ class Pipeline:
     initializations: tuple[Initialization, ...] = field(default_factory=tuple)
     finalizations: tuple[Finalization, ...] = field(default_factory=tuple)
     transitions: tuple[Transition, ...] = field(default_factory=tuple)
+    execution: ExecutionContract = field(default_factory=ExecutionContract)
 
     def __post_init__(self) -> None:
         if not self.name:

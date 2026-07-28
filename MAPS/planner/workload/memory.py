@@ -1,28 +1,27 @@
-"""L1 footprint estimation for virtual stage candidates."""
+"""Per-tile, stage-local permanent L1 allocation accounting."""
 
 from __future__ import annotations
 
+L1_ALLOCATION_ALIGNMENT_BYTES = 16
 
-def peak_l1_occupancy_for_stage(
+
+def permanent_l1_allocation_for_stage(
     stage_nodes: tuple,
     node_output_layouts: tuple[tuple, ...],
     submesh,
     initializer_tensors: frozenset,
+    num_token_slots: int = 2,
 ) -> int:
-    """Return the greatest estimated L1 footprint on any virtual stage tile.
-
-    Initializer slices persist across nodes and are counted once per tile.  For
-    non-initializer data, nodes execute sequentially, so the stage footprint uses
-    the largest node-local input/output footprint rather than their sum.
-    """
+    """Return the greatest permanent L1 allocation on any virtual tile."""
 
     return max(
         (
-            peak_l1_occupancy_for_tile(
-                stage_nodes=stage_nodes,
-                node_output_layouts=node_output_layouts,
-                tile=tile,
-                initializer_tensors=initializer_tensors,
+            permanent_l1_allocation_for_tile(
+                stage_nodes,
+                node_output_layouts,
+                tile,
+                initializer_tensors,
+                num_token_slots,
             )
             for tile in submesh.tiles
         ),
@@ -30,52 +29,52 @@ def peak_l1_occupancy_for_stage(
     )
 
 
-def peak_l1_occupancy_for_tile(
+def permanent_l1_allocation_for_tile(
     stage_nodes: tuple,
     node_output_layouts: tuple[tuple, ...],
     tile,
     initializer_tensors: frozenset,
+    num_token_slots: int = 2,
 ) -> int:
-    """Combine persistent initializer bytes and peak dynamic bytes on one tile."""
+    """Mirror the backend's monotonic, non-reusing tile-L1 allocator."""
 
-    initializer_memory = 0
-    max_node_dynamic_memory = 0
-    seen_initializer_slices = set()
-    for node, output_layouts in zip(stage_nodes, node_output_layouts):
-        tile_work = node.payload.build_tile_work(output_layouts=output_layouts, tile=tile)
-        initializer_bytes, node_dynamic_memory = peak_l1_occupancy_for_node(
-            tile_work.input_slices,
-            tile_work.output_slices,
-            initializer_tensors=initializer_tensors,
-            seen_initializer_slices=seen_initializer_slices,
-        )
-        initializer_memory += initializer_bytes
-        max_node_dynamic_memory = max(max_node_dynamic_memory, node_dynamic_memory)
-    return initializer_memory + max_node_dynamic_memory
+    works = tuple(
+        node.payload.build_tile_work(output_layouts=layouts, tile=tile)
+        for node, layouts in zip(stage_nodes, node_output_layouts)
+    )
+    produced_tensors = set()
+    allocation_sizes = []
+    for work in works:
+        for reference in work.input_slices:
+            if reference.tensor in produced_tensors:
+                continue
+            slot_count = (
+                1
+                if _is_initializer(reference.tensor, initializer_tensors)
+                else num_token_slots
+            )
+            allocation_sizes.append(reference.num_bytes * slot_count)
+
+        for reference in work.output_slices:
+            allocation_sizes.append(reference.num_bytes * num_token_slots)
+            produced_tensors.add(reference.tensor)
+
+    return permanent_l1_allocation_bytes(allocation_sizes)
 
 
-def peak_l1_occupancy_for_node(
-    input_slices: tuple,
-    output_slices: tuple,
-    initializer_tensors: frozenset,
-    seen_initializer_slices: set[tuple[int, object]],
-) -> tuple[int, int]:
-    """Split one node's referenced slices into new initializer and dynamic bytes."""
+def permanent_l1_allocation_bytes(allocation_sizes) -> int:
+    """Return the final offset of the backend's monotonic L1 allocator."""
 
-    initializer_memory = 0
-    node_dynamic_memory = 0
-    for reference in input_slices:
-        if reference.tensor in initializer_tensors or getattr(
-            reference.tensor,
-            "is_initializer",
-            False,
-        ):
-            key = (id(reference.tensor), reference.tensor_slice)
-            if key not in seen_initializer_slices:
-                seen_initializer_slices.add(key)
-                initializer_memory += reference.num_bytes
-        else:
-            node_dynamic_memory += reference.num_bytes
-    for reference in output_slices:
-        node_dynamic_memory += reference.num_bytes
-    return initializer_memory, node_dynamic_memory
+    next_offset = 0
+    for allocation_size in allocation_sizes:
+        next_offset = _align_to(next_offset, L1_ALLOCATION_ALIGNMENT_BYTES)
+        next_offset += allocation_size
+    return next_offset
+
+
+def _is_initializer(tensor: object, initializer_tensors: frozenset) -> bool:
+    return tensor in initializer_tensors or getattr(tensor, "is_initializer", False)
+
+
+def _align_to(value: int, alignment: int) -> int:
+    return ((value + alignment - 1) // alignment) * alignment

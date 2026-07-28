@@ -14,6 +14,7 @@ def seed_tile_counts(
     context: WorkloadContext,
     mesh: Mesh,
     debug: bool,
+    num_token_slots: int = 2,
 ) -> dict[int, int]:
     """Assign every stage its smallest L1-feasible virtual tile count.
 
@@ -24,7 +25,13 @@ def seed_tile_counts(
 
     stage_ids = tuple(context.stage_selection)
     if len(stage_ids) > mesh.num_tiles:
-        raise ValueError("graph has more selected stages than available tiles")
+        raise ValueError(
+            f"deterministic stage selection produced {len(stage_ids)} stages for "
+            f"a {mesh.num_tiles}-tile target; every stage requires at least one "
+            "tile. Lower stage_selection.max_stage_nodes to a value other than 1 "
+            "only if it enables more compatible coalescing, or select another "
+            "target. Workload balancing does not split or rewrite selected groups."
+        )
 
     _debug(debug, "[workload_balancing] phase=initial_l1_seeding")
     tile_counts = {
@@ -34,6 +41,7 @@ def seed_tile_counts(
             stage_selection=context.stage_selection,
             initializer_tensors=context.initializer_tensors,
             debug=debug,
+            num_token_slots=num_token_slots,
         )
         for stage_id in stage_ids
     }
@@ -49,10 +57,14 @@ def grow_tile_counts(
     compute_weight: float,
     communication_weight: float,
     debug: bool,
+    num_token_slots: int = 2,
 ) -> tuple[dict[int, int], dict[int, StagePlan]]:
     """Spend remaining tiles while improving the global bottleneck objective.
 
     On each iteration stages are ordered by their current bottleneck metric.
+    Before a stage participates in one growth step, doubling its current tile
+    count must improve the objective. A failed doubling probe permanently
+    removes that stage from growth consideration.
     The first stage with a feasible allocation growth that lexicographically
     improves all ordered bottlenecks receives the smallest such growth.  Search
     stops when the mesh is full or no globally improving allocation exists.
@@ -68,10 +80,11 @@ def grow_tile_counts(
         tile_counts,
         initializer_tensors=context.initializer_tensors,
         debug=False,
+        num_token_slots=num_token_slots,
     )
 
     used_tiles = sum(tile_counts.values())
-    stage_ids = tuple(context.stage_selection)
+    active_stage_ids = set(context.stage_selection)
 
     _debug(debug, f"[workload_balancing] start used_tiles={used_tiles}/{mesh.num_tiles}")
     _debug(debug, f"[workload_balancing] initial_tile_counts={tile_counts}")
@@ -93,7 +106,12 @@ def grow_tile_counts(
         )
 
         # Order stages by highest workload
-        stage_order = tuple(sorted(stage_ids, key=lambda stage_id: (-current_metrics[stage_id], stage_id),))
+        stage_order = tuple(
+            sorted(
+                active_stage_ids,
+                key=lambda stage_id: (-current_metrics[stage_id], stage_id),
+            )
+        )
 
         _debug(debug, f"[workload_balancing] used_tiles={used_tiles}/{mesh.num_tiles}")
         _debug(debug, f"[workload_balancing] current_selection_metrics={_format_metrics(current_metrics)}")
@@ -112,7 +130,7 @@ def grow_tile_counts(
                 f"current_metric={current_metrics[stage_id]}",
             )
 
-            growth = _growth_candidate_for_stage(
+            growth_arguments = dict(
                 stage_id=stage_id,
                 stage_selection=context.stage_selection,
                 mesh=mesh,
@@ -128,7 +146,40 @@ def grow_tile_counts(
                 producer_stage_id_by_tensor=context.producer_stage_id_by_tensor,
                 graph=context.graph,
                 current_selection_metrics=current_metrics,
+                num_token_slots=num_token_slots,
             )
+            doubled_current_count = tile_counts[stage_id] * 2
+            doubled_added_tiles = doubled_current_count - tile_counts[stage_id]
+            remaining_tiles = mesh.num_tiles - used_tiles
+            if doubled_added_tiles <= remaining_tiles:
+                doubling_growth = _growth_candidate_for_stage(
+                    **growth_arguments,
+                    candidate_counts=(doubled_current_count,),
+                )
+                if doubling_growth is None:
+                    active_stage_ids.remove(stage_id)
+                    _debug(
+                        debug,
+                        "[workload_balancing] "
+                        f"stage={stage_id} doubled_current_tile_count="
+                        f"{doubled_current_count} no_improvement prune_stage",
+                    )
+                    continue
+                _debug(
+                    debug,
+                    "[workload_balancing] "
+                    f"stage={stage_id} doubled_current_tile_count="
+                    f"{doubled_current_count} improvement_available",
+                )
+            else:
+                _debug(
+                    debug,
+                    "[workload_balancing] "
+                    f"stage={stage_id} doubled_current_tile_count="
+                    f"{doubled_current_count} outside_remaining_budget",
+                )
+
+            growth = _growth_candidate_for_stage(**growth_arguments)
 
             # Select stage with possible growth
             if growth is not None:
@@ -166,6 +217,7 @@ def initial_tile_count_for_stage(
     stage_selection: StageSelection,
     initializer_tensors: frozenset,
     debug: bool = False,
+    num_token_slots: int = 2,
 ) -> int:
     """Return the smallest tile count having an L1-feasible stage layout."""
 
@@ -179,6 +231,7 @@ def initial_tile_count_for_stage(
                 tile_count=tile_count,
                 initializer_tensors=initializer_tensors,
                 debug=False,
+                num_token_slots=num_token_slots,
             )
         except ValueError as exc:
             _debug(
@@ -195,8 +248,13 @@ def initial_tile_count_for_stage(
         )
         return tile_count
     raise ValueError(
-        f"stage {stage_id} ({_stage_label(stage_nodes)}) "
-        f"has no L1-feasible tile count on mesh {mesh.shape}"
+        f"stage {stage_id} nodes={tuple(node.name for node in stage_nodes)} "
+        f"canonical_node_count={len(stage_nodes)} "
+        f"contains_explicit_group={any('stage_group_id' in node.attributes for node in stage_nodes)} "
+        f"has no L1-feasible layout on mesh {mesh.shape}; "
+        f"attempted_tile_counts=1..{mesh.num_tiles} "
+        "layout_families=all_rectangular_factorizations. The caller can lower "
+        "stage_selection.max_stage_nodes or select another target."
     )
 
 
@@ -216,6 +274,7 @@ def grow_tile_count_for_stage(
     producer_stage_id_by_tensor: dict[object, int] | None = None,
     graph: Graph | None = None,
     current_selection_metrics: dict[int, float] | None = None,
+    num_token_slots: int = 2,
 ) -> int | None:
     """Return the smallest feasible stage growth that improves the objective."""
 
@@ -235,6 +294,7 @@ def grow_tile_count_for_stage(
         producer_stage_id_by_tensor=producer_stage_id_by_tensor,
         graph=graph,
         current_selection_metrics=current_selection_metrics,
+        num_token_slots=num_token_slots,
     )
     return None if growth is None else growth[0]
 
@@ -255,15 +315,25 @@ def _growth_candidate_for_stage(
     producer_stage_id_by_tensor: dict[object, int] | None = None,
     graph: Graph | None = None,
     current_selection_metrics: dict[int, float] | None = None,
+    candidate_counts: tuple[int, ...] | None = None,
+    num_token_slots: int = 2,
 ) -> tuple[int, dict[int, StagePlan]] | None:
     """Return the first improving tile count and its materialized plans."""
 
     current_tile_count = tile_counts[stage_id]
     remaining_tiles = mesh.num_tiles - used_tiles
-    candidate_counts = tuple(
-        current_tile_count + added_tiles
-        for added_tiles in range(1, remaining_tiles + 1)
-    )
+    if candidate_counts is None:
+        candidate_counts = tuple(
+            current_tile_count + added_tiles
+            for added_tiles in range(1, remaining_tiles + 1)
+        )
+    else:
+        candidate_counts = tuple(
+            candidate_count
+            for candidate_count in candidate_counts
+            if current_tile_count < candidate_count
+            and candidate_count - current_tile_count <= remaining_tiles
+        )
     _debug(
         debug,
         "[workload_balancing] "
@@ -280,6 +350,7 @@ def _growth_candidate_for_stage(
                 candidate_tile_counts,
                 initializer_tensors=initializer_tensors,
                 debug=False,
+                num_token_slots=num_token_slots,
             )
         except ValueError as exc:
             _debug(

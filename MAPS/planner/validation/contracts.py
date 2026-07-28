@@ -13,7 +13,7 @@ class PlannerConstraints:
     Cross-submesh policy controls transition layout legality.
     """
 
-    max_stage_nodes: int = 5
+    max_stage_nodes: int = 0
     allow_cross_submesh_remap: bool = True
     enforce_l1_capacity: bool = True
     enforce_l2_capacity: bool = True
@@ -21,8 +21,8 @@ class PlannerConstraints:
     def __post_init__(self) -> None:
         """Reject nonsensical stage-size limits at configuration time."""
 
-        if self.max_stage_nodes <= 0:
-            raise ValueError("max_stage_nodes must be > 0")
+        if self.max_stage_nodes < 0:
+            raise ValueError("max_stage_nodes must be >= 0")
 
 
 @dataclass(frozen=True)

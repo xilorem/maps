@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from MAPS.arch import Mesh
 from MAPS.core.graph import Graph
 from MAPS.core.layout import tile_tensor_slice
@@ -14,6 +16,150 @@ from MAPS.planner.contracts.stages import StagePlacement, StagePlan
 from MAPS.planner.spatial.models import MappingEvaluation, StageIOBreakdown, TileIOScore
 from MAPS.transitions import build_direct_remap_fragments
 from MAPS.transitions.transport import TransportCostModel
+
+
+@dataclass(frozen=True)
+class _L1Transfer:
+    source_stage_id: int
+    destination_stage_id: int
+    source_virtual_tile_id: int
+    destination_virtual_tile_id: int
+    bytes: int
+    row_bytes: int | None
+    rows: int
+
+
+@dataclass(frozen=True)
+class _L2Transfer:
+    stage_id: int
+    virtual_tile_id: int
+    bytes: int
+    row_bytes: int | None = None
+    rows: int = 1
+
+
+class MappingEvaluator:
+    """Compile logical transfers once and score complete or locally changed mappings."""
+
+    def __init__(
+        self,
+        graph: Graph,
+        mesh: Mesh,
+        stage_plans: dict[int, StagePlan],
+        node_stage_ids: dict[int, int],
+    ) -> None:
+        self._mesh = mesh
+        self._stage_plans = stage_plans
+        self._model = TransportCostModel(mesh=mesh)
+        (
+            self._l1_transfers_by_source,
+            self._l2_reads_by_stage,
+            self._l2_writes_by_stage,
+            self._source_dependencies_by_destination,
+        ) = _compile_transfers(graph, stage_plans, node_stage_ids)
+
+    def evaluate(
+        self,
+        placements: dict[int, StagePlacement],
+        previous: MappingEvaluation | None = None,
+        moved_stage_ids: frozenset[int] = frozenset(),
+    ) -> MappingEvaluation:
+        """Return the exact score, reusing unaffected stage scores when possible."""
+
+        if previous is None:
+            score_stage_ids = frozenset(self._stage_plans)
+        else:
+            score_stage_ids = moved_stage_ids | frozenset(
+                source_stage_id
+                for destination_stage_id in moved_stage_ids
+                for source_stage_id in self._source_dependencies_by_destination.get(
+                    destination_stage_id,
+                    (),
+                )
+            )
+
+        tile_scores = self._score_stages(placements, score_stage_ids)
+        if previous is not None:
+            tile_scores.update(
+                (tile_id, score)
+                for tile_id, score in previous.tile_scores.items()
+                if score.stage_id not in score_stage_ids
+            )
+        return _mapping_evaluation(placements, tile_scores)
+
+    def _score_stages(
+        self,
+        placements: dict[int, StagePlacement],
+        stage_ids: frozenset[int],
+    ) -> dict[int, TileIOScore]:
+        tile_writes = {
+            tile_id: 0
+            for stage_id in stage_ids
+            for tile_id in placements[stage_id].physical_submesh.tile_ids
+        }
+        tile_l2_reads = dict.fromkeys(tile_writes, 0)
+        tile_l2_writes = dict.fromkeys(tile_writes, 0)
+        consumer_stage_writes = {tile_id: {} for tile_id in tile_writes}
+
+        for source_stage_id in stage_ids:
+            source_placement = placements[source_stage_id]
+            for transfer in self._l1_transfers_by_source.get(source_stage_id, ()):
+                destination_placement = placements[transfer.destination_stage_id]
+                source_tile_id = source_placement.physical_tile_id(
+                    transfer.source_virtual_tile_id
+                )
+                destination_tile_id = destination_placement.physical_tile_id(
+                    transfer.destination_virtual_tile_id
+                )
+                transfer_cost = self._model.l1_to_l1(
+                    self._mesh.tile_by_id(source_tile_id),
+                    self._mesh.tile_by_id(destination_tile_id),
+                    transfer.bytes,
+                    row_bytes=transfer.row_bytes,
+                    rows=transfer.rows,
+                )
+                tile_writes[source_tile_id] += transfer_cost
+                stage_writes = consumer_stage_writes[source_tile_id]
+                destination_stage_id = transfer.destination_stage_id
+                stage_writes[destination_stage_id] = (
+                    stage_writes.get(destination_stage_id, 0) + transfer_cost
+                )
+
+            for transfer in self._l2_reads_by_stage.get(source_stage_id, ()):
+                tile_id = source_placement.physical_tile_id(transfer.virtual_tile_id)
+                tile_l2_reads[tile_id] += self._model.l2_to_l1(
+                    self._mesh.tile_by_id(tile_id),
+                    transfer.bytes,
+                    row_bytes=transfer.row_bytes,
+                    rows=transfer.rows,
+                )
+            for transfer in self._l2_writes_by_stage.get(source_stage_id, ()):
+                tile_id = source_placement.physical_tile_id(transfer.virtual_tile_id)
+                tile_l2_writes[tile_id] += self._model.l1_to_l2(
+                    self._mesh.tile_by_id(tile_id),
+                    transfer.bytes,
+                    row_bytes=transfer.row_bytes,
+                    rows=transfer.rows,
+                )
+
+        stage_of_tile = {
+            tile_id: stage_id
+            for stage_id in stage_ids
+            for tile_id in placements[stage_id].physical_submesh.tile_ids
+        }
+        return {
+            tile_id: TileIOScore(
+                tile_id=tile_id,
+                stage_id=stage_id,
+                tile_to_tile_writes=tile_writes[tile_id],
+                l2_reads=tile_l2_reads[tile_id],
+                l2_writes=tile_l2_writes[tile_id],
+                consumer_stage_writes=dict(
+                    sorted(consumer_stage_writes[tile_id].items())
+                ),
+            )
+            for tile_id, stage_id in stage_of_tile.items()
+        }
 
 
 def evaluate_mapping(
@@ -41,7 +187,24 @@ def evaluate_mapping(
         objective used by local repair.
     """
 
-    model = TransportCostModel(mesh=mesh)
+    return MappingEvaluator(
+        graph,
+        mesh,
+        stage_plans,
+        node_stage_ids,
+    ).evaluate(placements)
+
+
+def _compile_transfers(
+    graph: Graph,
+    stage_plans: dict[int, StagePlan],
+    node_stage_ids: dict[int, int],
+) -> tuple[
+    dict[int, tuple[_L1Transfer, ...]],
+    dict[int, tuple[_L2Transfer, ...]],
+    dict[int, tuple[_L2Transfer, ...]],
+    dict[int, frozenset[int]],
+]:
     producer_by_tensor = {
         tensor: node
         for node in graph.nodes
@@ -50,18 +213,12 @@ def evaluate_mapping(
     initializer_tensors = frozenset(graph.initializers)
     graph_inputs = frozenset(graph.inputs) - initializer_tensors
     graph_outputs = frozenset(graph.outputs)
-    stage_of_tile = {
-        tile_id: stage_id
-        for stage_id, placement in placements.items()
-        for tile_id in placement.physical_submesh.tile_ids
-    }
-    tile_writes = {tile_id: 0 for tile_id in stage_of_tile}
-    tile_l2_reads = {tile_id: 0 for tile_id in stage_of_tile}
-    tile_l2_writes = {tile_id: 0 for tile_id in stage_of_tile}
-    consumer_stage_writes = {tile_id: {} for tile_id in stage_of_tile}
+    l1_transfers: dict[int, list[_L1Transfer]] = {}
+    l2_reads: dict[int, list[_L2Transfer]] = {}
+    l2_writes: dict[int, list[_L2Transfer]] = {}
+    source_dependencies: dict[int, set[int]] = {}
 
     for destination_stage_id, destination_plan in stage_plans.items():
-        destination_placement = placements[destination_stage_id]
         for destination_node, output_layouts in zip(
             destination_plan.nodes,
             destination_plan.node_output_layouts,
@@ -77,12 +234,12 @@ def evaluate_mapping(
                 source_node = producer_by_tensor.get(tensor)
                 if tensor in graph_inputs or source_node is None:
                     for virtual_tile, tensor_slice in required_slices:
-                        destination_tile_id = destination_placement.physical_tile_id(
-                            virtual_tile.tile_id
-                        )
-                        tile_l2_reads[destination_tile_id] += model.l2_to_l1(
-                            mesh.tile_by_id(destination_tile_id),
-                            tensor.slice_num_bytes(tensor_slice),
+                        l2_reads.setdefault(destination_stage_id, []).append(
+                            _L2Transfer(
+                                stage_id=destination_stage_id,
+                                virtual_tile_id=virtual_tile.tile_id,
+                                bytes=tensor.slice_num_bytes(tensor_slice),
+                            )
                         )
                     continue
 
@@ -98,28 +255,22 @@ def evaluate_mapping(
                     src_layout=source_layout,
                     dst_required_slices=required_slices,
                 )
-                source_placement = placements[source_stage_id]
+                source_dependencies.setdefault(destination_stage_id, set()).add(
+                    source_stage_id
+                )
                 for fragment in fragments:
                     bytes_ = fragment.src_subslice.num_elements * tensor.elem_bytes
-                    source_tile = mesh.tile_by_id(
-                        source_placement.physical_tile_id(fragment.src_hartid)
-                    )
-                    destination_tile = mesh.tile_by_id(
-                        destination_placement.physical_tile_id(fragment.dst_hartid)
-                    )
                     row_bytes, rows = _fragment_row_shape(fragment, tensor.elem_bytes)
-                    transfer_cost = model.l1_to_l1(
-                        source_tile,
-                        destination_tile,
-                        bytes_,
-                        row_bytes=row_bytes,
-                        rows=rows,
-                    )
-                    source_tile_id = source_tile.tile_id
-                    tile_writes[source_tile_id] += transfer_cost
-                    stage_writes = consumer_stage_writes[source_tile_id]
-                    stage_writes[destination_stage_id] = (
-                        stage_writes.get(destination_stage_id, 0) + transfer_cost
+                    l1_transfers.setdefault(source_stage_id, []).append(
+                        _L1Transfer(
+                            source_stage_id=source_stage_id,
+                            destination_stage_id=destination_stage_id,
+                            source_virtual_tile_id=fragment.src_hartid,
+                            destination_virtual_tile_id=fragment.dst_hartid,
+                            bytes=bytes_,
+                            row_bytes=row_bytes,
+                            rows=rows,
+                        )
                     )
 
             for output_idx, tensor in enumerate(destination_node.outputs):
@@ -127,31 +278,33 @@ def evaluate_mapping(
                     continue
                 output_layout = output_layouts[output_idx]
                 for virtual_tile in output_layout.submesh.tiles:
-                    destination_tile_id = destination_placement.physical_tile_id(
-                        virtual_tile.tile_id
-                    )
                     output_slice = tile_tensor_slice(tensor, output_layout, virtual_tile)
                     row_bytes, rows = _output_row_shape(tensor, output_slice)
-                    tile_l2_writes[destination_tile_id] += model.l1_to_l2(
-                        mesh.tile_by_id(destination_tile_id),
-                        tensor.slice_num_bytes(output_slice),
-                        row_bytes=row_bytes,
-                        rows=rows,
+                    l2_writes.setdefault(destination_stage_id, []).append(
+                        _L2Transfer(
+                            stage_id=destination_stage_id,
+                            virtual_tile_id=virtual_tile.tile_id,
+                            bytes=tensor.slice_num_bytes(output_slice),
+                            row_bytes=row_bytes,
+                            rows=rows,
+                        )
                     )
 
-    tile_scores = {
-        tile_id: TileIOScore(
-            tile_id=tile_id,
-            stage_id=stage_of_tile.get(tile_id),
-            tile_to_tile_writes=tile_writes.get(tile_id, 0),
-            l2_reads=tile_l2_reads.get(tile_id, 0),
-            l2_writes=tile_l2_writes.get(tile_id, 0),
-            consumer_stage_writes=dict(
-                sorted(consumer_stage_writes.get(tile_id, {}).items())
-            ),
-        )
-        for tile_id in stage_of_tile
-    }
+    return (
+        {stage_id: tuple(transfers) for stage_id, transfers in l1_transfers.items()},
+        {stage_id: tuple(transfers) for stage_id, transfers in l2_reads.items()},
+        {stage_id: tuple(transfers) for stage_id, transfers in l2_writes.items()},
+        {
+            stage_id: frozenset(source_stage_ids)
+            for stage_id, source_stage_ids in source_dependencies.items()
+        },
+    )
+
+
+def _mapping_evaluation(
+    placements: dict[int, StagePlacement],
+    tile_scores: dict[int, TileIOScore],
+) -> MappingEvaluation:
     objective = tile_score_objective(tile_scores)
     worst_tile_id = max(
         tile_scores,

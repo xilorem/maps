@@ -20,6 +20,7 @@ def build_transition(
     src_layout: TensorLayout,
     dst_layout: TensorLayout,
     dst_required_slices: tuple[tuple[Tile, TensorSlice], ...],
+    mode: TransitionMode = TransitionMode.DIRECT_REMAP,
 ) -> Transition:
     """Build one concrete transition instance."""
 
@@ -38,7 +39,7 @@ def build_transition(
         src_output_idx=src_output_idx,
         dst_layer_id=dst_layer_id,
         dst_input_idx=dst_input_idx,
-        mode=TransitionMode.DIRECT_REMAP,
+        mode=mode,
         src_layout=src_layout,
         dst_layout=dst_layout,
         fragments=fragments,

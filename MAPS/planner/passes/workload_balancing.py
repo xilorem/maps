@@ -17,6 +17,7 @@ def balance_workload(
     debug: bool = False,
     compute_weight: float = 1.0,
     communication_weight: float = 1.0,
+    num_token_slots: int = 2,
 ) -> dict[int, StagePlan]:
     """Choose virtual tile allocations and tensor layouts for all stages.
 
@@ -44,7 +45,12 @@ def balance_workload(
     context = build_workload_context(graph, stage_selection)
 
     # Assign to every stage the minimum number of tiles that fit into L1 tile memory
-    tile_counts = seed_tile_counts(context, mesh, debug)
+    tile_counts = seed_tile_counts(
+        context,
+        mesh,
+        debug,
+        num_token_slots=num_token_slots,
+    )
 
     # Main tile growing loop
     tile_counts, plans = grow_tile_counts(
@@ -54,6 +60,7 @@ def balance_workload(
         compute_weight=compute_weight,
         communication_weight=communication_weight,
         debug=debug,
+        num_token_slots=num_token_slots,
     )
 
     if debug:

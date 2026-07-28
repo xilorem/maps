@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from MAPS.pipeline.execution import ExecutionContract
+
 
 @dataclass(frozen=True)
 class WorkloadBalancingOptions:
@@ -33,13 +35,30 @@ class SpatialMappingOptions:
 
 
 @dataclass(frozen=True)
+class StageSelectionOptions:
+    """Deterministic graph-level stage coalescing configuration.
+
+    Zero selects maximal eligible coalescing, one disables automatic
+    coalescing, and larger values bound automatic groups by canonical nodes.
+    """
+
+    max_stage_nodes: int = 0
+
+    def __post_init__(self) -> None:
+        if self.max_stage_nodes < 0:
+            raise ValueError("max_stage_nodes must be >= 0")
+
+
+@dataclass(frozen=True)
 class PlannerOptions:
     """Complete configuration for planning an already imported graph.
 
-    Options are grouped by pass so adding a pass-specific setting does not make
-    the outer planner signature grow.
+    Pass-specific options remain grouped by pass. ``execution`` is shared by
+    workload feasibility and executable-pipeline lowering.
     """
 
+    stage_selection: StageSelectionOptions = field(default_factory=StageSelectionOptions)
     workload: WorkloadBalancingOptions = field(default_factory=WorkloadBalancingOptions)
     spatial_mapping: SpatialMappingOptions = field(default_factory=SpatialMappingOptions)
+    execution: ExecutionContract = field(default_factory=ExecutionContract)
     print_pipeline_cost: bool = True

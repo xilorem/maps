@@ -7,7 +7,7 @@ from collections import deque
 from MAPS.arch import Mesh
 from MAPS.core.graph import Graph
 from MAPS.planner.contracts.stages import StagePlacement, StagePlan
-from MAPS.planner.spatial.evaluation import evaluate_mapping
+from MAPS.planner.spatial.evaluation import MappingEvaluator
 from MAPS.planner.spatial.models import (
     MappingEvaluation,
     RepairCandidate,
@@ -35,6 +35,7 @@ def improve_spatial_mapping(
     node_stage_ids: dict[int, int],
     initial_evaluation: MappingEvaluation,
     debug: bool,
+    evaluator: MappingEvaluator | None = None,
     max_iters: int = 32,
     max_repair_regions: int = 5,
 ) -> dict[int, StagePlacement]:
@@ -46,6 +47,8 @@ def improve_spatial_mapping(
     accepted.  A short tabu queue avoids immediately revisiting the same union.
     """
 
+    if evaluator is None:
+        evaluator = MappingEvaluator(graph, mesh, stage_plans, node_stage_ids)
     current_placements = placements
     current_evaluation = initial_evaluation
     tabu: deque[frozenset[int]] = deque(maxlen=10)
@@ -87,13 +90,17 @@ def improve_spatial_mapping(
             )
             if trial is None:
                 continue
-            trial = assign_stage_ownerships(mesh, stage_plans, trial, traffic)
-            evaluation = evaluate_mapping(
-                graph,
+            trial = assign_stage_ownerships(
                 mesh,
                 stage_plans,
                 trial,
-                node_stage_ids,
+                traffic,
+                stage_ids=candidate.stages,
+            )
+            evaluation = evaluator.evaluate(
+                trial,
+                previous=current_evaluation,
+                moved_stage_ids=candidate.stages,
             )
             _debug(
                 debug,
@@ -192,6 +199,7 @@ def repair_region(
                     placed_regions=placed_regions,
                     remaining_tile_counts=remaining_counts,
                     preferred_seed=preferred_seed,
+                    exhaustive_future_feasibility=False,
                 )
             except ValueError:
                 feasible = False
@@ -221,13 +229,12 @@ def repair_region(
     if best_regions is None:
         _debug(debug, f"[spatial_mapping] repair_failed stages={sorted(affected_stages)}")
         return None
-    merged_regions = {
-        stage_id: set(placement.physical_submesh.tile_ids)
-        for stage_id, placement in current_placements.items()
-    }
-    merged_regions.update(best_regions)
+    merged_placements = dict(current_placements)
+    merged_placements.update(
+        placements_from_regions(mesh, stage_plans, best_regions)
+    )
     _debug(debug, f"[spatial_mapping] repair_regions stages={sorted(affected_stages)}")
-    return placements_from_regions(mesh, stage_plans, merged_regions)
+    return merged_placements
 
 
 def choose_repair_regions(

@@ -15,6 +15,7 @@ def future_feasible_after_choice(
     chosen_tile_ids: set[int],
     remaining_tile_counts: dict[int, int],
     current_stage_remaining_tiles: int,
+    exhaustive: bool = True,
 ) -> bool:
     """Reject a region choice when it obviously strands later stages."""
 
@@ -26,6 +27,7 @@ def future_feasible_after_choice(
         mesh=mesh,
         free_tile_ids=free_after_choice,
         remaining_tile_counts=tuple(sorted(future_counts, reverse=True)),
+        exhaustive=exhaustive,
     )
 
 
@@ -33,6 +35,7 @@ def remaining_counts_fit_free_components(
     mesh: Mesh,
     free_tile_ids: set[int],
     remaining_tile_counts: tuple[int, ...],
+    exhaustive: bool = True,
 ) -> bool:
     """Check whether free connected components can host remaining stages."""
 
@@ -44,7 +47,11 @@ def remaining_counts_fit_free_components(
         return False
     if not component_sizes or requested_sizes[0] > component_sizes[0]:
         return False
-    if len(requested_sizes) <= 3 and sum(requested_sizes) <= 20:
+    if (
+        exhaustive
+        and len(requested_sizes) <= 3
+        and sum(requested_sizes) <= 20
+    ):
         return _can_partition_connected_regions(
             mesh=mesh,
             free_tile_ids=frozenset(free_tile_ids),

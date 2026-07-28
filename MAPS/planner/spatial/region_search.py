@@ -18,6 +18,7 @@ def greedy_connected_region(
     traffic: VirtualTraffic,
     placed_regions: dict[int, set[int]],
     remaining_tile_counts: dict[int, int],
+    exhaustive_future_feasibility: bool = True,
 ) -> set[int]:
     """Grow a connected region from one seed using local best choices."""
 
@@ -49,6 +50,7 @@ def greedy_connected_region(
                 candidate_region,
                 remaining_tile_counts,
                 tile_count - len(candidate_region),
+                exhaustive=exhaustive_future_feasibility,
             ):
                 next_tile_id = candidate_tile_id
                 break
@@ -69,6 +71,7 @@ def beam_connected_region(
     traffic: VirtualTraffic,
     placed_regions: dict[int, set[int]],
     remaining_tile_counts: dict[int, int],
+    exhaustive_future_feasibility: bool = True,
 ) -> set[int] | None:
     """Search a wider set of regions when greedy growth gets boxed in."""
 
@@ -111,6 +114,7 @@ def beam_connected_region(
             set(region),
             remaining_tile_counts,
             0,
+            exhaustive=exhaustive_future_feasibility,
         )
     ]
     if not feasible_regions:

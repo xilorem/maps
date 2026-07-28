@@ -5,8 +5,10 @@ from MAPS.core.tensor import Tensor
 from MAPS.ops.defs.gemm import GemmPayload
 from MAPS.planner.contracts.stages import StagePlacement, StagePlan, virtual_submesh
 from MAPS.planner.passes.spatial_mapping import map_spatially
-from MAPS.planner.spatial.evaluation import evaluate_mapping
+from MAPS.planner.spatial.evaluation import MappingEvaluator, evaluate_mapping
+from MAPS.planner.spatial.ownership import assign_stage_ownerships
 import MAPS.planner.spatial.repair as spatial_repair
+import MAPS.planner.spatial.topology as spatial_topology
 from MAPS.planner.spatial.models import VirtualTraffic
 from MAPS.planner.spatial.traffic import build_virtual_traffic
 from tests.noc_utils import rectangular_test_noc, rectangular_test_tiles
@@ -187,7 +189,7 @@ def test_repair_region_skips_an_infeasible_growth_attempt(monkeypatch) -> None:
     )
 
     def fail_growth(**kwargs) -> set[int]:
-        del kwargs
+        assert kwargs["exhaustive_future_feasibility"] is False
         raise ValueError("infeasible region")
 
     monkeypatch.setattr(spatial_repair, "grow_stage_region", fail_growth)
@@ -209,3 +211,136 @@ def test_repair_region_skips_an_infeasible_growth_attempt(monkeypatch) -> None:
         focus_stage_id=0,
         debug=False,
     ) is None
+
+
+def test_incremental_evaluation_rescores_moved_stages_and_predecessors() -> None:
+    mesh = _test_mesh(4, 1)
+    producer = _gemm_node("producer")
+    consumer = _gemm_node("consumer", x=producer.outputs[0])
+    neighbor = _gemm_node("neighbor")
+    unrelated = _gemm_node("unrelated")
+    graph = Graph(
+        name="g",
+        nodes=(producer, consumer, neighbor, unrelated),
+        edges=(Edge(tensor=producer.outputs[0], src=producer, dst=consumer),),
+        outputs=(consumer.outputs[0], unrelated.outputs[0]),
+    )
+    nodes = (producer, consumer, neighbor, unrelated)
+    stage_plans = {
+        stage_id: _single_node_stage_plan(mesh, stage_id, node, {0})
+        for stage_id, node in enumerate(nodes)
+    }
+    placements = {
+        stage_id: StagePlacement(
+            stage_id=stage_id,
+            virtual_submesh=virtual_submesh(plan),
+            physical_submesh=Submesh(
+                mesh=mesh,
+                submesh_id=stage_id,
+                tile_ids=frozenset({stage_id}),
+            ),
+            virtual_to_physical={0: stage_id},
+        )
+        for stage_id, plan in stage_plans.items()
+    }
+    node_stage_ids = {
+        id(node): stage_id
+        for stage_id, node in enumerate(nodes)
+    }
+    evaluator = MappingEvaluator(graph, mesh, stage_plans, node_stage_ids)
+    initial = evaluator.evaluate(placements)
+
+    trial = dict(placements)
+    for stage_id, tile_id in ((1, 2), (2, 1)):
+        trial[stage_id] = StagePlacement(
+            stage_id=stage_id,
+            virtual_submesh=virtual_submesh(stage_plans[stage_id]),
+            physical_submesh=Submesh(
+                mesh=mesh,
+                submesh_id=stage_id,
+                tile_ids=frozenset({tile_id}),
+            ),
+            virtual_to_physical={0: tile_id},
+        )
+
+    incremental = evaluator.evaluate(
+        trial,
+        previous=initial,
+        moved_stage_ids=frozenset({1, 2}),
+    )
+    complete = evaluate_mapping(
+        graph,
+        mesh,
+        stage_plans,
+        trial,
+        node_stage_ids,
+    )
+
+    assert incremental == complete
+    assert incremental.tile_scores[3] is initial.tile_scores[3]
+    assert incremental.tile_scores[0] is not initial.tile_scores[0]
+
+
+def test_local_ownership_assignment_preserves_unmoved_stages() -> None:
+    mesh = _test_mesh(3, 1)
+    nodes = tuple(_gemm_node(f"stage_{stage_id}") for stage_id in range(3))
+    stage_plans = {
+        stage_id: _single_node_stage_plan(mesh, stage_id, node, {0})
+        for stage_id, node in enumerate(nodes)
+    }
+    placements = {
+        stage_id: StagePlacement(
+            stage_id=stage_id,
+            virtual_submesh=virtual_submesh(plan),
+            physical_submesh=Submesh(
+                mesh=mesh,
+                submesh_id=stage_id,
+                tile_ids=frozenset({stage_id}),
+            ),
+            virtual_to_physical={0: stage_id},
+        )
+        for stage_id, plan in stage_plans.items()
+    }
+    traffic = VirtualTraffic(
+        stage_comm={},
+        edge_matrices={},
+        input_weights={stage_id: {0: 0} for stage_id in stage_plans},
+        output_weights={stage_id: {0: 0} for stage_id in stage_plans},
+        l2_read_weights={stage_id: {0: 0} for stage_id in stage_plans},
+        l2_write_weights={stage_id: {0: 0} for stage_id in stage_plans},
+        communication_degree={stage_id: 0 for stage_id in stage_plans},
+        bottleneck_risk={stage_id: 0 for stage_id in stage_plans},
+        l2_pressure={stage_id: 0 for stage_id in stage_plans},
+    )
+
+    assigned = assign_stage_ownerships(
+        mesh,
+        stage_plans,
+        placements,
+        traffic,
+        stage_ids=frozenset({1}),
+    )
+
+    assert assigned[0] is placements[0]
+    assert assigned[2] is placements[2]
+
+
+def test_non_exhaustive_future_feasibility_uses_component_sizes(monkeypatch) -> None:
+    mesh = _test_mesh(5, 4)
+
+    def fail_subset_enumeration(**kwargs) -> bool:
+        del kwargs
+        raise AssertionError("connected subsets must not be enumerated")
+
+    monkeypatch.setattr(
+        spatial_topology,
+        "_can_partition_connected_regions",
+        fail_subset_enumeration,
+    )
+
+    assert spatial_topology.remaining_counts_fit_free_components(
+        mesh,
+        set(range(mesh.num_tiles)),
+        (10, 10),
+        exhaustive=False,
+    )

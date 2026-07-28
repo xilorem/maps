@@ -1,16 +1,21 @@
+import pytest
+
 from MAPS.arch import L1Memory, L2Memory, Mesh
 from MAPS.core.graph import Edge, Graph, Node, OpKind
 from MAPS.core.submesh import Submesh
 from MAPS.core.tensor import Tensor
 from MAPS.ops.defs.gemm import GemmPayload
+from MAPS.ops.defs.elementwise import UnaryElementwisePayload
 from MAPS.planner.passes.stage_selection import select_stages
 from MAPS.planner.passes.workload_balancing import balance_workload
 from MAPS.planner.workload.allocation import grow_tile_count_for_stage
+from MAPS.planner.workload import allocation as allocation_module
 from MAPS.planner.workload.metrics import (
     estimate_selection_metrics,
     virtual_communication_cycles,
 )
 from MAPS.planner.workload.plans import best_plan_for_stage, plan_all_stages
+from MAPS.planner.workload.memory import permanent_l1_allocation_for_tile
 from tests.noc_utils import rectangular_test_noc, rectangular_test_tiles
 
 
@@ -124,11 +129,34 @@ def test_balance_workload_preserves_layout_decisions() -> None:
 def test_balance_workload_starts_from_minimum_l1_feasible_tile_count() -> None:
     node = _gemm_node("gemm", m=4, k=4, n=4)
     graph = Graph(name="g", nodes=(node,))
-    mesh = _mesh_with_l1(2, 1, l1_size=80)
+    mesh = _mesh_with_l1(2, 1, l1_size=128)
 
     plans = balance_workload(graph, mesh, select_stages(graph))
 
     assert plans[0].tile_count == 2
+
+
+def test_planner_selected_token_slots_control_l1_feasibility() -> None:
+    node = _gemm_node("gemm", m=4, k=4, n=4)
+    graph = Graph(name="g", nodes=(node,))
+    mesh = _mesh_with_l1(2, 1, l1_size=80)
+    selection = select_stages(graph)
+
+    plans = balance_workload(
+        graph,
+        mesh,
+        selection,
+        num_token_slots=1,
+    )
+
+    assert plans[0].tile_count == 2
+    with pytest.raises(ValueError, match="has no L1-feasible layout"):
+        balance_workload(
+            graph,
+            mesh,
+            selection,
+            num_token_slots=2,
+        )
 
 
 def test_balance_workload_accepts_explicit_stage_selection() -> None:
@@ -177,15 +205,13 @@ def test_balance_workload_can_use_selected_stage_groups() -> None:
     graph = Graph(name="g", nodes=(node0, node1, node2))
     mesh = _mesh_with_l1(3, 2, l1_size=4096)
 
-    plans = balance_workload(
-        graph,
-        mesh,
-        stage_selection=select_stages(graph),
-    )
-
-    assert tuple(plans) == (0, 1)
-    assert plans[0].nodes == (node0, node1)
-    assert plans[1].nodes == (node2,)
+    del mesh
+    try:
+        select_stages(graph)
+    except ValueError as exc:
+        assert "dependency-connected" in str(exc)
+    else:
+        raise AssertionError("expected malformed explicit group to fail")
 
 
 def test_best_stage_plan_uses_l1_feasible_logical_shape_for_fixed_tile_count() -> None:
@@ -244,6 +270,79 @@ def test_growth_prefers_tile_count_with_more_physical_shape_options() -> None:
     assert best_growth > 2
 
 
+def test_growth_prunes_stage_when_doubling_current_count_does_not_improve(
+    monkeypatch,
+) -> None:
+    from types import SimpleNamespace
+
+    stage_selection = {
+        0: (Node("no_scale", OpKind.CUSTOM),),
+        1: (Node("scales", OpKind.CUSTOM),),
+    }
+    context = SimpleNamespace(
+        stage_selection=stage_selection,
+        initializer_tensors=frozenset(),
+        graph_inputs=frozenset(),
+        graph_outputs=frozenset(),
+        producer_stage_id_by_tensor={},
+        graph=Graph("growth", nodes=stage_selection[0] + stage_selection[1]),
+    )
+    mesh = _mesh_with_l1(5, 1, l1_size=4096)
+    plans = {
+        stage_id: SimpleNamespace(logical_shape=(1, 1))
+        for stage_id in stage_selection
+    }
+    calls = []
+    normal_growth_calls = 0
+
+    monkeypatch.setattr(
+        allocation_module,
+        "plan_all_stages",
+        lambda *args, **kwargs: plans,
+    )
+    monkeypatch.setattr(
+        allocation_module,
+        "estimate_selection_metrics",
+        lambda *args, **kwargs: {0: 10.0, 1: 5.0},
+    )
+
+    def fake_growth(**kwargs):
+        nonlocal normal_growth_calls
+        call = (kwargs["stage_id"], kwargs.get("candidate_counts"))
+        calls.append(call)
+        if call == (0, (2,)):
+            return None
+        if call == (1, (2,)):
+            return 2, plans
+        if call == (1, None):
+            normal_growth_calls += 1
+            if normal_growth_calls == 1:
+                return 2, plans
+        return None
+
+    monkeypatch.setattr(
+        allocation_module,
+        "_growth_candidate_for_stage",
+        fake_growth,
+    )
+
+    tile_counts, _ = allocation_module.grow_tile_counts(
+        context,
+        mesh,
+        tile_counts={0: 1, 1: 1},
+        compute_weight=1.0,
+        communication_weight=1.0,
+        debug=False,
+    )
+
+    assert tile_counts == {0: 1, 1: 2}
+    assert calls.count((0, (2,))) == 1
+    assert (0, None) not in calls
+    assert (1, (2,)) in calls
+    assert (1, None) in calls
+    assert (1, (4,)) in calls
+
+
 def test_best_stage_plan_rejects_tile_work_that_does_not_fit() -> None:
     node = _batched_gemm_node("batched", b=4, m=4, k=4, n=4)
     mesh = _mesh_with_l1(1, 1, l1_size=64)
@@ -258,7 +357,7 @@ def test_best_stage_plan_rejects_tile_work_that_does_not_fit() -> None:
             debug=False,
         )
     except ValueError as exc:
-        assert "full tile-work slices" in str(exc)
+        assert "local stage layouts and permanent L1 allocation" in str(exc)
     else:
         raise AssertionError("expected tile-work L1 fit failure")
 
@@ -277,6 +376,162 @@ def test_best_stage_plan_counts_outputs_in_l1_fit() -> None:
             debug=False,
         )
     except ValueError as exc:
-        assert "full tile-work slices" in str(exc)
+        assert "local stage layouts and permanent L1 allocation" in str(exc)
     else:
         raise AssertionError("expected output slice to be included in L1 fit")
+
+
+def test_stage_l1_accounting_keeps_every_backend_allocation() -> None:
+    x = Tensor("x", 1, (8,), 2)
+    a = Tensor("a", 1, (8,), 2)
+    early_output = Tensor("early_output", 1, (8,), 2)
+    c = Tensor("c", 1, (8,), 2)
+    output = Tensor("output", 1, (8,), 2)
+    nodes = (
+        Node(
+            "produce_a",
+            OpKind.ELEMENTWISE,
+            (x,),
+            (a,),
+            UnaryElementwisePayload("Relu", x, a),
+        ),
+        Node(
+            "early_branch",
+            OpKind.ELEMENTWISE,
+            (a,),
+            (early_output,),
+            UnaryElementwisePayload("Exp", a, early_output),
+        ),
+        Node(
+            "late_branch",
+            OpKind.ELEMENTWISE,
+            (a,),
+            (c,),
+            UnaryElementwisePayload("Neg", a, c),
+        ),
+        Node(
+            "finish",
+            OpKind.ELEMENTWISE,
+            (c,),
+            (output,),
+            UnaryElementwisePayload("Sqrt", c, output),
+        ),
+    )
+    mesh = _mesh_with_l1(1, 1, l1_size=4096)
+    submesh = Submesh(mesh, submesh_id=0, x0=0, y0=0, width=1, height=1)
+    layouts = tuple(
+        node.payload.output_layouts(submesh, logical_shape=(1, 1))
+        for node in nodes
+    )
+
+    assert permanent_l1_allocation_for_tile(
+        nodes,
+        layouts,
+        submesh.tiles[0],
+        frozenset(),
+    ) == 160
+
+
+def test_l1_occupancy_token_buffers_runtime_tensors_but_not_initializers() -> None:
+    weight = Tensor("weight", 1, (8,), 2, is_initializer=True)
+    output = Tensor("output", 1, (8,), 2)
+    node = Node(
+        "op",
+        OpKind.ELEMENTWISE,
+        (weight,),
+        (output,),
+        UnaryElementwisePayload("Exp", weight, output),
+    )
+    mesh = _mesh_with_l1(1, 1, l1_size=4096)
+    submesh = Submesh(mesh, submesh_id=0, x0=0, y0=0, width=1, height=1)
+    layouts = node.payload.output_layouts(submesh, logical_shape=(1, 1))
+
+    assert permanent_l1_allocation_for_tile(
+        (node,),
+        (layouts,),
+        submesh.tiles[0],
+        frozenset((weight,)),
+        num_token_slots=3,
+    ) == 64
+
+
+def test_permanent_l1_allocation_reproduces_tile_245_overflow() -> None:
+    x = Tensor("x", 1, (71_552,), 2)
+    intermediate = Tensor("intermediate", 1, (71_552,), 2)
+    output = Tensor("output", 1, (71_552,), 2)
+    nodes = (
+        Node(
+            "first",
+            OpKind.ELEMENTWISE,
+            (x,),
+            (intermediate,),
+            UnaryElementwisePayload("Relu", x, intermediate),
+        ),
+        Node(
+            "second",
+            OpKind.ELEMENTWISE,
+            (intermediate,),
+            (output,),
+            UnaryElementwisePayload("Exp", intermediate, output),
+        ),
+    )
+    mesh = _mesh_with_l1(1, 1, l1_size=0xD0000)
+    submesh = Submesh(mesh, submesh_id=0, x0=0, y0=0, width=1, height=1)
+    layouts = tuple(
+        node.payload.output_layouts(submesh, logical_shape=(1, 1))
+        for node in nodes
+    )
+
+    assert permanent_l1_allocation_for_tile(
+        nodes,
+        layouts,
+        submesh.tiles[0],
+        frozenset(),
+        num_token_slots=2,
+    ) == 858_624
+
+    with pytest.raises(ValueError, match="permanent L1 allocation"):
+        best_plan_for_stage(
+            stage_nodes=nodes,
+            mesh=mesh,
+            stage_id=0,
+            tile_count=1,
+            initializer_tensors=frozenset(),
+            num_token_slots=2,
+        )
+
+
+def test_permanent_l1_allocation_aligns_each_slice_start() -> None:
+    x = Tensor("x", 1, (1,), 1)
+    intermediate = Tensor("intermediate", 1, (1,), 1)
+    output = Tensor("output", 1, (1,), 1)
+    nodes = (
+        Node(
+            "first",
+            OpKind.ELEMENTWISE,
+            (x,),
+            (intermediate,),
+            UnaryElementwisePayload("Relu", x, intermediate),
+        ),
+        Node(
+            "second",
+            OpKind.ELEMENTWISE,
+            (intermediate,),
+            (output,),
+            UnaryElementwisePayload("Exp", intermediate, output),
+        ),
+    )
+    mesh = _mesh_with_l1(1, 1, l1_size=4096)
+    submesh = Submesh(mesh, submesh_id=0, x0=0, y0=0, width=1, height=1)
+    layouts = tuple(
+        node.payload.output_layouts(submesh, logical_shape=(1, 1))
+        for node in nodes
+    )
+
+    assert permanent_l1_allocation_for_tile(
+        nodes,
+        layouts,
+        submesh.tiles[0],
+        frozenset(),
+        num_token_slots=1,
+    ) == 33

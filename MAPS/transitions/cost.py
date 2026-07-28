@@ -49,7 +49,11 @@ def _transition_fragment_dma_rows(
     return src_inner.length * tensor.elem_bytes, fragment.src_subslice.num_elements // src_inner.length
 
 
-def _aggregate_transition(legs: tuple[TransferLeg, ...], model: TransportCostModel) -> TransitionCost:
+def _aggregate_transition(
+    legs: tuple[TransferLeg, ...],
+    model: TransportCostModel,
+    mode: TransitionMode,
+) -> TransitionCost:
     producer_loads: dict[int, int] = {}
     consumer_loads: dict[int, int] = {}
     resource_loads: dict[str, int] = {}
@@ -72,7 +76,7 @@ def _aggregate_transition(legs: tuple[TransferLeg, ...], model: TransportCostMod
     )
 
     return TransitionCost(
-        mode=TransitionMode.DIRECT_REMAP,
+        mode=mode,
         total_bytes=sum(leg.bytes for leg in legs),
         legs=legs,
         producer_loads=producer_loads,
@@ -115,8 +119,11 @@ def estimate_transition_cost(
 
     transition.validate_for(tensor)
 
-    if transition.mode is TransitionMode.DIRECT_REMAP:
+    if transition.mode in (
+        TransitionMode.DIRECT_REMAP,
+        TransitionMode.PERMUTED_REMAP,
+    ):
         legs = _build_direct_remap_legs(transition, tensor, mesh)
-        return _aggregate_transition(legs, model)
+        return _aggregate_transition(legs, model, transition.mode)
 
     raise ValueError(f"unsupported transition mode: {transition.mode}")

@@ -13,6 +13,7 @@ from MAPS.hw.chips import magia_mesh
 from MAPS.core.submesh import Submesh
 from MAPS.core.tensor import Tensor
 from MAPS.transitions.model import TransitionMode
+from MAPS.ops.defs.rearrange import TransposePayload
 
 
 def test_build_transition_allows_empty_demand() -> None:
@@ -130,6 +131,52 @@ def test_build_transition_builds_direct_remap_fragments() -> None:
             TensorRange(start=4, length=4),
         ),
     }
+
+
+def test_transpose_builds_permuted_all_to_all_ownership_exchange() -> None:
+    mesh = magia_mesh(width=2, height=1)
+    submesh = Submesh(mesh=mesh, submesh_id=0, x0=0, y0=0, width=2, height=1)
+    x = Tensor(name="x", rank=2, dims=(4, 4), elem_bytes=2)
+    output = Tensor(name="output", rank=2, dims=(4, 4), elem_bytes=2)
+    payload = TransposePayload(x, output, (1, 0))
+    src_layout = TensorLayout(
+        submesh=submesh,
+        mesh_x=LayoutAxis(mode=LayoutAxisMode.SHARD, tensor_axis=1),
+        mesh_y=LayoutAxis(mode=LayoutAxisMode.REPLICATE),
+    )
+    output_layout = payload.output_layouts(submesh)[0]
+    input_layout = payload.layout_relations[0].input_layout_from_output_layout(
+        output_layout
+    )
+    required = tuple(
+        (
+            tile,
+            payload.build_tile_work((output_layout,), tile).input_slice,
+        )
+        for tile in submesh.tiles
+    )
+
+    transition = build_transition(
+        name="transpose_exchange",
+        tensor=x,
+        tensor_id=0,
+        src_layer_id=0,
+        src_output_idx=0,
+        dst_layer_id=1,
+        dst_input_idx=0,
+        src_layout=src_layout,
+        dst_layout=input_layout,
+        dst_required_slices=required,
+        mode=TransitionMode.PERMUTED_REMAP,
+    )
+
+    assert transition.mode is TransitionMode.PERMUTED_REMAP
+    assert input_layout.mesh_x.tensor_axis == 0
+    assert len(transition.fragments) == 4
+    assert {
+        (fragment.src_hartid, fragment.dst_hartid)
+        for fragment in transition.fragments
+    } == {(0, 0), (0, 1), (1, 0), (1, 1)}
 
 
 def test_build_transition_builds_direct_remap_between_different_submeshes() -> None:

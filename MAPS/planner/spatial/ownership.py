@@ -13,6 +13,7 @@ def assign_stage_ownerships(
     stage_plans: dict[int, StagePlan],
     placements: dict[int, StagePlacement],
     traffic: VirtualTraffic,
+    stage_ids: frozenset[int] | None = None,
 ) -> dict[int, StagePlacement]:
     """Choose a bijection from virtual tiles to each stage's physical region.
 
@@ -27,11 +28,23 @@ def assign_stage_ownerships(
         {stage_id: plan.tile_count for stage_id, plan in stage_plans.items()},
         traffic,
     )
+    if stage_ids is not None:
+        ordered_stage_ids = tuple(
+            stage_id for stage_id in ordered_stage_ids if stage_id in stage_ids
+        )
     stage_centers = {
         stage_id: tile_set_center(mesh, placement.physical_submesh.tile_ids)
         for stage_id, placement in placements.items()
     }
-    assigned: dict[int, StagePlacement] = {}
+    assigned = (
+        {}
+        if stage_ids is None
+        else {
+            stage_id: placement
+            for stage_id, placement in placements.items()
+            if stage_id not in stage_ids
+        }
+    )
 
     for stage_id in ordered_stage_ids:
         placement = placements[stage_id]
