@@ -55,15 +55,7 @@ def _deployment_bytes(constant: Constant) -> tuple[TensorDType, bytes]:
             f"constant '{constant.name}' has {len(constant.data)} bytes; "
             f"expected {expected_size}"
         )
-    values = np.frombuffer(constant.data, dtype=source_dtype)
-    if constant.dtype in (TensorDType.FLOAT16, TensorDType.FLOAT32):
-        deployed_dtype = TensorDType.FLOAT16
-        deployed = values.astype(_NUMPY_DTYPES[deployed_dtype], copy=False)
-    else:
-        # Shape/index constants consumed at runtime retain their semantic type.
-        deployed_dtype = constant.dtype
-        deployed = values.astype(source_dtype, copy=False)
-    return deployed_dtype, deployed.tobytes(order="C")
+    return constant.dtype, constant.data
 
 
 def pack_weights(

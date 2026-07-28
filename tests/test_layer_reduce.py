@@ -57,4 +57,4 @@ def test_reduce_cost_counts_input_elements() -> None:
         tile=submesh.tiles[0],
     )
 
-    assert ReductionCostModel(work_kind=WorkKind.REDUCE_SUM).cost(tile_work, submesh.tiles[0]) == 32
+    assert ReductionCostModel(work_kind=WorkKind.REDUCE_SUM).cost(tile_work, submesh.tiles[0]) == 24

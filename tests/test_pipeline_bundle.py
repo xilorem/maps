@@ -37,7 +37,7 @@ def _mesh(l2_size: int) -> Mesh:
     )
 
 
-def test_write_pipeline_bundle_is_deterministic_and_reconstructs_fp16(tmp_path) -> None:
+def test_write_pipeline_bundle_is_deterministic_and_preserves_fp32(tmp_path) -> None:
     first_json, first_weights = write_pipeline_bundle(
         _bundle(), tmp_path / "first" / "model.json", tmp_path / "first" / "model.weights.bin"
     )
@@ -50,18 +50,18 @@ def test_write_pipeline_bundle_is_deterministic_and_reconstructs_fp16(tmp_path) 
     payload = json.loads(first_json.read_text())
     initializer = payload["tensors"][0]["initializer"]
     assert payload["bundle"]["schema_version"] == 1
-    assert initializer["dtype"] == "float16"
+    assert initializer["dtype"] == "float32"
     assert initializer["shape"] == [2, 2]
     start = initializer["offset"]
     end = start + initializer["byte_size"]
-    values = np.frombuffer(first_weights.read_bytes()[start:end], dtype="<f2")
-    np.testing.assert_array_equal(values, np.array([1.0, -2.0, 3.5, 4.0], dtype="<f2"))
+    values = np.frombuffer(first_weights.read_bytes()[start:end], dtype="<f4")
+    np.testing.assert_array_equal(values, np.array([1.0, -2.0, 3.5, 4.0], dtype="<f4"))
 
 
 def test_write_pipeline_bundle_rejects_l2_capacity_failure(tmp_path) -> None:
-    with pytest.raises(ValueError, match="requires 8 L2 bytes"):
+    with pytest.raises(ValueError, match="requires 16 L2 bytes"):
         write_pipeline_bundle(
-            _bundle(l2_size=7), tmp_path / "model.json", tmp_path / "model.weights.bin"
+            _bundle(l2_size=15), tmp_path / "model.json", tmp_path / "model.weights.bin"
         )
 
 

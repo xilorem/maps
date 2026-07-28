@@ -22,6 +22,7 @@ from MAPS.hw.devices import (
     MAGIA_IDMA_READ_DEVICE,
     MAGIA_IDMA_WRITE_DEVICE,
     MAGIA_REDMULE_DEVICE,
+    MAGIA_SPATZ_DEVICE,
     MAGIA_TILE_DEVICES,
 )
 from MAPS.utils.print_mesh import print_mesh

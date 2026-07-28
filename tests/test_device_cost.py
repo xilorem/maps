@@ -3,15 +3,31 @@ import pytest
 from MAPS.arch import Device, DeviceKind, L1Memory, MatrixDevice, ScalarDevice, SystolicDevice, Tile, VectorDevice, WorkKind
 from MAPS.hw.chips import magia_mesh
 from MAPS.hw.chips.n300d import wormhole_n300d_mesh
-from MAPS.hw.chips.magia import MAGIA_REDMULE_DEVICE
+from MAPS.hw.chips.magia import MAGIA_CORE_DEVICE, MAGIA_REDMULE_DEVICE
 from MAPS.core.layout import TensorRange, TensorSlice
 from MAPS.core.tensor import Tensor
+from MAPS.ops.costs.elementwise_cost import ElementwiseCostModel
 from MAPS.ops.costs.gemm_cost import GemmCostModel
 from MAPS.hw.devices.generic import GENERIC_SCALAR_DEVICE
 from MAPS.hw.devices.redmule import REDMULE_ARRAY_HEIGHT, REDMULE_ARRAY_WIDTH
+from MAPS.hw.devices.spatz import (
+    SPATZ_DEVICE,
+    SPATZ_FREQUENCY_HZ,
+    SPATZ_LANES,
+    SPATZ_LANE_WIDTH_BYTES,
+    SPATZ_TCDM_BANKS,
+    SPATZ_TCDM_BANK_WIDTH_BYTES,
+    SPATZ_VLEN_BITS,
+    SPATZ_VLSU_PORTS,
+    SPATZ_VLSU_SWITCH_LOAD_TO_STORE_CYCLES,
+    SPATZ_VLSU_SWITCH_SAME_CYCLES,
+    SPATZ_VLSU_SWITCH_STORE_TO_LOAD_CYCLES,
+    SpatzDevice,
+)
 from MAPS.hw.devices.tensix_tile import TENSIX_MATRIX_DEVICE
 from MAPS.ops.defs.gemm import GemmTileWork
 from MAPS.ops.defs.elementwise import ElementwiseTileWork
+from MAPS.ops.defs.reduction import ReductionTileWork
 
 
 def _tile_work(m_size: int = 4, n_size: int = 8, k_size: int = 16) -> GemmTileWork:
@@ -199,3 +215,120 @@ def test_scalar_device_uses_operation_specific_throughput() -> None:
 
     assert device.cycles(add_work) == 2
     assert device.cycles(div_work) == 8
+
+
+def _elementwise_work(
+    work_kind: WorkKind,
+    count: int,
+    elem_bytes: int,
+    input_count: int = 1,
+) -> ElementwiseTileWork:
+    output = Tensor(name="output", rank=1, dims=(count,), elem_bytes=elem_bytes)
+    output_slice = TensorSlice(rank=1, dims=(TensorRange(start=0, length=count),))
+    inputs = tuple(
+        Tensor(name=f"input_{index}", rank=1, dims=(count,), elem_bytes=elem_bytes)
+        for index in range(input_count)
+    )
+    return ElementwiseTileWork(
+        work_kind=work_kind,
+        output=output,
+        output_slice=output_slice,
+        inputs=inputs,
+        input_tile_slices=(output_slice,) * input_count,
+    )
+
+
+def test_spatz_has_named_magia_gvsoc_configuration() -> None:
+    device = SPATZ_DEVICE
+
+    assert isinstance(device, SpatzDevice)
+    assert device.name == "spatz"
+    assert device.kind is DeviceKind.VECTOR
+    assert device.lanes == SPATZ_LANES == 4
+    assert device.lane_width_bytes == SPATZ_LANE_WIDTH_BYTES == 4
+    assert device.vlen_bits == SPATZ_VLEN_BITS == 512
+    assert device.frequency_hz == SPATZ_FREQUENCY_HZ == 200_000_000
+    assert device.vlsu_ports == SPATZ_VLSU_PORTS == 4
+    assert device.tcdm_banks == SPATZ_TCDM_BANKS == 32
+    assert device.tcdm_bank_width_bytes == SPATZ_TCDM_BANK_WIDTH_BYTES == 4
+    assert device.vlsu_switch_same == SPATZ_VLSU_SWITCH_SAME_CYCLES == 2
+    assert device.vlsu_switch_store_to_load == SPATZ_VLSU_SWITCH_STORE_TO_LOAD_CYCLES == 3
+    assert device.vlsu_switch_load_to_store == SPATZ_VLSU_SWITCH_LOAD_TO_STORE_CYCLES == 7
+
+
+@pytest.mark.parametrize(
+    ("elem_bytes", "expected_cycles"),
+    (
+        (2, 10),
+        (4, 13),
+        (8, 19),
+    ),
+)
+def test_spatz_cost_scales_with_element_width(
+    elem_bytes: int,
+    expected_cycles: int,
+) -> None:
+    work = _elementwise_work(WorkKind.RELU, count=8, elem_bytes=elem_bytes)
+
+    assert SPATZ_DEVICE.cycles(work) == expected_cycles
+
+
+def test_spatz_strip_mines_at_lmul8_and_accounts_for_tail_switches() -> None:
+    full_vector = _elementwise_work(WorkKind.RELU, count=256, elem_bytes=2)
+    one_element_tail = _elementwise_work(WorkKind.RELU, count=257, elem_bytes=2)
+
+    assert SPATZ_DEVICE.cycles(full_vector) == 103
+    assert SPATZ_DEVICE.cycles(one_element_tail) == 116
+
+
+def test_spatz_binary_profile_adds_second_load_and_same_direction_gap() -> None:
+    unary = _elementwise_work(WorkKind.RELU, count=8, elem_bytes=2)
+    binary = _elementwise_work(WorkKind.ADD, count=8, elem_bytes=2, input_count=2)
+
+    assert SPATZ_DEVICE.cycles(unary) == 10
+    assert SPATZ_DEVICE.cycles(binary) == 13
+
+
+def test_spatz_reduction_uses_latency_three_chunk_spacing() -> None:
+    x = Tensor(name="x", rank=1, dims=(32,), elem_bytes=2)
+    output = Tensor(name="output", rank=1, dims=(1,), elem_bytes=2)
+    input_slice = TensorSlice(rank=1, dims=(TensorRange(start=0, length=32),))
+    output_slice = TensorSlice(rank=1, dims=(TensorRange(start=0, length=1),))
+    work = ReductionTileWork(
+        work_kind=WorkKind.REDUCE_SUM,
+        x=x,
+        output=output,
+        input_slice=input_slice,
+        output_slice=output_slice,
+    )
+
+    assert SPATZ_DEVICE.cycles(work) == 24
+
+
+def test_spatz_leaves_unprofiled_work_on_scalar_core() -> None:
+    tile = magia_mesh(width=1, height=1).tile(0, 0)
+    work = _elementwise_work(WorkKind.LOG, count=8, elem_bytes=2)
+
+    assert not SPATZ_DEVICE.supports(WorkKind.LOG)
+    assert work.work_kind is WorkKind.LOG
+    assert ElementwiseCostModel(work_kind=WorkKind.LOG).cost(work, tile) == (
+        MAGIA_CORE_DEVICE.cycles(work)
+    )
+
+
+def test_profiled_elementwise_work_can_select_spatz_over_scalar() -> None:
+    tile = magia_mesh(width=1, height=1).tile(0, 0)
+    work = _elementwise_work(WorkKind.ADD, count=8, elem_bytes=2, input_count=2)
+
+    assert SPATZ_DEVICE.cycles(work) < MAGIA_CORE_DEVICE.cycles(work)
+    assert ElementwiseCostModel(work_kind=WorkKind.ADD).cost(work, tile) == (
+        SPATZ_DEVICE.cycles(work)
+    )
+
+
+def test_magia_gemm_still_uses_redmule_with_spatz_present() -> None:
+    tile = magia_mesh(width=1, height=1).tile(0, 0)
+    work = _tile_work()
+
+    assert not SPATZ_DEVICE.supports(WorkKind.GEMM)
+    assert GemmCostModel().cost(work, tile) == MAGIA_REDMULE_DEVICE.cycles(work)

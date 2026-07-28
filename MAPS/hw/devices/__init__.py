@@ -6,8 +6,10 @@ from .magia_tile import (
     MAGIA_IDMA_READ_DEVICE,
     MAGIA_IDMA_WRITE_DEVICE,
     MAGIA_REDMULE_DEVICE,
+    MAGIA_SPATZ_DEVICE,
     MAGIA_TILE_DEVICES,
 )
+from .spatz import SPATZ_DEVICE, SpatzDevice
 from .tensix_tile import (
     TENSIX_MATRIX_DEVICE,
     TENSIX_READ_CORE,
@@ -24,8 +26,11 @@ __all__ = [
     "MAGIA_IDMA_READ_DEVICE",
     "MAGIA_IDMA_WRITE_DEVICE",
     "MAGIA_REDMULE_DEVICE",
+    "MAGIA_SPATZ_DEVICE",
     "MAGIA_TILE_DEVICES",
     "SCALAR_DEVICE",
+    "SPATZ_DEVICE",
+    "SpatzDevice",
     "TENSIX_MATRIX_DEVICE",
     "TENSIX_READ_CORE",
     "TENSIX_SCALAR_DEVICE",

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from MAPS.arch import DMADevice, DMAJob, DeviceKind, ScalarDevice, WorkKind
 from MAPS.hw.devices.redmule import REDMULE_DEVICE
+from MAPS.hw.devices.spatz import SPATZ_DEVICE
 
 L1_CORE_TRANSFER_LATENCY = 4
 
@@ -56,10 +57,12 @@ MAGIA_CORE_DEVICE = ScalarDevice(
 )
 
 MAGIA_REDMULE_DEVICE = REDMULE_DEVICE
+MAGIA_SPATZ_DEVICE = SPATZ_DEVICE
 
 MAGIA_TILE_DEVICES = (
     MAGIA_IDMA_READ_DEVICE,
     MAGIA_IDMA_WRITE_DEVICE,
     MAGIA_CORE_DEVICE,
+    MAGIA_SPATZ_DEVICE,
     MAGIA_REDMULE_DEVICE,
 )

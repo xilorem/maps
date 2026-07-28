@@ -20,7 +20,7 @@ def _mesh(l2_size: int = 4096) -> Mesh:
     )
 
 
-def test_pack_weights_orders_by_pipeline_id_converts_floats_and_aligns() -> None:
+def test_pack_weights_orders_by_pipeline_id_preserves_dtypes_and_aligns() -> None:
     later = Tensor("later", 1, (2,), 4, True, TensorDType.FLOAT32)
     first = Tensor("first", 1, (3,), 2, True, TensorDType.FLOAT16)
     pipeline = Pipeline("model", _mesh(), tensors=(first, later))
@@ -34,9 +34,10 @@ def test_pack_weights_orders_by_pipeline_id_converts_floats_and_aligns() -> None
     assert [item.name for item in packed.initializers] == ["first", "later"]
     assert [item.offset for item in packed.initializers] == [0, 16]
     assert packed.data[6:16] == bytes(10)
-    assert np.frombuffer(packed.data[16:20], dtype="<f2").tolist() == [4.0, 5.0]
-    assert packed.initializers[1].dtype is TensorDType.FLOAT16
-    assert packed.initializers[1].sha256 == sha256(packed.data[16:20]).hexdigest()
+    assert np.frombuffer(packed.data[16:24], dtype="<f4").tolist() == [4.0, 5.0]
+    assert packed.initializers[0].dtype is TensorDType.FLOAT16
+    assert packed.initializers[1].dtype is TensorDType.FLOAT32
+    assert packed.initializers[1].sha256 == sha256(packed.data[16:24]).hexdigest()
 
 
 def test_pack_weights_rejects_constant_without_pipeline_tensor_id() -> None:
