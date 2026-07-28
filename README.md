@@ -40,65 +40,154 @@ Run the full test suite with:
 ./.venv/bin/python -m pytest -q
 ```
 
-## Run the MAGIA example
+## Configure the MAGIA backend
 
-MAPS includes a runnable MAGIA planning example in
-`./examples/magia_example.py`.
-
-Run only the Python planner and JSON export with:
-
-```bash
-./.venv/bin/python examples/magia_example.py
-```
-
-This writes:
-
-```text
-generated/magia_example.pipeline.json
-```
-
-## Run the full MAGIA flow
-
-The repository root `Makefile` runs the MAPS-side example first, then delegates
-the MLIR translation and MAGIA header/data generation to `maps-ir/Makefile`.
-
-Configure `maps-ir` once before running the full flow:
+Deployment packages use the `maps-translate` executable from the `maps-ir`
+submodule. Configure and build it once:
 
 ```bash
 cmake -S maps-ir -B maps-ir/build \
   -DMLIR_DIR=/path/to/llvm-install/lib/cmake/mlir \
   -DLLVM_DIR=/path/to/llvm-install/lib/cmake/llvm
+cmake --build maps-ir/build --target maps-translate
 ```
 
-Then run:
+## Build a deployment package
+
+The supported handoff from MAPS to the MAGIA SDK is one verified, relocatable
+deployment-package directory. First run the small end-to-end smoke test:
 
 ```bash
-make magia-example
+./.venv/bin/maps package examples/simple_three_stage.onnx \
+  --target magia-v2 \
+  --mesh 4 \
+  --token-slots 2 \
+  --output generated/simple_three_stage.maps
+
+./.venv/bin/maps package verify generated/simple_three_stage.maps
 ```
 
-This builds `maps-translate`, generates the pipeline JSON, converts it
-to MAPS MLIR, and emits the MAGIA header and data files:
+This exercises planning, constant packing, maps-ir lowering, verification, and
+atomic publication. The CLI prints planner and packaging progress while it
+works.
+
+`--mesh 4` selects a 4x4 mesh; rectangular meshes use syntax such as
+`--mesh 4x8`. `--token-slots` fixes planner-owned concurrent tensor
+residency. The optional `--pipeline-token-capacity` controls the number of
+runtime pipeline tokens represented by generated L2 buffers and defaults to
+one.
+
+The command imports and specializes the ONNX model, plans it once, packs its
+constants, invokes one maps-ir package operation, independently verifies the
+result, and publishes:
 
 ```text
-generated/magia_example.pipeline.json
-generated/magia_example.pipeline.mlir
-generated/magia_example.h
-generated/magia_example_data.c
+generated/simple_three_stage.maps/
+  manifest.json
+  model.h
+  model_data.c
+  model_weights.S
+  model.weights.bin
 ```
 
-You can also run individual root targets:
+Pipeline JSON and Maps MLIR are build intermediates and are not part of the
+normal package. Existing output paths are rejected rather than overwritten,
+and a failed build leaves no partial package at the requested path.
+
+The equivalent Make target is:
 
 ```bash
-make pipeline-json
+make package \
+  MODEL=examples/simple_three_stage.onnx \
+  TARGET=magia-v2 \
+  MESH=4 \
+  TOKEN_SLOTS=2 \
+  PACKAGE=generated/simple_three_stage.maps
+```
+
+## Inspect and verify a package
+
+Inspection first performs complete independent verification, then prints the
+model, target, tensor counts, token contract, and artifact count:
+
+```bash
+./.venv/bin/maps package inspect generated/simple_three_stage.maps
+```
+
+Verification is suitable for automation and does not need the source ONNX
+model:
+
+```bash
+./.venv/bin/maps package verify generated/simple_three_stage.maps
+```
+
+The verifier checks the manifest schema and ABI versions, fixed tensor
+contracts, target and memory requirements, safe package-relative paths, the
+exact runtime file set, byte sizes, and SHA-256 checksums. A copied package can
+therefore be verified independently:
+
+```bash
+cp -a generated/simple_three_stage.maps /tmp/simple_three_stage.maps
+./.venv/bin/maps package verify /tmp/simple_three_stage.maps
+```
+
+The matching Make targets are:
+
+```bash
+make package-inspect PACKAGE=generated/simple_three_stage.maps
+make package-verify PACKAGE=generated/simple_three_stage.maps
+```
+
+## Execute through the MAGIA SDK
+
+The package manifest is the runtime contract. The MAGIA SDK binds raw input
+and output tensors by the names, dtypes, shapes, and byte sizes recorded there;
+callers do not supply L2 addresses, generated symbols, tile IDs, or operation
+identifiers.
+
+A run description is kept outside the immutable package:
+
+```json
+{
+  "schema_version": 1,
+  "pipeline_tokens": 1,
+  "inputs": [
+    {
+      "name": "x",
+      "path": "inputs/x.bin",
+      "sha256": "..."
+    }
+  ],
+  "outputs": [
+    {
+      "name": "add_out",
+      "path": "outputs/add_out.bin"
+    }
+  ]
+}
+```
+
+The intended SDK invocation is:
+
+```bash
+magia-run --package generated/simple_three_stage.maps --run run.json
+```
+
+This repository now completes and verifies the package handoff. The
+corresponding manifest consumption, operation support, and GVSOC execution
+path must be present in the separately maintained MAGIA SDK before full-model
+execution succeeds.
+
+## Backend development targets
+
+The lower-level example and translation targets remain available for backend
+development:
+
+```bash
+make pipeline-bundle
 make maps-translate
 make maps-mlir
 make magia-header
 make magia-data
+make magia-package-artifacts
 ```
-
-Clean generated MLIR/header/data artifacts with:
-
-```bash
-make clean-generated
-```
-
