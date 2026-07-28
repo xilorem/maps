@@ -16,19 +16,28 @@ class DeviceKind(Enum):
 
 class WorkKind(Enum):
     GEMM = auto()
+    CONV2D = auto()
     ELEMENTWISE = auto()
+    GROUP_NORMALIZE = auto()
+    GROUP_REDUCE = auto()
     ABS = auto()
     ADD = auto()
     DIV = auto()
+    DEPTHWISE_CONV = auto()
     LOG = auto()
     MUL = auto()
     NEG = auto()
     POW = auto()
+    RELU = auto()
     REDUCE_SUM = auto()
     REDUCE_MAX = auto()
+    RESHAPE = auto()
     EXP = auto()
+    SIGMOID = auto()
+    SLICE = auto()
     SQRT = auto()
     SUB = auto()
+    TRANSPOSE = auto()
     IM2COL = auto()
     WEIGHT_PACK = auto()
     OUTPUT_REFORMAT = auto()
@@ -40,13 +49,21 @@ class WorkKind(Enum):
             WorkKind.ABS,
             WorkKind.ADD,
             WorkKind.DIV,
+            WorkKind.DEPTHWISE_CONV,
             WorkKind.EXP,
+            WorkKind.GROUP_NORMALIZE,
+            WorkKind.GROUP_REDUCE,
             WorkKind.LOG,
             WorkKind.MUL,
             WorkKind.NEG,
             WorkKind.POW,
+            WorkKind.RELU,
+            WorkKind.RESHAPE,
+            WorkKind.SIGMOID,
+            WorkKind.SLICE,
             WorkKind.SQRT,
             WorkKind.SUB,
+            WorkKind.TRANSPOSE,
             WorkKind.IM2COL,
             WorkKind.WEIGHT_PACK,
             WorkKind.OUTPUT_REFORMAT,

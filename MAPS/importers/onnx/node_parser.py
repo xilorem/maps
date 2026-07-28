@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 from MAPS.core.graph import Node
 from MAPS.core.tensor import Tensor
 from MAPS.ops.registry import get_onnx_lowerer
+from MAPS.ops.spec import LoweredOperation, STATIC_INPUT_VALUES
 
 if TYPE_CHECKING:
     from onnx import NodeProto
@@ -80,6 +81,7 @@ def parse_node(
     node: "NodeProto",
     node_idx: int,
     tensors: dict[str, Tensor],
+    static_input_values: dict[str, tuple[int, ...]] | None = None,
 ) -> Node:
     """Lower one raw ONNX node into one graph node."""
 
@@ -94,11 +96,31 @@ def parse_node(
     )
 
     attributes = parse_node_attributes(node)
+    lowering_attributes = dict(attributes)
+    node_static_inputs = {
+        name: static_input_values[name]
+        for name in input_names
+        if static_input_values is not None and name in static_input_values
+    }
+    if node_static_inputs:
+        lowering_attributes[STATIC_INPUT_VALUES] = node_static_inputs
     lowerer = get_onnx_lowerer(node.op_type)
     if lowerer is None:
         raise NotImplementedError(f"unsupported ONNX op_type: {node.op_type}")
 
-    kind, payload = lowerer(node_name_value, input_tensors, output_tensors, attributes)
+    lowered = lowerer(
+        node_name_value,
+        input_tensors,
+        output_tensors,
+        lowering_attributes,
+    )
+    if isinstance(lowered, LoweredOperation):
+        kind = lowered.kind
+        payload = lowered.payload
+        input_tensors = lowered.inputs
+        output_tensors = lowered.outputs
+    else:
+        kind, payload = lowered
 
     return Node(
         name=node_name_value,

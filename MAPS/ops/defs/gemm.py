@@ -85,12 +85,16 @@ class GemmPayload(OpPayload):
     - ``w`` has shape ``[..., K, N]``
     - ``output`` has shape ``[..., M, N]``
     - optional ``y`` may broadcast unidirectionally to ``output``
+
+    When ``transpose_w`` is true, ``w`` is stored as ``[..., N, K]`` and is
+    transposed logically by the GEMM operation.
     """
 
     x: Tensor
     w: Tensor
     y: Tensor | None
     output: Tensor
+    transpose_w: bool = False
 
     def __post_init__(self) -> None:
         for tensor_name, tensor in (
@@ -114,11 +118,13 @@ class GemmPayload(OpPayload):
                 "GEMM currently requires identical batch dimensions for X, W, and output"
             )
 
-        if self.x.dims[-1] != self.w.dims[-2]:
+        w_k = self.w.dims[-1] if self.transpose_w else self.w.dims[-2]
+        w_n = self.w.dims[-2] if self.transpose_w else self.w.dims[-1]
+        if self.x.dims[-1] != w_k:
             raise ValueError("GEMM tensors must agree on K dimension")
         if self.x.dims[-2] != self.output.dims[-2]:
             raise ValueError("GEMM X and output must agree on M dimension")
-        if self.w.dims[-1] != self.output.dims[-1]:
+        if w_n != self.output.dims[-1]:
             raise ValueError("GEMM W and output must agree on N dimension")
 
         if self.y is not None:
@@ -173,8 +179,12 @@ class GemmPayload(OpPayload):
         if output_slice.rank != self.w.rank:
             raise ValueError("output slice rank must match W tensor rank")
         dims = list(output_slice.dims[:-2])
-        dims.append(_full_range(self.w.dims[-2]))
-        dims.append(output_slice.dims[-1])
+        if self.transpose_w:
+            dims.append(output_slice.dims[-1])
+            dims.append(_full_range(self.w.dims[-1]))
+        else:
+            dims.append(_full_range(self.w.dims[-2]))
+            dims.append(output_slice.dims[-1])
         return TensorSlice(rank=self.w.rank, dims=tuple(dims))
 
     def required_y_slice(self, output_slice: TensorSlice) -> TensorSlice | None:
@@ -216,7 +226,7 @@ def lower_gemm_node(
         raise ValueError(f"Gemm node '{node_name}' must have 2 or 3 inputs")
     if len(outputs) != 1:
         raise ValueError(f"Gemm node '{node_name}' must have exactly 1 output")
-    _require_default_gemm_attributes(node_name, attributes)
+    transpose_w = _parse_gemm_attributes(node_name, attributes)
     if any(tensor.rank != 2 for tensor in inputs[:2] + outputs):
         raise NotImplementedError(
             f"Gemm node '{node_name}' uses non-matrix operands; MAPS currently "
@@ -230,6 +240,7 @@ def lower_gemm_node(
             w=inputs[1],
             y=inputs[2] if len(inputs) == 3 else None,
             output=outputs[0],
+            transpose_w=transpose_w,
         ),
     )
 
@@ -276,17 +287,16 @@ def lower_matmul_node(
     )
 
 
-def _require_default_gemm_attributes(
+def _parse_gemm_attributes(
     node_name: str,
     attributes: dict[str, object],
-) -> None:
+) -> bool:
     """Reject ONNX Gemm semantics not represented by ``GemmPayload``."""
 
     supported_defaults = {
         "alpha": 1.0,
         "beta": 1.0,
         "transA": 0,
-        "transB": 0,
     }
     for attribute, default in supported_defaults.items():
         value = attributes.get(attribute, default)
@@ -295,6 +305,10 @@ def _require_default_gemm_attributes(
                 f"Gemm node '{node_name}' uses unsupported {attribute}={value}; "
                 f"only {attribute}={default} is currently supported"
             )
+    trans_b = int(attributes.get("transB", 0))
+    if trans_b not in (0, 1):
+        raise ValueError(f"Gemm node '{node_name}' transB must be 0 or 1")
+    return bool(trans_b)
 
 
 register_op(

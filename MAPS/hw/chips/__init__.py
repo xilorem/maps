@@ -1,6 +1,7 @@
 """Concrete chip descriptions."""
 
 from .magia import (
+    MAGIA_L1_DATA_BYTES,
     MAGIA_L1_RESERVED_BYTES,
     MAGIA_L1_SIZE_BYTES,
     MAGIA_L1_STACK_BYTES,
@@ -22,6 +23,7 @@ from .n300d import (
 )
 
 __all__ = [
+    "MAGIA_L1_DATA_BYTES",
     "MAGIA_L1_RESERVED_BYTES",
     "MAGIA_L1_SIZE_BYTES",
     "MAGIA_L1_STACK_BYTES",

@@ -65,6 +65,7 @@ def test_exp_cost_uses_exp_capable_device() -> None:
 
 
 def test_elementwise_work_kinds_preserve_operation_identity() -> None:
+    assert UNARY_ELEMENTWISE_OPS["Sigmoid"] is WorkKind.SIGMOID
     assert UNARY_ELEMENTWISE_OPS["Sqrt"] is WorkKind.SQRT
     assert UNARY_ELEMENTWISE_OPS["Log"] is WorkKind.LOG
     assert BINARY_ELEMENTWISE_OPS["Add"] is WorkKind.ADD

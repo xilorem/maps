@@ -5,10 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from .dtype import TensorDType, dtype_elem_bytes
+
 if TYPE_CHECKING:
     from MAPS.core.layout import TensorSlice
 
-TENSOR_MAX_DIMS = 4
+TENSOR_MAX_DIMS = 6
 
 
 @dataclass(frozen=True)
@@ -20,6 +22,7 @@ class Tensor:
     dims: tuple[int, ...]
     elem_bytes: int
     is_initializer: bool = False
+    dtype: TensorDType | None = None
 
     def __post_init__(self) -> None:
         if not self.name:
@@ -32,6 +35,8 @@ class Tensor:
             raise ValueError("all tensor dimensions must be > 0")
         if self.elem_bytes <= 0:
             raise ValueError("elem_bytes must be > 0")
+        if self.dtype is not None and self.elem_bytes != dtype_elem_bytes(self.dtype):
+            raise ValueError("elem_bytes must match dtype")
 
     @property
     def num_elements(self) -> int:

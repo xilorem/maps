@@ -14,6 +14,7 @@ from MAPS.core.layout import (
 from MAPS.core.submesh import Submesh
 from MAPS.core.tensor import Tensor
 from MAPS.ops.common.payload import OpPayload, sharded_layout
+from MAPS.ops.common.layout_relation import LayoutRelation
 from MAPS.ops.common.tile_work import TileWork
 from MAPS.ops.common.cost import OpCostModel
 
@@ -52,6 +53,12 @@ class AllReducePayload(OpPayload):
         if self.collective_axis not in {"x", "y"}:
             raise ValueError("AllReducePayload collective_axis must be 'x' or 'y'")
         self.validate_shapes()
+
+    @property
+    def layout_relations(self) -> tuple[LayoutRelation, ...]:
+        return (
+            LayoutRelation.exact(input_index=0, output_index=0, tensor=self.x),
+        )
 
     @property
     def cost_model(self) -> OpCostModel:

@@ -10,6 +10,7 @@ from MAPS.core.submesh import Submesh
 from MAPS.core.tensor import Tensor
 from MAPS.ops.common.broadcast import broadcast_input_slice, validate_broadcast_output
 from MAPS.ops.common.cost import OpCostModel
+from MAPS.ops.common.layout_relation import LayoutRelation
 from MAPS.ops.common.payload import OpPayload, sharded_layout
 from MAPS.ops.common.tile_work import TileWork
 from MAPS.ops.registry import register_op
@@ -21,6 +22,8 @@ UNARY_ELEMENTWISE_OPS: dict[str, WorkKind] = {
     "Exp": WorkKind.EXP,
     "Log": WorkKind.LOG,
     "Neg": WorkKind.NEG,
+    "Relu": WorkKind.RELU,
+    "Sigmoid": WorkKind.SIGMOID,
     "Sqrt": WorkKind.SQRT,
 }
 
@@ -78,6 +81,12 @@ class UnaryElementwisePayload(OpPayload):
             )
         object.__setattr__(self, "work_kind", expected)
         self.validate_shapes()
+
+    @property
+    def layout_relations(self) -> tuple[LayoutRelation, ...]:
+        return (
+            LayoutRelation.exact(input_index=0, output_index=0, tensor=self.x),
+        )
 
     @property
     def cost_model(self) -> OpCostModel:
@@ -140,6 +149,18 @@ class BinaryElementwisePayload(OpPayload):
             )
         object.__setattr__(self, "work_kind", expected)
         self.validate_shapes()
+
+    @property
+    def layout_relations(self) -> tuple[LayoutRelation, ...]:
+        return tuple(
+            LayoutRelation.exact(
+                input_index=input_index,
+                output_index=0,
+                tensor=tensor,
+            )
+            for input_index, tensor in enumerate((self.lhs, self.rhs))
+            if tensor.dims == self.output.dims
+        )
 
     @property
     def cost_model(self) -> OpCostModel:

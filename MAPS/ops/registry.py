@@ -14,7 +14,16 @@ def _ensure_builtins_registered() -> None:
     if _BUILTINS_LOADED:
         return
 
-    from MAPS.ops.defs import conv, elementwise, gemm, softmax  # noqa: F401
+    from MAPS.ops.defs import (  # noqa: F401
+        conv,
+        elementwise,
+        gemm,
+        group_norm,
+        rearrange,
+        reduction,
+        softmax,
+        split,
+    )
 
     _BUILTINS_LOADED = True
 

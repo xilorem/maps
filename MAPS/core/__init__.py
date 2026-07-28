@@ -13,10 +13,14 @@ from .layout import (
 )
 from .submesh import Submesh
 from .tensor import TENSOR_MAX_DIMS, Tensor
+from .constants import Constant, ConstantStore
+from .dtype import TensorDType
 
 __all__ = [
     "Edge",
     "Graph",
+    "Constant",
+    "ConstantStore",
     "LayoutAxis",
     "LayoutAxisMode",
     "Node",
@@ -26,6 +30,7 @@ __all__ = [
     "TENSOR_AXIS_NONE",
     "TENSOR_MAX_DIMS",
     "Tensor",
+    "TensorDType",
     "TensorLayout",
     "TensorRange",
     "TensorSlice",

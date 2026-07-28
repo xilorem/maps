@@ -67,7 +67,7 @@ def test_gemm_bias_broadcasts_to_the_owned_output_slice() -> None:
 
 @pytest.mark.parametrize(
     ("attribute", "value"),
-    (("alpha", 0.5), ("beta", 0.0), ("transA", 1), ("transB", 1)),
+    (("alpha", 0.5), ("beta", 0.0), ("transA", 1)),
 )
 def test_onnx_gemm_rejects_unrepresented_attributes(attribute: str, value: object) -> None:
     inputs = (_tensor("x", (4, 6)), _tensor("w", (6, 8)))
@@ -75,6 +75,23 @@ def test_onnx_gemm_rejects_unrepresented_attributes(attribute: str, value: objec
 
     with pytest.raises(NotImplementedError, match=attribute):
         lower_gemm_node("gemm", inputs, outputs, {attribute: value})
+
+
+def test_onnx_gemm_represents_transposed_weight_storage() -> None:
+    inputs = (_tensor("x", (4, 6)), _tensor("w", (8, 6)))
+    outputs = (_tensor("output", (4, 8)),)
+
+    _, payload = lower_gemm_node("gemm", inputs, outputs, {"transB": 1})
+
+    assert payload.transpose_w
+    output_slice = TensorSlice(
+        rank=2,
+        dims=(TensorRange(0, 4), TensorRange(2, 3)),
+    )
+    assert payload.required_w_slice(output_slice) == TensorSlice(
+        rank=2,
+        dims=(TensorRange(2, 3), TensorRange(0, 6)),
+    )
 
 
 def test_onnx_matmul_rejects_batch_broadcasting_explicitly() -> None:

@@ -7,11 +7,13 @@ from .broadcast import (
     validate_broadcastable_to,
 )
 from .cost import OpCostModel
+from .layout_relation import LayoutRelation
 from .payload import CompositeOpPayload, OperationPayload, OpPayload, sharded_layout
 from .tile_work import TileWork
 
 __all__ = [
     "CompositeOpPayload",
+    "LayoutRelation",
     "OpCostModel",
     "OperationPayload",
     "OpPayload",

@@ -10,9 +10,24 @@ from MAPS.core.graph import OpKind
 from MAPS.core.tensor import Tensor
 from MAPS.ops.common import OperationPayload
 
+STATIC_INPUT_VALUES = "_static_input_values"
+
+
+@dataclass(frozen=True)
+class LoweredOperation:
+    """Canonical operands and payload produced by one frontend lowerer."""
+
+    kind: OpKind
+    payload: OperationPayload
+    inputs: tuple[Tensor, ...]
+    outputs: tuple[Tensor, ...]
+
+
+OnnxLoweringResult = tuple[OpKind, OperationPayload] | LoweredOperation
+
 OnnxLoweringFn = Callable[
     [str, tuple[Tensor, ...], tuple[Tensor, ...], dict[str, object]],
-    tuple[OpKind, OperationPayload],
+    OnnxLoweringResult,
 ]
 
 

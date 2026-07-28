@@ -1,6 +1,7 @@
 from MAPS.arch import DMADevice, DMAJob, DeviceKind, EndpointKind, RoutingPolicy, ScalarDevice, SystolicDevice, TrafficKind, WorkKind
 from MAPS.hw.chips.magia import (
     MAGIA_L1_BANDWIDTH_BYTES,
+    MAGIA_L1_DATA_BYTES,
     MAGIA_L1_USABLE_BYTES,
     MAGIA_L2_BANDWIDTH_BYTES,
     MAGIA_MESH_HEIGHT,
@@ -19,6 +20,8 @@ def test_magia_mesh_matches_paper_memory_map_and_shape() -> None:
     assert mesh.shape == (MAGIA_MESH_WIDTH, MAGIA_MESH_HEIGHT)
     assert mesh.num_tiles == MAGIA_MESH_WIDTH * MAGIA_MESH_HEIGHT
     assert mesh.l2_memory.bandwidth == MAGIA_L2_BANDWIDTH_BYTES
+    assert MAGIA_L1_DATA_BYTES == 0xD0000
+    assert MAGIA_L1_USABLE_BYTES == MAGIA_L1_DATA_BYTES
     assert all(tile.memory.size == MAGIA_L1_USABLE_BYTES for tile in mesh.tiles)
     assert all(tile.memory.bandwidth == MAGIA_L1_BANDWIDTH_BYTES for tile in mesh.tiles)
     assert mesh.noc.routing_policy is RoutingPolicy.XY
