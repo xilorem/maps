@@ -323,10 +323,9 @@ def test_form_stages_rejects_explicit_internal_cross_stage_output() -> None:
     )
     external_consumer = Node(
         "external_consumer",
-        OpKind.ELEMENTWISE,
+        OpKind.CUSTOM,
         inputs=(shared,),
         outputs=(external_output,),
-        payload=UnaryElementwisePayload("Neg", shared, external_output),
     )
     graph = Graph(
         "explicit_internal_cross_stage_output",
@@ -341,6 +340,80 @@ def test_form_stages_rejects_explicit_internal_cross_stage_output() -> None:
         assert "cross-stage output shared leaves internal Layer first" in str(exc)
     else:
         raise AssertionError("expected invalid explicit stage group to fail")
+
+
+def test_form_stages_extends_explicit_group_when_merge_makes_edges_local() -> None:
+    x = Tensor("x", 1, (8,), 2)
+    shared = Tensor("shared", 1, (8,), 2)
+    middle = Tensor("middle", 1, (8,), 2)
+    output = Tensor("output", 1, (8,), 2)
+    first = Node(
+        "first",
+        OpKind.ELEMENTWISE,
+        inputs=(x,),
+        outputs=(shared,),
+        payload=UnaryElementwisePayload("Relu", x, shared),
+        attributes={"stage_group_id": "explicit"},
+    )
+    second = Node(
+        "second",
+        OpKind.ELEMENTWISE,
+        inputs=(shared,),
+        outputs=(middle,),
+        payload=UnaryElementwisePayload("Exp", shared, middle),
+        attributes={"stage_group_id": "explicit"},
+    )
+    third = Node(
+        "third",
+        OpKind.ELEMENTWISE,
+        inputs=(middle, shared),
+        outputs=(output,),
+        payload=BinaryElementwisePayload("Add", middle, shared, output),
+    )
+    graph = Graph(
+        "extended_explicit_group",
+        nodes=(first, second, third),
+        inputs=(x,),
+    )
+
+    assert form_stages(graph) == {0: (first, second, third)}
+
+
+def test_form_stages_prepends_to_explicit_group_when_merge_makes_edges_local() -> None:
+    x = Tensor("x", 1, (8,), 2)
+    shared = Tensor("shared", 1, (8,), 2)
+    middle = Tensor("middle", 1, (8,), 2)
+    output = Tensor("output", 1, (8,), 2)
+    producer = Node(
+        "producer",
+        OpKind.ELEMENTWISE,
+        inputs=(x,),
+        outputs=(shared,),
+        payload=UnaryElementwisePayload("Relu", x, shared),
+    )
+    first = Node(
+        "first",
+        OpKind.ELEMENTWISE,
+        inputs=(shared,),
+        outputs=(middle,),
+        payload=UnaryElementwisePayload("Exp", shared, middle),
+        attributes={"stage_group_id": "explicit"},
+    )
+    second = Node(
+        "second",
+        OpKind.ELEMENTWISE,
+        inputs=(middle, shared),
+        outputs=(output,),
+        payload=BinaryElementwisePayload("Add", middle, shared, output),
+        attributes={"stage_group_id": "explicit"},
+    )
+    graph = Graph(
+        "prepended_explicit_group",
+        nodes=(producer, first, second),
+        inputs=(x,),
+    )
+
+    assert form_stages(graph) == {0: (producer, first, second)}
 
 
 def test_form_stages_does_not_put_cross_stage_output_on_internal_layer() -> None:

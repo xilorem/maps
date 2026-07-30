@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from MAPS.core.graph import Graph, Node
+from MAPS.core.tensor import Tensor
 from MAPS.ops.common.layout_relation import find_layout_relation
 from MAPS.planner.contracts.options import StageSelectionOptions
 from MAPS.planner.contracts.stages import StageSelection
@@ -16,10 +17,71 @@ STAGE_GROUP_ID_ATTR = "stage_group_id"
 class _Unit:
     nodes: tuple[Node, ...]
     explicit: bool
+    key: object | None = None
 
     @property
     def size(self) -> int:
         return len(self.nodes)
+
+
+@dataclass(frozen=True)
+class _CommunicationEdges:
+    runtime_inputs: frozenset[Tensor]
+    graph_outputs: frozenset[Tensor]
+    producer_by_tensor: dict[Tensor, Node]
+    consumers_by_tensor: dict[Tensor, tuple[Node, ...]]
+
+    @classmethod
+    def from_graph(cls, graph: Graph) -> "_CommunicationEdges":
+        consumers_by_tensor: dict[Tensor, list[Node]] = {}
+        for node in graph.nodes:
+            for tensor in node.inputs:
+                consumers_by_tensor.setdefault(tensor, []).append(node)
+        return cls(
+            runtime_inputs=frozenset(graph.inputs) - frozenset(graph.initializers),
+            graph_outputs=frozenset(graph.outputs),
+            producer_by_tensor={
+                tensor: node
+                for node in graph.nodes
+                for tensor in node.outputs
+            },
+            consumers_by_tensor={
+                tensor: tuple(consumers)
+                for tensor, consumers in consumers_by_tensor.items()
+            },
+        )
+
+    def violation(self, nodes: tuple[Node, ...]) -> str | None:
+        node_ids = {id(node) for node in nodes}
+        for node in nodes[1:]:
+            for tensor in node.inputs:
+                if tensor in self.runtime_inputs:
+                    return (
+                        f"the incoming communication edge: Runtime Input "
+                        f"{tensor.name} reaches internal Layer {node.name}"
+                    )
+                producer = self.producer_by_tensor.get(tensor)
+                if producer is not None and id(producer) not in node_ids:
+                    return (
+                        f"the incoming communication edge: cross-stage input "
+                        f"{tensor.name} reaches internal Layer {node.name}"
+                    )
+        for node in nodes[:-1]:
+            for tensor in node.outputs:
+                if tensor in self.graph_outputs:
+                    return (
+                        f"the outgoing communication edge: graph output "
+                        f"{tensor.name} leaves internal Layer {node.name}"
+                    )
+                if any(
+                    id(consumer) not in node_ids
+                    for consumer in self.consumers_by_tensor.get(tensor, ())
+                ):
+                    return (
+                        f"the outgoing communication edge: cross-stage output "
+                        f"{tensor.name} leaves internal Layer {node.name}"
+                    )
+        return None
 
 
 def form_stages(
@@ -29,6 +91,7 @@ def form_stages(
     """Collapse explicit units, then greedily coalesce compatible linear chains."""
 
     options = options or StageSelectionOptions()
+    communication_edges = _CommunicationEdges.from_graph(graph)
     units = _explicit_units(graph)
     if options.max_stage_nodes > 1:
         for unit in units:
@@ -39,20 +102,17 @@ def form_stages(
                     f"exceeding max_stage_nodes={options.max_stage_nodes}"
                 )
     if options.max_stage_nodes == 1:
-        return {
+        stages = {
             stage_id: unit.nodes
             for stage_id, unit in enumerate(units)
         }
+        _validate_explicit_stage_edges(stages, units, communication_edges)
+        return stages
 
     unit_id_by_node = {
         id(node): unit_id
         for unit_id, unit in enumerate(units)
         for node in unit.nodes
-    }
-    producer_by_tensor = {
-        tensor: node
-        for node in graph.nodes
-        for tensor in node.outputs
     }
     predecessors = {unit_id: set() for unit_id in range(len(units))}
     successors = {unit_id: set() for unit_id in range(len(units))}
@@ -60,7 +120,7 @@ def form_stages(
     for consumer in graph.nodes:
         consumer_unit = unit_id_by_node[id(consumer)]
         for input_index, tensor in enumerate(consumer.inputs):
-            producer = producer_by_tensor.get(tensor)
+            producer = communication_edges.producer_by_tensor.get(tensor)
             if producer is None:
                 continue
             producer_unit = unit_id_by_node[id(producer)]
@@ -88,8 +148,7 @@ def form_stages(
             and _edges_are_compatible(
                 edges_by_units.get((current_last_unit, next_unit_id), ())
             )
-            and not _has_internal_runtime_input(graph, current + next_unit.nodes)
-            and not _has_internal_graph_output(graph, current + next_unit.nodes)
+            and communication_edges.violation(current + next_unit.nodes) is None
             and (
                 options.max_stage_nodes == 0
                 or len(current) + next_unit.size <= options.max_stage_nodes
@@ -103,25 +162,31 @@ def form_stages(
         current_last_unit = next_unit_id
     if current:
         stages.append(current)
-    return {stage_id: nodes for stage_id, nodes in enumerate(stages)}
+    formed_stages = {
+        stage_id: nodes
+        for stage_id, nodes in enumerate(stages)
+    }
+    _validate_explicit_stage_edges(formed_stages, units, communication_edges)
+    return formed_stages
 
 
-def _has_internal_runtime_input(graph: Graph, nodes: tuple[Node, ...]) -> bool:
-    runtime_inputs = frozenset(graph.inputs) - frozenset(graph.initializers)
-    return any(
-        tensor in runtime_inputs
-        for node in nodes[1:]
-        for tensor in node.inputs
-    )
-
-
-def _has_internal_graph_output(graph: Graph, nodes: tuple[Node, ...]) -> bool:
-    graph_outputs = frozenset(graph.outputs)
-    return any(
-        tensor in graph_outputs
-        for node in nodes[:-1]
-        for tensor in node.outputs
-    )
+def _validate_explicit_stage_edges(
+    stages: StageSelection,
+    units: tuple[_Unit, ...],
+    communication_edges: _CommunicationEdges,
+) -> None:
+    stage_by_node_id = {
+        id(node): stage_nodes
+        for stage_nodes in stages.values()
+        for node in stage_nodes
+    }
+    for unit in units:
+        if not unit.explicit:
+            continue
+        stage_nodes = stage_by_node_id[id(unit.nodes[0])]
+        violation = communication_edges.violation(stage_nodes)
+        if violation is not None:
+            raise ValueError(f"explicit stage group {unit.key!r} violates {violation}")
 
 
 def _edges_are_compatible(
@@ -143,15 +208,6 @@ def _edges_are_compatible(
 
 def _explicit_units(graph: Graph) -> tuple[_Unit, ...]:
     keys = tuple(_explicit_stage_group_key(node) for node in graph.nodes)
-    producer_by_tensor = {
-        tensor: node
-        for node in graph.nodes
-        for tensor in node.outputs
-    }
-    consumers_by_tensor: dict[object, list[Node]] = {}
-    for node in graph.nodes:
-        for tensor in node.inputs:
-            consumers_by_tensor.setdefault(tensor, []).append(node)
     positions_by_key: dict[object, list[int]] = {}
     for position, key in enumerate(keys):
         if key is not None:
@@ -164,41 +220,6 @@ def _explicit_units(graph: Graph) -> tuple[_Unit, ...]:
         nodes = tuple(graph.nodes[position] for position in positions)
         if len(nodes) > 1 and not _dependency_connected(nodes):
             raise ValueError(f"explicit stage group {key!r} is not dependency-connected")
-        runtime_inputs = frozenset(graph.inputs) - frozenset(graph.initializers)
-        node_ids = {id(node) for node in nodes}
-        for node in nodes[1:]:
-            for tensor in node.inputs:
-                if tensor in runtime_inputs:
-                    raise ValueError(
-                        f"explicit stage group {key!r} violates the incoming "
-                        f"communication edge: Runtime Input {tensor.name} reaches "
-                        f"internal Layer {node.name}"
-                    )
-                producer = producer_by_tensor.get(tensor)
-                if producer is not None and id(producer) not in node_ids:
-                    raise ValueError(
-                        f"explicit stage group {key!r} violates the incoming "
-                        f"communication edge: cross-stage input {tensor.name} "
-                        f"reaches internal Layer {node.name}"
-                    )
-        graph_outputs = frozenset(graph.outputs)
-        for node in nodes[:-1]:
-            for tensor in node.outputs:
-                if tensor in graph_outputs:
-                    raise ValueError(
-                        f"explicit stage group {key!r} violates the outgoing "
-                        f"communication edge: graph output {tensor.name} leaves "
-                        f"internal Layer {node.name}"
-                    )
-                if any(
-                    id(consumer) not in node_ids
-                    for consumer in consumers_by_tensor.get(tensor, ())
-                ):
-                    raise ValueError(
-                        f"explicit stage group {key!r} violates the outgoing "
-                        f"communication edge: cross-stage output {tensor.name} "
-                        f"leaves internal Layer {node.name}"
-                    )
 
     units: list[_Unit] = []
     position = 0
@@ -210,7 +231,7 @@ def _explicit_units(graph: Graph) -> tuple[_Unit, ...]:
             continue
         positions = positions_by_key[key]
         nodes = tuple(graph.nodes[index] for index in positions)
-        units.append(_Unit(nodes, explicit=True))
+        units.append(_Unit(nodes, explicit=True, key=key))
         position = positions[-1] + 1
     return tuple(units)
 
