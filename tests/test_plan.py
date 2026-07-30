@@ -416,7 +416,7 @@ def test_build_pipeline_parses_balances_maps_and_builds_transitions() -> None:
     assert report.is_valid, report.violations
 
 
-def test_build_pipeline_lowers_softmax_into_one_grouped_stage() -> None:
+def test_build_pipeline_lowers_softmax_into_edge_communicating_stages() -> None:
     try:
         import onnx
         from onnx import TensorProto, helper
@@ -435,11 +435,13 @@ def test_build_pipeline_lowers_softmax_into_one_grouped_stage() -> None:
         pipeline = build_pipeline(model_path, _mesh_with_l1(2, 2, l1_size=4096))
 
     assert pipeline.name == "tiny_softmax"
-    assert len(pipeline.stages) == 1
-    assert len(pipeline.transitions) == 0
+    assert len(pipeline.stages) == 2
+    assert len(pipeline.transitions) == 1
     assert tuple(layer.node.name for layer in pipeline.stages[0].layers) == (
         "softmax_0__reduce_max",
         "softmax_0__allreduce_max",
+    )
+    assert tuple(layer.node.name for layer in pipeline.stages[1].layers) == (
         "softmax_0__sub",
         "softmax_0__exp",
         "softmax_0__reduce_sum",
@@ -448,12 +450,11 @@ def test_build_pipeline_lowers_softmax_into_one_grouped_stage() -> None:
     )
     assert isinstance(pipeline.stages[0].layers[1].inputs[0].source, LocalInput)
     assert pipeline.stages[0].layers[1].inputs[0].source.layer_idx == 0
-    assert isinstance(pipeline.stages[0].layers[2].inputs[1].source, LocalInput)
-    assert pipeline.stages[0].layers[2].inputs[1].source.layer_idx == 1
-    assert isinstance(pipeline.stages[0].layers[6].inputs[1].source, LocalInput)
-    assert pipeline.stages[0].layers[6].inputs[1].source.layer_idx == 5
+    assert isinstance(pipeline.stages[1].layers[0].inputs[1].source, TransitionInput)
+    assert isinstance(pipeline.stages[1].layers[4].inputs[1].source, LocalInput)
+    assert pipeline.stages[1].layers[4].inputs[1].source.layer_idx == 3
 
-    report = validate_constraints(pipeline, PlannerConstraints(max_stage_nodes=7))
+    report = validate_constraints(pipeline, PlannerConstraints(max_stage_nodes=5))
     assert report.is_valid, report.violations
 
 

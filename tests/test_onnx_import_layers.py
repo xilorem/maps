@@ -562,9 +562,17 @@ def test_decompose_graph_lowers_softmax_to_grouped_internal_nodes() -> None:
     assert isinstance(lowered_graph.nodes[4].payload, ReductionPayload)
     assert isinstance(lowered_graph.nodes[5].payload, AllReducePayload)
     assert isinstance(lowered_graph.nodes[6].payload, BinaryElementwisePayload)
-    assert all(
-        node.attributes["stage_group_id"] == "softmax_0::softmax"
+    assert tuple(
+        node.attributes["stage_group_id"]
         for node in lowered_graph.nodes
+    ) == (
+        "softmax_0::softmax:max",
+        "softmax_0::softmax:max",
+        "softmax_0::softmax:normalize",
+        "softmax_0::softmax:normalize",
+        "softmax_0::softmax:normalize",
+        "softmax_0::softmax:normalize",
+        "softmax_0::softmax:normalize",
     )
     assert tuple(tensor.name for tensor in lowered_graph.outputs) == ("y",)
     assert {
