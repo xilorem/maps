@@ -19,7 +19,7 @@ from MAPS.planner.contracts.options import (
 )
 from MAPS.planner.passes.pipeline_lowering import lower_pipeline
 from MAPS.planner.passes.spatial_mapping import map_spatially
-from MAPS.planner.passes.stage_selection import select_stages
+from MAPS.planner.passes.stage_selection import form_stages
 from MAPS.planner.passes.workload_balancing import balance_workload
 from MAPS.planner.reporting.pipeline import print_pipeline_stage_cost
 from MAPS.utils.pipeline_json import write_pipeline_json
@@ -50,7 +50,7 @@ def plan_graph(
     """
 
 
-    stage_selection = select_stages(graph, options.stage_selection)
+    stage_selection = form_stages(graph, options.stage_selection)
 
     stage_plans = balance_workload(
         graph,

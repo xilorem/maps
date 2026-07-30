@@ -22,7 +22,7 @@ class _Unit:
         return len(self.nodes)
 
 
-def select_stages(
+def form_stages(
     graph: Graph,
     options: StageSelectionOptions | None = None,
 ) -> StageSelection:
@@ -88,6 +88,8 @@ def select_stages(
             and _edges_are_compatible(
                 edges_by_units.get((current_last_unit, next_unit_id), ())
             )
+            and not _has_internal_runtime_input(graph, current + next_unit.nodes)
+            and not _has_internal_graph_output(graph, current + next_unit.nodes)
             and (
                 options.max_stage_nodes == 0
                 or len(current) + next_unit.size <= options.max_stage_nodes
@@ -102,6 +104,24 @@ def select_stages(
     if current:
         stages.append(current)
     return {stage_id: nodes for stage_id, nodes in enumerate(stages)}
+
+
+def _has_internal_runtime_input(graph: Graph, nodes: tuple[Node, ...]) -> bool:
+    runtime_inputs = frozenset(graph.inputs) - frozenset(graph.initializers)
+    return any(
+        tensor in runtime_inputs
+        for node in nodes[1:]
+        for tensor in node.inputs
+    )
+
+
+def _has_internal_graph_output(graph: Graph, nodes: tuple[Node, ...]) -> bool:
+    graph_outputs = frozenset(graph.outputs)
+    return any(
+        tensor in graph_outputs
+        for node in nodes[:-1]
+        for tensor in node.outputs
+    )
 
 
 def _edges_are_compatible(
@@ -123,6 +143,15 @@ def _edges_are_compatible(
 
 def _explicit_units(graph: Graph) -> tuple[_Unit, ...]:
     keys = tuple(_explicit_stage_group_key(node) for node in graph.nodes)
+    producer_by_tensor = {
+        tensor: node
+        for node in graph.nodes
+        for tensor in node.outputs
+    }
+    consumers_by_tensor: dict[object, list[Node]] = {}
+    for node in graph.nodes:
+        for tensor in node.inputs:
+            consumers_by_tensor.setdefault(tensor, []).append(node)
     positions_by_key: dict[object, list[int]] = {}
     for position, key in enumerate(keys):
         if key is not None:
@@ -135,6 +164,41 @@ def _explicit_units(graph: Graph) -> tuple[_Unit, ...]:
         nodes = tuple(graph.nodes[position] for position in positions)
         if len(nodes) > 1 and not _dependency_connected(nodes):
             raise ValueError(f"explicit stage group {key!r} is not dependency-connected")
+        runtime_inputs = frozenset(graph.inputs) - frozenset(graph.initializers)
+        node_ids = {id(node) for node in nodes}
+        for node in nodes[1:]:
+            for tensor in node.inputs:
+                if tensor in runtime_inputs:
+                    raise ValueError(
+                        f"explicit stage group {key!r} violates the incoming "
+                        f"communication edge: Runtime Input {tensor.name} reaches "
+                        f"internal Layer {node.name}"
+                    )
+                producer = producer_by_tensor.get(tensor)
+                if producer is not None and id(producer) not in node_ids:
+                    raise ValueError(
+                        f"explicit stage group {key!r} violates the incoming "
+                        f"communication edge: cross-stage input {tensor.name} "
+                        f"reaches internal Layer {node.name}"
+                    )
+        graph_outputs = frozenset(graph.outputs)
+        for node in nodes[:-1]:
+            for tensor in node.outputs:
+                if tensor in graph_outputs:
+                    raise ValueError(
+                        f"explicit stage group {key!r} violates the outgoing "
+                        f"communication edge: graph output {tensor.name} leaves "
+                        f"internal Layer {node.name}"
+                    )
+                if any(
+                    id(consumer) not in node_ids
+                    for consumer in consumers_by_tensor.get(tensor, ())
+                ):
+                    raise ValueError(
+                        f"explicit stage group {key!r} violates the outgoing "
+                        f"communication edge: cross-stage output {tensor.name} "
+                        f"leaves internal Layer {node.name}"
+                    )
 
     units: list[_Unit] = []
     position = 0
@@ -190,4 +254,4 @@ def _explicit_stage_group_key(node: Node) -> object | None:
     return group_key
 
 
-__all__ = ["select_stages"]
+__all__ = ["form_stages"]

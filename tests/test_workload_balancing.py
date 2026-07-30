@@ -6,7 +6,7 @@ from MAPS.core.submesh import Submesh
 from MAPS.core.tensor import Tensor
 from MAPS.ops.defs.gemm import GemmPayload
 from MAPS.ops.defs.elementwise import UnaryElementwisePayload
-from MAPS.planner.passes.stage_selection import select_stages
+from MAPS.planner.passes.stage_selection import form_stages
 from MAPS.planner.passes.workload_balancing import balance_workload
 from MAPS.planner.workload.allocation import grow_tile_count_for_stage
 from MAPS.planner.workload import allocation as allocation_module
@@ -65,7 +65,7 @@ def test_balance_workload_uses_full_tile_budget() -> None:
 
     allocation = {
         stage_id: plan.tile_count
-        for stage_id, plan in balance_workload(graph, mesh, select_stages(graph)).items()
+        for stage_id, plan in balance_workload(graph, mesh, form_stages(graph)).items()
     }
 
     assert allocation == {0: 8, 1: 8}
@@ -80,7 +80,7 @@ def test_balance_workload_gives_more_tiles_to_heavier_gemm() -> None:
 
     allocation = {
         stage_id: plan.tile_count
-        for stage_id, plan in balance_workload(graph, mesh, select_stages(graph)).items()
+        for stage_id, plan in balance_workload(graph, mesh, form_stages(graph)).items()
     }
 
     assert allocation[0] > allocation[1]
@@ -118,7 +118,7 @@ def test_balance_workload_preserves_layout_decisions() -> None:
     graph = Graph(name="g", nodes=(node,))
     mesh = _mesh_with_l1(4, 1, l1_size=32768)
 
-    plans = balance_workload(graph, mesh, select_stages(graph))
+    plans = balance_workload(graph, mesh, form_stages(graph))
 
     assert plans[0].tile_count == 4
     assert plans[0].logical_shape[0] * plans[0].logical_shape[1] == 4
@@ -131,7 +131,7 @@ def test_balance_workload_starts_from_minimum_l1_feasible_tile_count() -> None:
     graph = Graph(name="g", nodes=(node,))
     mesh = _mesh_with_l1(2, 1, l1_size=128)
 
-    plans = balance_workload(graph, mesh, select_stages(graph))
+    plans = balance_workload(graph, mesh, form_stages(graph))
 
     assert plans[0].tile_count == 2
 
@@ -140,7 +140,7 @@ def test_planner_selected_token_slots_control_l1_feasibility() -> None:
     node = _gemm_node("gemm", m=4, k=4, n=4)
     graph = Graph(name="g", nodes=(node,))
     mesh = _mesh_with_l1(2, 1, l1_size=80)
-    selection = select_stages(graph)
+    selection = form_stages(graph)
 
     plans = balance_workload(
         graph,
@@ -207,7 +207,7 @@ def test_balance_workload_can_use_selected_stage_groups() -> None:
 
     del mesh
     try:
-        select_stages(graph)
+        form_stages(graph)
     except ValueError as exc:
         assert "dependency-connected" in str(exc)
     else:
