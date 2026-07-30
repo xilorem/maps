@@ -7,6 +7,7 @@ from MAPS.core.graph import Graph, Node
 from MAPS.core.layout import tile_tensor_slice
 from MAPS.planner.contracts.stages import StagePlan, StageSelection, virtual_submesh
 from MAPS.planner.workload.submesh import representative_connected_submesh
+from MAPS.transitions import build_virtual_transitions
 
 
 def estimate_selection_metrics(
@@ -15,24 +16,16 @@ def estimate_selection_metrics(
     mesh: Mesh,
     compute_weight: float,
     communication_weight: float,
-    graph_inputs: frozenset,
-    graph_outputs: frozenset,
-    producer_stage_id_by_tensor: dict[object, int],
-    initializer_tensors: frozenset,
-    graph: Graph | None = None,
+    graph: Graph,
 ) -> dict[int, float]:
     """Estimate the bottleneck metric of every stage in one allocation.
 
-    When the full graph is available, virtual inter-stage communication is
-    accounted per producer tile and combined with compute using a max metric.
-    Legacy callers without a graph receive the earlier additive L2 estimate.
+    Virtual communication is compiled for the complete candidate Stage Plan
+    set, accounted per producer tile, and combined with compute using a max
+    metric.
     """
 
-    virtual_communication = (
-        virtual_communication_cycles(graph, mesh, plans)
-        if graph is not None
-        else None
-    )
+    virtual_communication = virtual_communication_cycles(graph, mesh, plans)
     return {
         stage_id: _selection_metric_for_stage(
             stage_nodes=stage_nodes,
@@ -40,10 +33,6 @@ def estimate_selection_metrics(
             mesh=mesh,
             compute_weight=compute_weight,
             communication_weight=communication_weight,
-            graph_inputs=graph_inputs,
-            graph_outputs=graph_outputs,
-            producer_stage_id_by_tensor=producer_stage_id_by_tensor,
-            initializer_tensors=initializer_tensors,
             virtual_communication=virtual_communication,
         )
         for stage_id, stage_nodes in stage_selection.items()
@@ -56,54 +45,28 @@ def _selection_metric_for_stage(
     mesh: Mesh,
     compute_weight: float,
     communication_weight: float,
-    graph_inputs: frozenset,
-    graph_outputs: frozenset,
-    producer_stage_id_by_tensor: dict[object, int],
-    initializer_tensors: frozenset,
-    virtual_communication: dict[int, dict[int, int]] | None = None,
+    virtual_communication: dict[int, dict[int, int]],
 ) -> float:
     """Combine one stage's worst per-tile compute and communication costs."""
 
     submesh = representative_connected_submesh(mesh, plan.stage_id, plan.tile_count)
-    worst_tile_compute = worst_tile_compute_workload(
-        stage_nodes=stage_nodes,
-        node_output_layouts=plan.node_output_layouts,
-        submesh=submesh,
-    )
-    if virtual_communication is not None:
-        compute_by_tile = {
-            tile.tile_id: sum(
-                _node_compute_workload(node, output_layouts, tile)
-                for node, output_layouts in zip(stage_nodes, plan.node_output_layouts)
-            )
-            for tile in submesh.tiles
-        }
-        return max(
-            (
-                max(
-                    compute_weight * compute_by_tile[tile_id],
-                    communication_weight
-                    * virtual_communication[plan.stage_id][tile_id],
-                )
-                for tile_id in compute_by_tile
-            ),
-            default=0.0,
+    compute_by_tile = {
+        tile.tile_id: sum(
+            _node_compute_workload(node, output_layouts, tile)
+            for node, output_layouts in zip(stage_nodes, plan.node_output_layouts)
         )
-
-    worst_tile_io = worst_tile_l2_transfer_workload(
-        stage_id=plan.stage_id,
-        stage_nodes=stage_nodes,
-        node_output_layouts=plan.node_output_layouts,
-        submesh=submesh,
-        mesh=mesh,
-        graph_inputs=graph_inputs,
-        graph_outputs=graph_outputs,
-        producer_stage_id_by_tensor=producer_stage_id_by_tensor,
-        initializer_tensors=initializer_tensors,
-    )
-    return (
-        compute_weight * worst_tile_compute
-        + communication_weight * worst_tile_io
+        for tile in submesh.tiles
+    }
+    return max(
+        (
+            max(
+                compute_weight * compute_by_tile[tile_id],
+                communication_weight
+                * virtual_communication[plan.stage_id][tile_id],
+            )
+            for tile_id in compute_by_tile
+        ),
+        default=0.0,
     )
 
 
@@ -118,16 +81,8 @@ def virtual_communication_cycles(
     # and spatial mapping; it does not depend on physical mapping decisions.
     from MAPS.planner.spatial.traffic import build_virtual_traffic
 
-    traffic = build_virtual_traffic(
-        graph=graph,
-        mesh=mesh,
-        stage_plans=plans,
-        node_stage_ids={
-            id(node): stage_id
-            for stage_id, plan in plans.items()
-            for node in plan.nodes
-        },
-    )
+    virtual_transitions = build_virtual_transitions(graph, plans)
+    traffic = build_virtual_traffic(virtual_transitions, plans)
     communication = {
         stage_id: {
             tile.tile_id: 0

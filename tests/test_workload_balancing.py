@@ -95,9 +95,25 @@ def test_virtual_traffic_charges_inter_stage_writes_to_producer_tiles() -> None:
         kind=consumer.kind,
         inputs=(producer.outputs[0], consumer.inputs[1]),
         outputs=consumer.outputs,
-        payload=consumer.payload,
+        payload=GemmPayload(
+            x=producer.outputs[0],
+            w=consumer.inputs[1],
+            y=None,
+            output=consumer.outputs[0],
+        ),
     )
-    graph = Graph(name="g", nodes=(producer, consumer))
+    graph = Graph(
+        name="g",
+        tensors=tuple(
+            dict.fromkeys(
+                producer.inputs
+                + producer.outputs
+                + consumer.inputs
+                + consumer.outputs
+            )
+        ),
+        nodes=(producer, consumer),
+    )
     mesh = _mesh_with_l1(2, 1, l1_size=4096)
     stage_selection = {0: (producer,), 1: (consumer,)}
     plans = plan_all_stages(
@@ -243,16 +259,18 @@ def test_growth_prefers_tile_count_with_more_physical_shape_options() -> None:
         initializer_tensors=frozenset(),
         debug=False,
     )
+    graph = Graph(
+        name="growth",
+        tensors=node.inputs + node.outputs,
+        nodes=(node,),
+    )
     current_metric = estimate_selection_metrics(
         {0: current_plan},
         stage_selection,
         mesh=mesh,
         compute_weight=1.0,
         communication_weight=1.0,
-        graph_inputs=frozenset(),
-        graph_outputs=frozenset(),
-        producer_stage_id_by_tensor={},
-        initializer_tensors=frozenset(),
+        graph=graph,
     )[0]
 
     best_growth = grow_tile_count_for_stage(
@@ -263,6 +281,7 @@ def test_growth_prefers_tile_count_with_more_physical_shape_options() -> None:
         used_tiles=2,
         current_metric=current_metric,
         initializer_tensors=frozenset(),
+        graph=graph,
         debug=False,
     )
 
@@ -282,9 +301,6 @@ def test_growth_prunes_stage_when_doubling_current_count_does_not_improve(
     context = SimpleNamespace(
         stage_selection=stage_selection,
         initializer_tensors=frozenset(),
-        graph_inputs=frozenset(),
-        graph_outputs=frozenset(),
-        producer_stage_id_by_tensor={},
         graph=Graph("growth", nodes=stage_selection[0] + stage_selection[1]),
     )
     mesh = _mesh_with_l1(5, 1, l1_size=4096)

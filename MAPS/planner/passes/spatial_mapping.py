@@ -14,6 +14,7 @@ from MAPS.planner.spatial.ownership import assign_stage_ownerships, stage_order
 from MAPS.planner.spatial.regions import build_initial_stage_placements
 from MAPS.planner.spatial.repair import improve_spatial_mapping
 from MAPS.planner.spatial.traffic import build_virtual_traffic
+from MAPS.transitions import build_virtual_transitions
 
 
 def map_spatially(
@@ -55,7 +56,8 @@ def map_spatially(
     if sum(tile_counts.values()) > mesh.num_tiles:
         raise ValueError("requested stage tiles exceed available mesh tiles")
 
-    traffic = build_virtual_traffic(graph, mesh, stage_plans, node_stage_ids)
+    virtual_transitions = build_virtual_transitions(graph, stage_plans)
+    traffic = build_virtual_traffic(virtual_transitions, stage_plans)
     _debug(show_progress, "[spatial_mapping] phase=virtual_analysis")
     _debug(
         show_progress,

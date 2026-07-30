@@ -11,6 +11,7 @@ import MAPS.planner.spatial.repair as spatial_repair
 import MAPS.planner.spatial.topology as spatial_topology
 from MAPS.planner.spatial.models import VirtualTraffic
 from MAPS.planner.spatial.traffic import build_virtual_traffic
+from MAPS.transitions import build_virtual_transitions
 from tests.noc_utils import rectangular_test_noc, rectangular_test_tiles
 
 
@@ -67,6 +68,14 @@ def test_build_virtual_traffic_tracks_inter_stage_bytes() -> None:
     consumer = _gemm_node("consumer", x=producer.outputs[0])
     graph = Graph(
         name="g",
+        tensors=tuple(
+            dict.fromkeys(
+                producer.inputs
+                + producer.outputs
+                + consumer.inputs
+                + consumer.outputs
+            )
+        ),
         nodes=(producer, consumer),
         edges=(Edge(tensor=producer.outputs[0], src=producer, dst=consumer),),
     )
@@ -75,12 +84,8 @@ def test_build_virtual_traffic_tracks_inter_stage_bytes() -> None:
         1: _single_node_stage_plan(mesh, 1, consumer, {0, 1}),
     }
 
-    traffic = build_virtual_traffic(
-        graph=graph,
-        mesh=mesh,
-        stage_plans=stage_plans,
-        node_stage_ids={id(producer): 0, id(consumer): 1},
-    )
+    virtual_transitions = build_virtual_transitions(graph, stage_plans)
+    traffic = build_virtual_traffic(virtual_transitions, stage_plans)
 
     assert traffic.stage_comm[(0, 1)] > 0
     assert sum(traffic.input_weights[1].values()) > 0
@@ -93,6 +98,14 @@ def test_map_spatially_returns_connected_adjacent_mapping() -> None:
     consumer = _gemm_node("consumer", x=producer.outputs[0])
     graph = Graph(
         name="g",
+        tensors=tuple(
+            dict.fromkeys(
+                producer.inputs
+                + producer.outputs
+                + consumer.inputs
+                + consumer.outputs
+            )
+        ),
         nodes=(producer, consumer),
         edges=(Edge(tensor=producer.outputs[0], src=producer, dst=consumer),),
     )

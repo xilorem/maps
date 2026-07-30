@@ -18,6 +18,7 @@ from MAPS.core.tensor import Tensor
 from MAPS.hw.chips import magia_mesh
 from MAPS.ops.common import OperationPayload
 from MAPS.planner.contracts.stages import StagePlacement, StagePlan
+from MAPS.planner.spatial.traffic import build_virtual_traffic
 from MAPS.transitions import (
     InputTransition,
     IntermediateTransition,
@@ -172,6 +173,15 @@ def test_compiles_input_intermediate_and_output_transitions() -> None:
     assert tuple(source.virtual_tile_id for source in output_transition.sources) == (0, 1)
     assert all(transition.tensor is not initializer for transition in transitions)
 
+    traffic = build_virtual_traffic(transitions, plans)
+
+    assert traffic.stage_comm == {(0, 1): 8}
+    assert traffic.edge_matrices == {(0, 1): {(0, 0): 4, (1, 1): 4}}
+    assert traffic.l2_read_weights == {0: {0: 4, 1: 4}, 1: {0: 0, 1: 0}}
+    assert traffic.l2_write_weights == {0: {0: 0, 1: 0}, 1: {0: 4, 1: 4}}
+    assert traffic.input_weights == {0: {0: 4, 1: 4}, 1: {0: 4, 1: 4}}
+    assert traffic.output_weights == {0: {0: 4, 1: 4}, 1: {0: 4, 1: 4}}
+
 
 def test_compiles_fanout_replication_offsets_and_empty_demand_deterministically() -> None:
     mesh = magia_mesh(width=2, height=1)
@@ -235,6 +245,19 @@ def test_compiles_fanout_replication_offsets_and_empty_demand_deterministically(
     empty_transition = transitions[2]
     assert isinstance(empty_transition, VirtualIntermediateTransition)
     assert empty_transition.transfers == ()
+
+    traffic = build_virtual_traffic(transitions, plans)
+
+    assert traffic.stage_comm == {(0, 1): 16, (0, 2): 16}
+    assert traffic.edge_matrices == {
+        (0, 1): {(0, 0): 4, (0, 1): 4, (1, 0): 4, (1, 1): 4},
+        (0, 2): {(0, 0): 4, (0, 1): 4, (1, 0): 4, (1, 1): 4},
+        (0, 3): {},
+    }
+    assert traffic.input_weights[1] == {0: 8, 1: 8}
+    assert traffic.input_weights[2] == {0: 8, 1: 8}
+    assert traffic.input_weights[3] == {0: 0, 1: 0}
+    assert traffic.output_weights[0] == {0: 16, 1: 16}
 
 
 def test_same_stage_dependencies_produce_no_virtual_transition() -> None:
