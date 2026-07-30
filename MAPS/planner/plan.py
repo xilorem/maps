@@ -22,6 +22,7 @@ from MAPS.planner.passes.spatial_mapping import map_spatially
 from MAPS.planner.passes.stage_selection import form_stages
 from MAPS.planner.passes.workload_balancing import balance_workload
 from MAPS.planner.reporting.pipeline import print_pipeline_stage_cost
+from MAPS.transitions import build_virtual_transitions
 from MAPS.utils.pipeline_json import write_pipeline_json
 
 
@@ -61,11 +62,12 @@ def plan_graph(
         communication_weight=options.workload.communication_weight,
         num_token_slots=options.execution.num_token_slots,
     )
+    virtual_transitions = build_virtual_transitions(graph, stage_plans)
 
     placements = map_spatially(
-        graph,
         mesh,
         stage_plans,
+        virtual_transitions,
         show_progress=options.spatial_mapping.print_progress,
         print_mapping=options.spatial_mapping.print_mapping,
         print_costs=options.spatial_mapping.print_costs,
@@ -80,7 +82,12 @@ def plan_graph(
     )
 
     if options.print_pipeline_cost:
-        print_pipeline_stage_cost(graph, mesh, stage_plans, placements)
+        print_pipeline_stage_cost(
+            mesh,
+            stage_plans,
+            placements,
+            virtual_transitions,
+        )
 
     return pipeline
 

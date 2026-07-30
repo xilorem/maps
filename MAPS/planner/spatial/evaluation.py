@@ -5,16 +5,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from MAPS.arch import Mesh
-from MAPS.core.graph import Graph
-from MAPS.core.layout import tile_tensor_slice
-from MAPS.planner.contracts.queries import (
-    node_output_index,
-    node_output_layouts,
-    required_input_slices,
-)
 from MAPS.planner.contracts.stages import StagePlacement, StagePlan
 from MAPS.planner.spatial.models import MappingEvaluation, StageIOBreakdown, TileIOScore
-from MAPS.transitions import build_direct_remap_fragments
+from MAPS.transitions import (
+    VirtualInputTransition,
+    VirtualIntermediateTransition,
+    VirtualOutputTransition,
+    VirtualTransfer,
+    VirtualTransition,
+)
 from MAPS.transitions.transport import TransportCostModel
 
 
@@ -43,10 +42,9 @@ class MappingEvaluator:
 
     def __init__(
         self,
-        graph: Graph,
         mesh: Mesh,
         stage_plans: dict[int, StagePlan],
-        node_stage_ids: dict[int, int],
+        virtual_transitions: tuple[VirtualTransition, ...],
     ) -> None:
         self._mesh = mesh
         self._stage_plans = stage_plans
@@ -56,7 +54,7 @@ class MappingEvaluator:
             self._l2_reads_by_stage,
             self._l2_writes_by_stage,
             self._source_dependencies_by_destination,
-        ) = _compile_transfers(graph, stage_plans, node_stage_ids)
+        ) = _compile_transfers(virtual_transitions)
 
     def evaluate(
         self,
@@ -163,18 +161,17 @@ class MappingEvaluator:
 
 
 def evaluate_mapping(
-    graph: Graph,
     mesh: Mesh,
     stage_plans: dict[int, StagePlan],
     placements: dict[int, StagePlacement],
-    node_stage_ids: dict[int, int],
+    virtual_transitions: tuple[VirtualTransition, ...],
 ) -> MappingEvaluation:
     """Compute the exact physical IO objective for a complete mapping.
 
     Contract:
         Every stage must have a disjoint physical placement and a complete
-        virtual-to-physical ownership map.  ``node_stage_ids`` must cover all
-        nodes contained in the supplied plans.
+        virtual-to-physical ownership map. ``virtual_transitions`` must have
+        been compiled from the supplied plans.
 
     Behavior:
         Graph inputs are charged as L2 reads on consumer tiles, graph outputs as
@@ -188,107 +185,81 @@ def evaluate_mapping(
     """
 
     return MappingEvaluator(
-        graph,
         mesh,
         stage_plans,
-        node_stage_ids,
+        virtual_transitions,
     ).evaluate(placements)
 
 
 def _compile_transfers(
-    graph: Graph,
-    stage_plans: dict[int, StagePlan],
-    node_stage_ids: dict[int, int],
+    virtual_transitions: tuple[VirtualTransition, ...],
 ) -> tuple[
     dict[int, tuple[_L1Transfer, ...]],
     dict[int, tuple[_L2Transfer, ...]],
     dict[int, tuple[_L2Transfer, ...]],
     dict[int, frozenset[int]],
 ]:
-    producer_by_tensor = {
-        tensor: node
-        for node in graph.nodes
-        for tensor in node.outputs
-    }
-    initializer_tensors = frozenset(graph.initializers)
-    graph_inputs = frozenset(graph.inputs) - initializer_tensors
-    graph_outputs = frozenset(graph.outputs)
     l1_transfers: dict[int, list[_L1Transfer]] = {}
     l2_reads: dict[int, list[_L2Transfer]] = {}
     l2_writes: dict[int, list[_L2Transfer]] = {}
     source_dependencies: dict[int, set[int]] = {}
 
-    for destination_stage_id, destination_plan in stage_plans.items():
-        for destination_node, output_layouts in zip(
-            destination_plan.nodes,
-            destination_plan.node_output_layouts,
-        ):
-            for tensor in destination_node.inputs:
-                if tensor in initializer_tensors:
-                    continue
-                required_slices = required_input_slices(
-                    tensor=tensor,
-                    destination_node=destination_node,
-                    destination_output_layouts=output_layouts,
-                )
-                source_node = producer_by_tensor.get(tensor)
-                if tensor in graph_inputs or source_node is None:
-                    for virtual_tile, tensor_slice in required_slices:
-                        l2_reads.setdefault(destination_stage_id, []).append(
-                            _L2Transfer(
-                                stage_id=destination_stage_id,
-                                virtual_tile_id=virtual_tile.tile_id,
-                                bytes=tensor.slice_num_bytes(tensor_slice),
-                            )
-                        )
-                    continue
-
-                source_stage_id = node_stage_ids[id(source_node)]
-                if source_stage_id == destination_stage_id:
-                    continue
-                source_layout = node_output_layouts(
-                    stage_plans[source_stage_id],
-                    source_node,
-                )[node_output_index(source_node, tensor)]
-                fragments = build_direct_remap_fragments(
-                    tensor=tensor,
-                    src_layout=source_layout,
-                    dst_required_slices=required_slices,
-                )
-                source_dependencies.setdefault(destination_stage_id, set()).add(
-                    source_stage_id
-                )
-                for fragment in fragments:
-                    bytes_ = fragment.src_subslice.num_elements * tensor.elem_bytes
-                    row_bytes, rows = _fragment_row_shape(fragment, tensor.elem_bytes)
-                    l1_transfers.setdefault(source_stage_id, []).append(
-                        _L1Transfer(
-                            source_stage_id=source_stage_id,
-                            destination_stage_id=destination_stage_id,
-                            source_virtual_tile_id=fragment.src_hartid,
-                            destination_virtual_tile_id=fragment.dst_hartid,
-                            bytes=bytes_,
-                            row_bytes=row_bytes,
-                            rows=rows,
-                        )
+    for transition in virtual_transitions:
+        if isinstance(transition, VirtualInputTransition):
+            for destination in transition.destinations:
+                l2_reads.setdefault(transition.destination_stage_id, []).append(
+                    _L2Transfer(
+                        stage_id=transition.destination_stage_id,
+                        virtual_tile_id=destination.virtual_tile_id,
+                        bytes=transition.tensor.slice_num_bytes(
+                            destination.tensor_slice
+                        ),
                     )
-
-            for output_idx, tensor in enumerate(destination_node.outputs):
-                if tensor not in graph_outputs:
-                    continue
-                output_layout = output_layouts[output_idx]
-                for virtual_tile in output_layout.submesh.tiles:
-                    output_slice = tile_tensor_slice(tensor, output_layout, virtual_tile)
-                    row_bytes, rows = _output_row_shape(tensor, output_slice)
-                    l2_writes.setdefault(destination_stage_id, []).append(
-                        _L2Transfer(
-                            stage_id=destination_stage_id,
-                            virtual_tile_id=virtual_tile.tile_id,
-                            bytes=tensor.slice_num_bytes(output_slice),
-                            row_bytes=row_bytes,
-                            rows=rows,
-                        )
+                )
+        elif isinstance(transition, VirtualIntermediateTransition):
+            if transition.transfers:
+                source_dependencies.setdefault(
+                    transition.destination_stage_id,
+                    set(),
+                ).add(transition.source_stage_id)
+            for transfer in transition.transfers:
+                row_bytes, rows = _transfer_row_shape(
+                    transfer,
+                    transition.tensor.elem_bytes,
+                )
+                l1_transfers.setdefault(transition.source_stage_id, []).append(
+                    _L1Transfer(
+                        source_stage_id=transition.source_stage_id,
+                        destination_stage_id=transition.destination_stage_id,
+                        source_virtual_tile_id=transfer.source_virtual_tile_id,
+                        destination_virtual_tile_id=(
+                            transfer.destination_virtual_tile_id
+                        ),
+                        bytes=(
+                            transfer.source_subslice.num_elements
+                            * transition.tensor.elem_bytes
+                        ),
+                        row_bytes=row_bytes,
+                        rows=rows,
                     )
+                )
+        elif isinstance(transition, VirtualOutputTransition):
+            for source in transition.sources:
+                row_bytes, rows = _output_row_shape(
+                    transition.tensor,
+                    source.tensor_slice,
+                )
+                l2_writes.setdefault(transition.source_stage_id, []).append(
+                    _L2Transfer(
+                        stage_id=transition.source_stage_id,
+                        virtual_tile_id=source.virtual_tile_id,
+                        bytes=transition.tensor.slice_num_bytes(
+                            source.tensor_slice
+                        ),
+                        row_bytes=row_bytes,
+                        rows=rows,
+                    )
+                )
 
     return (
         {stage_id: tuple(transfers) for stage_id, transfers in l1_transfers.items()},
@@ -365,23 +336,27 @@ def _stage_breakdowns(
     return breakdowns
 
 
-def _fragment_row_shape(fragment, element_bytes: int) -> tuple[int | None, int]:
-    """Describe strided fragment rows for the transport model."""
+def _transfer_row_shape(
+    transfer: VirtualTransfer,
+    element_bytes: int,
+) -> tuple[int | None, int]:
+    """Describe a canonical Virtual Transfer's strided rows."""
 
-    if fragment.src_subslice.rank < 2:
+    if transfer.source_subslice.rank < 2:
         return None, 1
-    source_inner = fragment.src_subslice.dims[-1]
-    destination_inner = fragment.dst_subslice.dims[-1]
+    source_inner = transfer.source_subslice.dims[-1]
+    destination_inner = transfer.destination_subslice.dims[-1]
     if source_inner.length != destination_inner.length:
         return None, 1
     if (
-        source_inner.length == fragment.src_subslice.parent.dims[-1].length
-        and destination_inner.length == fragment.dst_subslice.parent.dims[-1].length
+        source_inner.length == transfer.source_subslice.parent.dims[-1].length
+        and destination_inner.length
+        == transfer.destination_subslice.parent.dims[-1].length
     ):
         return None, 1
     return (
         source_inner.length * element_bytes,
-        fragment.src_subslice.num_elements // source_inner.length,
+        transfer.source_subslice.num_elements // source_inner.length,
     )
 
 

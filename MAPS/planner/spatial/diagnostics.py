@@ -3,28 +3,27 @@
 from __future__ import annotations
 
 from MAPS.arch import Mesh
-from MAPS.core.graph import Graph, Node
+from MAPS.core.graph import Node
 from MAPS.planner.contracts.stages import StagePlacement, StagePlan
 from MAPS.planner.spatial.evaluation import evaluate_mapping
 from MAPS.planner.spatial.topology import owner_by_tile_id
+from MAPS.transitions import VirtualTransition
 
 
 def print_spatial_mapping_details(
-    graph: Graph,
     mesh: Mesh,
     stage_plans: dict[int, StagePlan],
     placements: dict[int, StagePlacement],
-    node_stage_ids: dict[int, int],
+    virtual_transitions: tuple[VirtualTransition, ...],
     label: str = "mapping",
 ) -> None:
     """Print physical regions, ownership maps, and exact IO bottlenecks."""
 
     evaluation = evaluate_mapping(
-        graph,
         mesh,
         stage_plans,
         placements,
-        node_stage_ids,
+        virtual_transitions,
     )
     print(f"\n[spatial_mapping] chosen physical submeshes for {label}:")
     for stage_id in stage_plans:

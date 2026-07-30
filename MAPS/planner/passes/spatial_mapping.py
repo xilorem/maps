@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from MAPS.arch import Mesh
-from MAPS.core.graph import Graph
 from MAPS.planner.contracts.stages import StagePlacement, StagePlan
 from MAPS.planner.spatial.diagnostics import (
     print_placement_grid,
@@ -14,13 +13,13 @@ from MAPS.planner.spatial.ownership import assign_stage_ownerships, stage_order
 from MAPS.planner.spatial.regions import build_initial_stage_placements
 from MAPS.planner.spatial.repair import improve_spatial_mapping
 from MAPS.planner.spatial.traffic import build_virtual_traffic
-from MAPS.transitions import build_virtual_transitions
+from MAPS.transitions import VirtualTransition
 
 
 def map_spatially(
-    graph: Graph,
     mesh: Mesh,
     stage_plans: dict[int, StagePlan],
+    virtual_transitions: tuple[VirtualTransition, ...],
     show_progress: bool = False,
     print_mapping: bool = True,
     print_costs: bool = False,
@@ -44,11 +43,6 @@ def map_spatially(
             feasible placement can be constructed.
     """
 
-    node_stage_ids = {
-        id(node): stage_id
-        for stage_id, plan in stage_plans.items()
-        for node in plan.nodes
-    }
     tile_counts = {
         stage_id: plan.tile_count
         for stage_id, plan in stage_plans.items()
@@ -56,7 +50,6 @@ def map_spatially(
     if sum(tile_counts.values()) > mesh.num_tiles:
         raise ValueError("requested stage tiles exceed available mesh tiles")
 
-    virtual_transitions = build_virtual_transitions(graph, stage_plans)
     traffic = build_virtual_traffic(virtual_transitions, stage_plans)
     _debug(show_progress, "[spatial_mapping] phase=virtual_analysis")
     _debug(
@@ -77,10 +70,9 @@ def map_spatially(
     )
     placements = assign_stage_ownerships(mesh, stage_plans, placements, traffic)
     evaluator = MappingEvaluator(
-        graph,
         mesh,
         stage_plans,
-        node_stage_ids,
+        virtual_transitions,
     )
     evaluation = evaluator.evaluate(placements)
     _debug(
@@ -90,12 +82,11 @@ def map_spatially(
         f"worst_tile={evaluation.worst_tile_id}",
     )
     placements = improve_spatial_mapping(
-        graph,
         mesh,
         stage_plans,
         placements,
         traffic,
-        node_stage_ids,
+        virtual_transitions,
         evaluation,
         show_progress,
         evaluator=evaluator,
@@ -103,11 +94,10 @@ def map_spatially(
 
     if print_costs:
         print_spatial_mapping_details(
-            graph,
             mesh,
             stage_plans,
             placements,
-            node_stage_ids,
+            virtual_transitions,
             label="ownership_aware",
         )
     elif print_mapping:

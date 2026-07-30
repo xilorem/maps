@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections import deque
 
 from MAPS.arch import Mesh
-from MAPS.core.graph import Graph
 from MAPS.planner.contracts.stages import StagePlacement, StagePlan
 from MAPS.planner.spatial.evaluation import MappingEvaluator
 from MAPS.planner.spatial.models import (
@@ -24,15 +23,15 @@ from MAPS.planner.spatial.topology import (
     shared_boundary_length,
     shortest_path_between_regions,
 )
+from MAPS.transitions import VirtualTransition
 
 
 def improve_spatial_mapping(
-    graph: Graph,
     mesh: Mesh,
     stage_plans: dict[int, StagePlan],
     placements: dict[int, StagePlacement],
     traffic: VirtualTraffic,
-    node_stage_ids: dict[int, int],
+    virtual_transitions: tuple[VirtualTransition, ...],
     initial_evaluation: MappingEvaluation,
     debug: bool,
     evaluator: MappingEvaluator | None = None,
@@ -48,7 +47,7 @@ def improve_spatial_mapping(
     """
 
     if evaluator is None:
-        evaluator = MappingEvaluator(graph, mesh, stage_plans, node_stage_ids)
+        evaluator = MappingEvaluator(mesh, stage_plans, virtual_transitions)
     current_placements = placements
     current_evaluation = initial_evaluation
     tabu: deque[frozenset[int]] = deque(maxlen=10)

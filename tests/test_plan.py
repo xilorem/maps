@@ -512,7 +512,8 @@ def test_build_pipeline_disables_spatial_mapping_progress_by_default(monkeypatch
     seen = {}
     built_pipeline = object()
 
-    def fake_map_spatially(graph, mesh, stage_plans, **kwargs):
+    def fake_map_spatially(mesh, stage_plans, virtual_transitions, **kwargs):
+        del mesh, stage_plans, virtual_transitions
         seen["show_progress"] = kwargs["show_progress"]
         return {}
 
@@ -525,7 +526,7 @@ def test_build_pipeline_disables_spatial_mapping_progress_by_default(monkeypatch
     monkeypatch.setattr(
         plan_module,
         "print_pipeline_stage_cost",
-        lambda graph, mesh, plans, placements: None,
+        lambda mesh, plans, placements, virtual_transitions: None,
     )
 
     with TemporaryDirectory() as tmpdir:
@@ -563,7 +564,8 @@ def test_build_pipeline_can_enable_spatial_mapping_progress(monkeypatch) -> None
     seen = {}
     built_pipeline = object()
 
-    def fake_map_spatially(graph, mesh, stage_plans, **kwargs):
+    def fake_map_spatially(mesh, stage_plans, virtual_transitions, **kwargs):
+        del mesh, stage_plans, virtual_transitions
         seen["show_progress"] = kwargs["show_progress"]
         return {}
 
@@ -576,7 +578,7 @@ def test_build_pipeline_can_enable_spatial_mapping_progress(monkeypatch) -> None
     monkeypatch.setattr(
         plan_module,
         "print_pipeline_stage_cost",
-        lambda graph, mesh, plans, placements: None,
+        lambda mesh, plans, placements, virtual_transitions: None,
     )
 
     with TemporaryDirectory() as tmpdir:

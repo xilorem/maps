@@ -3,17 +3,17 @@
 from __future__ import annotations
 
 from MAPS.arch import Mesh
-from MAPS.core.graph import Graph
 from MAPS.planner.contracts.stages import StagePlacement, StagePlan, virtual_submesh
 from MAPS.planner.spatial.evaluation import evaluate_mapping
 from MAPS.planner.workload.metrics import worst_tile_compute_workload
+from MAPS.transitions import VirtualTransition
 
 
 def print_pipeline_stage_cost(
-    graph: Graph,
     mesh: Mesh,
     stage_plans: dict[int, StagePlan],
     placements: dict[int, StagePlacement],
+    virtual_transitions: tuple[VirtualTransition, ...],
 ) -> None:
     """Print the combined worst-stage compute and physical IO estimate.
 
@@ -33,17 +33,11 @@ def print_pipeline_stage_cost(
         ),
         default=0,
     )
-    node_stage_ids = {
-        id(node): stage_id
-        for stage_id, plan in stage_plans.items()
-        for node in plan.nodes
-    }
     evaluation = evaluate_mapping(
-        graph,
         mesh,
         stage_plans,
         placements,
-        node_stage_ids,
+        virtual_transitions,
     )
     worst_stage_io = max(
         (breakdown.total for breakdown in evaluation.stage_breakdowns.values()),
