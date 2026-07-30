@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from MAPS.core.layout import TensorLayout
+from MAPS.transitions.contracts import InputDestination
 
 if TYPE_CHECKING:
     from MAPS.core.graph import Node
@@ -35,6 +36,24 @@ class TransitionInput:
 
 
 @dataclass(frozen=True)
+class InitializerInput:
+    """Per-tile residency for an immutable input tensor."""
+
+    destinations: tuple[InputDestination, ...] = field(default_factory=tuple)
+
+
+@dataclass(frozen=True)
+class TransitionSource:
+    """Layer input supplied by an Input or Intermediate Transition."""
+
+    transition_id: int
+
+    def __post_init__(self) -> None:
+        if self.transition_id < 0:
+            raise ValueError("transition sources require transition_id >= 0")
+
+
+@dataclass(frozen=True)
 class LocalInput:
     """Layer input read from a previous layer output in the same stage."""
 
@@ -46,7 +65,13 @@ class LocalInput:
             raise ValueError("layer_idx and tensor_id must be >= 0")
 
 
-LayerInputSource = ExternalInput | TransitionInput | LocalInput
+LayerInputSource = (
+    ExternalInput
+    | InitializerInput
+    | TransitionInput
+    | TransitionSource
+    | LocalInput
+)
 
 
 @dataclass(frozen=True)
@@ -69,6 +94,28 @@ class LayerInput:
         return cls(
             tensor_id=tensor_id,
             source=TransitionInput(transition_id=transition_id),
+        )
+
+    @classmethod
+    def initializer(
+        cls,
+        tensor_id: int,
+        destinations: tuple[InputDestination, ...],
+    ) -> "LayerInput":
+        return cls(
+            tensor_id=tensor_id,
+            source=InitializerInput(destinations=destinations),
+        )
+
+    @classmethod
+    def transition_source(
+        cls,
+        tensor_id: int,
+        transition_id: int,
+    ) -> "LayerInput":
+        return cls(
+            tensor_id=tensor_id,
+            source=TransitionSource(transition_id=transition_id),
         )
 
     @classmethod
