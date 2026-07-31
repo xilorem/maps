@@ -1,7 +1,15 @@
 import pytest
 
 from MAPS.arch import WorkKind
-from MAPS.core import Graph, Node, OpKind, Submesh, Tensor, TensorDType
+from MAPS.core import (
+    Graph,
+    LayoutAxisMode,
+    Node,
+    OpKind,
+    Submesh,
+    Tensor,
+    TensorDType,
+)
 from MAPS.core.graph import Edge
 from MAPS.hw.chips import magia_mesh
 from MAPS.ops.defs.cast import CastPayload
@@ -38,6 +46,26 @@ def test_cast_preserves_shape_and_builds_typed_tile_work() -> None:
     assert tile_work.output_slices[0].num_bytes == 32
     assert tile_work.operation_count() == 8
     assert tile_work.l1_bytes == 48
+
+
+def test_cast_shards_output_and_preserves_the_exact_input_layout() -> None:
+    payload = CastPayload(
+        x=_tensor("x", TensorDType.FLOAT16, (4, 8)),
+        output=_tensor("output", TensorDType.FLOAT32, (4, 8)),
+    )
+    mesh = magia_mesh(width=2, height=2)
+    submesh = Submesh(mesh=mesh, submesh_id=0, tile_ids={0, 1, 2, 3})
+
+    output_layout = payload.output_layouts(submesh, logical_shape=(2, 2))[0]
+    input_layout = payload.layout_relations[0].input_layout_from_output_layout(
+        output_layout
+    )
+
+    assert output_layout.mesh_x.mode is LayoutAxisMode.SHARD
+    assert output_layout.mesh_x.tensor_axis == 1
+    assert output_layout.mesh_y.mode is LayoutAxisMode.SHARD
+    assert output_layout.mesh_y.tensor_axis == 0
+    assert input_layout == output_layout
 
 
 def test_cast_requires_shape_preservation() -> None:
