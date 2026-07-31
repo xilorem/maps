@@ -218,7 +218,7 @@ def convert_softmax(
     outputs: tuple[Tensor, ...],
     attributes: dict[str, object],
 ) -> tuple[OpKind, SoftmaxPayload]:
-    """Lower one ONNX Softmax node into one high-level MAPS softmax op."""
+    """Lower one ONNX Softmax node into one high-level maps softmax operation."""
 
     if len(inputs) != 1:
         raise ValueError(f"Softmax node '{node_name}' must have exactly 1 input")

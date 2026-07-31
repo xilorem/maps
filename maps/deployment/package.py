@@ -28,7 +28,8 @@ PACKAGE_SCHEMA_VERSION = 1
 OPERATION_ABI_VERSION = 1
 DESCRIPTOR_ABI_VERSION = 1
 DESCRIPTOR_MAX_DIMENSIONS = 6
-SUPPORTED_TARGET = "magia-v2"
+SUPPORTED_DEPLOYMENT_TARGET = "magia"
+RUNTIME_TARGET = "magia-v2"
 
 _DTYPE_BYTES = {
     "float16": 2,
@@ -155,7 +156,7 @@ def validate_deployment_package(package_dir: str | Path) -> dict[str, Any]:
         raise ValueError("input and output tensor identities must be distinct")
 
     target = _object(manifest.get("target"), "target")
-    if target.get("architecture") != SUPPORTED_TARGET:
+    if target.get("architecture") != RUNTIME_TARGET:
         raise ValueError("unsupported deployment target")
     mesh = _object(target.get("mesh"), "target.mesh")
     _positive_integer(mesh.get("width"), "target.mesh.width")
@@ -269,7 +270,7 @@ def write_deployment_package(
     model_path: str | Path,
     output_dir: str | Path,
     *,
-    target: str = SUPPORTED_TARGET,
+    target: str = SUPPORTED_DEPLOYMENT_TARGET,
     mesh_width: int = 32,
     mesh_height: int = 32,
     num_token_slots: int = 2,
@@ -279,8 +280,8 @@ def write_deployment_package(
 ) -> Path:
     """Plan once, package in a staging directory, verify, then publish."""
 
-    if target != SUPPORTED_TARGET:
-        raise ValueError(f"unsupported deployment target '{target}'")
+    if target != SUPPORTED_DEPLOYMENT_TARGET:
+        raise ValueError(f"{target} deployment backend is unsupported")
     if mesh_width <= 0 or mesh_height <= 0:
         raise ValueError("mesh dimensions must be positive")
     if num_token_slots <= 0 or pipeline_token_capacity <= 0:
