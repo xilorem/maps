@@ -6,7 +6,7 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from MAPS.arch import Tile
+    from MAPS.arch import Device, Tile
     from MAPS.core.graph import Node
     from MAPS.core.layout import TensorLayout
     from MAPS.ops.common.tile_work import TileWork
@@ -22,7 +22,12 @@ class OpCostModel(ABC):
     """
 
     @abstractmethod
-    def cost(self, tile_work: "TileWork", tile: "Tile") -> int:
+    def cost(
+        self,
+        tile_work: "TileWork",
+        tile: "Tile",
+        assigned_device: "Device | None" = None,
+    ) -> int:
         """Return non-negative cycles spent on one tile's local work."""
 
     def placement_cost(

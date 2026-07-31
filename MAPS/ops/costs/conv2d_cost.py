@@ -22,7 +22,13 @@ class Conv2DCostModel(OpCostModel):
         DeviceKind.SYSTOLIC,
     )
 
-    def cost(self, tile_work: Conv2DTileWork, tile: Tile) -> int:
+    def cost(
+        self,
+        tile_work: Conv2DTileWork,
+        tile: Tile,
+        assigned_device: object | None = None,
+    ) -> int:
+        del assigned_device
         devices = tuple(
             device for device in tile.devices if device.supports(WorkKind.CONV2D)
         )

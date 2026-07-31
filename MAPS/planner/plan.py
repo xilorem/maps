@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from MAPS.arch import Mesh
 from MAPS.core.graph import Graph
 from MAPS.importers.onnx.importer import import_onnx_graph, import_onnx_model
+from MAPS.importers.model import ImportedModel
 from MAPS.importers.onnx.preprocess import InputShapes
 from MAPS.pipeline.execution import ExecutionContract
 from MAPS.pipeline.execution_plan import ExecutionPlan
@@ -29,6 +30,7 @@ from MAPS.planner.reporting.execution_plan import print_execution_plan_stage_cos
 from MAPS.planner.validation.contracts import PlannerConstraints
 from MAPS.transitions import build_virtual_transitions
 from MAPS.utils.execution_plan_json import write_execution_plan_json
+from MAPS.transforms import run_graph_rewrites
 
 if TYPE_CHECKING:
     from MAPS.deployment.bundle import DeploymentBundle
@@ -138,9 +140,9 @@ def build_execution_plan(
 ) -> ExecutionPlan:
     """Import and plan one model as a unified Execution Plan."""
 
-    graph = import_onnx_graph(model_path, input_shapes=input_shapes)
-    execution_plan = plan_graph(
-        graph,
+    model = import_onnx_model(model_path, input_shapes=input_shapes)
+    execution_plan = plan_model(
+        model,
         mesh,
         PlannerOptions(
             execution=ExecutionContract(num_token_slots=num_token_slots),
@@ -156,7 +158,7 @@ def build_execution_plan(
                 print_costs=print_spatial_mapping,
             ),
         ),
-    )
+    ).execution_plan
     if output_json_path is not None:
         write_execution_plan_json(execution_plan, output_json_path)
     return execution_plan
@@ -171,17 +173,28 @@ def build_execution_plan_bundle(
 ) -> DeploymentBundle:
     """Import constants alongside a model and produce its deployment bundle."""
 
+    model = import_onnx_model(model_path, input_shapes=input_shapes)
+    return plan_model(model, arch, options)
+
+
+def plan_model(
+    model: ImportedModel,
+    mesh: Mesh,
+    options: PlannerOptions,
+) -> DeploymentBundle:
+    """Rewrite and plan one Imported Model as an auditable Deployment Bundle."""
+
     from MAPS.deployment.bundle import DeploymentBundle
 
-    model = import_onnx_model(model_path, input_shapes=input_shapes)
+    rewritten, rewrite_report = run_graph_rewrites(model)
     stage_plans, virtual_transitions, placements = _plan_decisions(
-        model.graph,
-        arch,
+        rewritten.graph,
+        mesh,
         options,
     )
     execution_plan = lower_execution_plan(
-        model.graph,
-        arch,
+        rewritten.graph,
+        mesh,
         stage_plans,
         placements,
         virtual_transitions,
@@ -201,8 +214,9 @@ def build_execution_plan_bundle(
         )
     return DeploymentBundle(
         execution_plan=execution_plan,
-        graph=model.graph,
-        constants=model.constants,
+        graph=rewritten.graph,
+        constants=rewritten.constants,
+        rewrite_report=rewrite_report,
     )
 
 
@@ -210,4 +224,5 @@ __all__ = [
     "build_execution_plan",
     "build_execution_plan_bundle",
     "plan_graph",
+    "plan_model",
 ]

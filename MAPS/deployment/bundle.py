@@ -15,6 +15,7 @@ from MAPS.planner.passes.execution_plan_validation import require_valid_executio
 from MAPS.planner.validation.contracts import PlannerConstraints
 from MAPS.transitions.contracts import InputTransition, OutputTransition
 from MAPS.utils.execution_plan_json import execution_plan_json_payload
+from MAPS.transforms.rewrite import RewriteReport
 
 from .weights import PackedWeights, pack_weights
 
@@ -36,6 +37,33 @@ class DeploymentBundle:
     execution_plan: ExecutionPlan
     graph: Graph
     constants: ConstantStore
+    rewrite_report: RewriteReport = RewriteReport()
+
+
+def _signature_payload(signature) -> dict[str, Any] | None:
+    if signature is None:
+        return None
+    return {
+        "work_kind": signature.work_kind.name,
+        "input_dtypes": [dtype.value for dtype in signature.input_dtypes],
+        "output_dtypes": [dtype.value for dtype in signature.output_dtypes],
+    }
+
+
+def _rewrite_report_payload(report: RewriteReport) -> list[dict[str, Any]]:
+    return [
+        {
+            "rewrite_name": event.rewrite_name,
+            "source_node": event.source_node,
+            "original_signature": _signature_payload(event.original_signature),
+            "resulting_signatures": [
+                _signature_payload(signature)
+                for signature in event.resulting_signatures
+            ],
+            "converted_initializers": list(event.converted_initializers),
+        }
+        for event in report.events
+    ]
 
 
 def _static_activation_bytes(bundle: DeploymentBundle) -> int:
@@ -62,6 +90,9 @@ def _bundle_payload(
     weights_file: str,
 ) -> dict[str, Any]:
     payload = execution_plan_json_payload(bundle.execution_plan)
+    payload["provenance"] = {
+        "rewrite_report": _rewrite_report_payload(bundle.rewrite_report),
+    }
     payload["bundle"] = {
         "schema_version": BUNDLE_SCHEMA_VERSION,
         "weights_file": weights_file,

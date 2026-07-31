@@ -28,6 +28,7 @@ def print_execution_plan_stage_cost(
                 stage_nodes=plan.nodes,
                 node_output_layouts=plan.node_output_layouts,
                 submesh=virtual_submesh(plan),
+                device_names=plan.device_names,
             )
             for plan in stage_plans.values()
         ),

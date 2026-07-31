@@ -110,6 +110,7 @@ class Layer:
     node: "Node"
     inputs: tuple[LayerInput, ...] = field(default_factory=tuple)
     outputs: tuple[LayerOutput, ...] = field(default_factory=tuple)
+    device_name: str | None = None
 
     def validate_tensors(self, tensors: tuple["Tensor", ...]) -> None:
         """Validate bound tensor ids and output layout compatibility."""

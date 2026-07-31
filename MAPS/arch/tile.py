@@ -52,8 +52,26 @@ class Tile:
     def assigned_device(self, signature: WorkSignature) -> Device:
         """Return the Device named by this Tile's fixed assignment."""
 
-        device_name = self.device_assignment.assignments[signature]
-        return next(device for device in self.devices if device.name == device_name)
+        device_name = self.device_assignment.assignments.get(signature)
+        considered = ", ".join(device.name for device in self.devices)
+        if device_name is None:
+            raise ValueError(
+                f"tile {self.tile_id} has no fixed assignment for {signature}; "
+                f"configured assignment=None; considered devices: {considered}"
+            )
+        return self.device_by_name(device_name)
+
+    def device_by_name(self, device_name: str) -> Device:
+        """Resolve one stable chip-local Device name."""
+
+        for device in self.devices:
+            if device.name == device_name:
+                return device
+        considered = ", ".join(device.name for device in self.devices)
+        raise ValueError(
+            f"tile {self.tile_id} has no device named {device_name}; "
+            f"considered devices: {considered}"
+        )
     
     def dma_devices(self, job: DMAJob) -> tuple[DMADevice, ...]:
         """Return the set of DMADevices associated with a tile for a

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from MAPS.core.layout import TensorSlice, TensorSubSlice
+from MAPS.arch import WorkKind, WorkSignature
 from MAPS.pipeline.execution_plan import ExecutionPlan
 from MAPS.pipeline.layer import InitializerInput, LocalInput, TransitionSource
 from MAPS.planner.validation.contracts import (
@@ -114,6 +115,12 @@ def _validate_stage(
         )
 
     for layer_index, layer in enumerate(stage.layers):
+        _validate_layer_device(
+            violations,
+            stage_id,
+            layer_index,
+            execution_plan,
+        )
         for input_index, layer_input in enumerate(layer.inputs):
             source = layer_input.source
             if isinstance(source, InitializerInput):
@@ -166,6 +173,54 @@ def _validate_stage(
                     f"tile {tile.tile_id} only provides {tile.memory.size}",
                 )
     return tensor_bindings_valid
+
+
+def _validate_layer_device(
+    violations: list[ConstraintViolation],
+    stage_id: int,
+    layer_index: int,
+    execution_plan: ExecutionPlan,
+) -> None:
+    stage = execution_plan.stages[stage_id]
+    layer = stage.layers[layer_index]
+    work_kind = getattr(layer.node.payload, "work_kind", None)
+    if work_kind is not WorkKind.GEMM:
+        return
+    try:
+        signature = WorkSignature.from_node(layer.node)
+    except ValueError:
+        # Legacy hand-built plans may still omit TensorDTypes until the final
+        # execution-contract migration ticket.
+        return
+    if layer.device_name is None:
+        append_violation(
+            violations,
+            "layer_device_assignment_invalid",
+            f"stage {stage_id} layer {layer_index} node {layer.node.name} with "
+            f"{signature} has no retained Device name",
+        )
+        return
+    for tile in stage.submesh.tiles:
+        configured_name = tile.device_assignment.assignments.get(signature)
+        try:
+            device = tile.device_by_name(layer.device_name)
+        except ValueError as exc:
+            append_violation(
+                violations,
+                "layer_device_assignment_invalid",
+                f"stage {stage_id} layer {layer_index} node {layer.node.name}: {exc}",
+            )
+            return
+        if configured_name != layer.device_name or not device.supports(signature):
+            append_violation(
+                violations,
+                "layer_device_assignment_invalid",
+                f"stage {stage_id} layer {layer_index} node {layer.node.name} with "
+                f"{signature} retains {layer.device_name} on tile {tile.tile_id}, "
+                f"but configured assignment is {configured_name!r} and the Device "
+                f"capability match is {device.supports(signature)}",
+            )
+            return
 
 
 def _validate_initializer_input(

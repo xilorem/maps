@@ -25,6 +25,7 @@ class StagePlan:
     logical_shape: tuple[int, int]
     nodes: tuple[Node, ...]
     node_output_layouts: tuple[tuple, ...]
+    device_names: tuple[str | None, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -37,7 +38,7 @@ class StagePlacement:
     """
 
     stage_id: int
-    virtual_submesh: object
+    virtual_submesh: Submesh
     physical_submesh: Submesh
     virtual_to_physical: dict[int, int]
 

@@ -2,7 +2,16 @@
 
 from __future__ import annotations
 
-from MAPS.arch import DMADevice, DMAJob, DeviceKind, ScalarDevice, WorkKind
+from MAPS.arch import (
+    DMADevice,
+    DMAJob,
+    DeviceKind,
+    FixedDeviceAssignment,
+    ScalarDevice,
+    WorkKind,
+    WorkSignature,
+)
+from MAPS.core.dtype import TensorDType
 from MAPS.hw.devices.redmule import REDMULE_DEVICE
 from MAPS.hw.devices.spatz import SPATZ_DEVICE
 
@@ -31,6 +40,7 @@ MAGIA_CORE_DEVICE = ScalarDevice(
     name="core",
     kind=DeviceKind.SCALAR,
     throughput={
+        WorkKind.GEMM: 1,
         WorkKind.ELEMENTWISE: 1,
         WorkKind.GROUP_NORMALIZE: 1,
         WorkKind.GROUP_REDUCE: 1,
@@ -54,6 +64,20 @@ MAGIA_CORE_DEVICE = ScalarDevice(
         WorkKind.SUB: 1,
         WorkKind.TRANSPOSE: 1,
     },
+    capabilities=frozenset(
+        {
+            WorkSignature(
+                work_kind=WorkKind.GEMM,
+                input_dtypes=(TensorDType.FLOAT32, TensorDType.FLOAT32),
+                output_dtypes=(TensorDType.FLOAT32,),
+            ),
+            WorkSignature(
+                work_kind=WorkKind.GEMM,
+                input_dtypes=(TensorDType.FLOAT32,) * 3,
+                output_dtypes=(TensorDType.FLOAT32,),
+            ),
+        }
+    ),
 )
 
 MAGIA_REDMULE_DEVICE = REDMULE_DEVICE
@@ -65,4 +89,15 @@ MAGIA_TILE_DEVICES = (
     MAGIA_CORE_DEVICE,
     MAGIA_SPATZ_DEVICE,
     MAGIA_REDMULE_DEVICE,
+)
+
+MAGIA_DEVICE_ASSIGNMENT = FixedDeviceAssignment(
+    {
+        signature: MAGIA_REDMULE_DEVICE.name
+        for signature in MAGIA_REDMULE_DEVICE.capabilities
+    }
+    | {
+        signature: MAGIA_CORE_DEVICE.name
+        for signature in MAGIA_CORE_DEVICE.capabilities
+    }
 )

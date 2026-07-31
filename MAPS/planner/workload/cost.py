@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from MAPS.arch import WorkKind, WorkSignature
 from MAPS.core.graph import Node
 from MAPS.core.layout import TensorLayout
 
@@ -23,7 +24,18 @@ def cost_estimator(
         for tile in submesh.tiles
     )
     tile_cost = max(
-        (cost_model.cost(work, tile) for tile, work in tile_work),
+        (
+            cost_model.cost(
+                work,
+                tile,
+                (
+                    tile.assigned_device(WorkSignature.from_node(node))
+                    if node.payload.work_kind is WorkKind.GEMM
+                    else None
+                ),
+            )
+            for tile, work in tile_work
+        ),
         default=0,
     )
     return tile_cost + int(

@@ -6,6 +6,7 @@ from MAPS.arch import L1Memory, L2Memory, Mesh, Tile
 from MAPS.core.graph import Edge, Graph, Node, OpKind
 from MAPS.core.layout import TensorLayout
 from MAPS.core.submesh import Submesh
+from MAPS.core.dtype import TensorDType
 from MAPS.core.tensor import Tensor
 from MAPS.ops.common.cost import OpCostModel
 from MAPS.ops.common.tile_work import TileWork
@@ -27,9 +28,9 @@ from tests.noc_utils import rectangular_test_noc, rectangular_test_tiles
 
 
 def _gemm_node(name: str, m: int, k: int, n: int) -> Node:
-    x = Tensor(name=f"{name}_x", rank=2, dims=(m, k), elem_bytes=2)
-    w = Tensor(name=f"{name}_w", rank=2, dims=(k, n), elem_bytes=2)
-    out = Tensor(name=f"{name}_out", rank=2, dims=(m, n), elem_bytes=2)
+    x = Tensor(name=f"{name}_x", rank=2, dims=(m, k), elem_bytes=2, dtype=TensorDType.FLOAT16)
+    w = Tensor(name=f"{name}_w", rank=2, dims=(k, n), elem_bytes=2, dtype=TensorDType.FLOAT16)
+    out = Tensor(name=f"{name}_out", rank=2, dims=(m, n), elem_bytes=2, dtype=TensorDType.FLOAT16)
     op = GemmPayload(x=x, w=w, y=None, output=out)
     return Node(
         name=name,
@@ -41,9 +42,9 @@ def _gemm_node(name: str, m: int, k: int, n: int) -> Node:
 
 
 def _batched_gemm_node(name: str, b: int, m: int, k: int, n: int) -> Node:
-    x = Tensor(name=f"{name}_x", rank=3, dims=(b, m, k), elem_bytes=2)
-    w = Tensor(name=f"{name}_w", rank=3, dims=(b, k, n), elem_bytes=2)
-    out = Tensor(name=f"{name}_out", rank=3, dims=(b, m, n), elem_bytes=2)
+    x = Tensor(name=f"{name}_x", rank=3, dims=(b, m, k), elem_bytes=2, dtype=TensorDType.FLOAT16)
+    w = Tensor(name=f"{name}_w", rank=3, dims=(b, k, n), elem_bytes=2, dtype=TensorDType.FLOAT16)
+    out = Tensor(name=f"{name}_out", rank=3, dims=(b, m, n), elem_bytes=2, dtype=TensorDType.FLOAT16)
     op = GemmPayload(x=x, w=w, y=None, output=out)
     return Node(
         name=name,

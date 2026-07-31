@@ -19,6 +19,7 @@ from MAPS.arch import (
 )
 from MAPS.hw.devices import (
     MAGIA_CORE_DEVICE,
+    MAGIA_DEVICE_ASSIGNMENT,
     MAGIA_IDMA_READ_DEVICE,
     MAGIA_IDMA_WRITE_DEVICE,
     MAGIA_REDMULE_DEVICE,
@@ -173,6 +174,7 @@ def magia_mesh(
                 y=y,
                 memory=L1Memory(size=MAGIA_L1_USABLE_BYTES, bandwidth=MAGIA_L1_BANDWIDTH_BYTES),
                 devices=MAGIA_TILE_DEVICES,
+                device_assignment=MAGIA_DEVICE_ASSIGNMENT,
             )
             for y in range(height)
             for x in range(width)

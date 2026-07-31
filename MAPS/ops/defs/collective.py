@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from MAPS.arch import WorkKind
 from MAPS.core.layout import (
     LayoutAxis,
     LayoutAxisMode,
@@ -46,6 +47,10 @@ class AllReducePayload(OpPayload):
     output: Tensor
     reduction: str
     collective_axis: str = "x"
+
+    @property
+    def work_kind(self) -> WorkKind:
+        return WorkKind.GROUP_REDUCE
 
     def __post_init__(self) -> None:
         if self.reduction not in {"sum", "max"}:

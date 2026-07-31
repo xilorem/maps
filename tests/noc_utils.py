@@ -1,5 +1,10 @@
-from MAPS.arch import Device, EndpointKind, L1Memory, NoC, NoCChannel, NoCEndpoint, NoCLink, NoCNode, Tile
-from MAPS.hw.devices.generic import GENERIC_SCALAR_DEVICE, IDMA_READ_DEVICE, IDMA_WRITE_DEVICE
+from MAPS.arch import Device, EndpointKind, FixedDeviceAssignment, L1Memory, NoC, NoCChannel, NoCEndpoint, NoCLink, NoCNode, Tile
+from MAPS.hw.devices.generic import (
+    GENERIC_DEVICE_ASSIGNMENT,
+    GENERIC_SCALAR_DEVICE,
+    IDMA_READ_DEVICE,
+    IDMA_WRITE_DEVICE,
+)
 
 DEFAULT_TEST_TILE_DEVICES = (IDMA_READ_DEVICE, IDMA_WRITE_DEVICE, GENERIC_SCALAR_DEVICE)
 
@@ -18,6 +23,11 @@ def rectangular_test_tiles(
             y=y,
             memory=memory,
             devices=devices,
+            device_assignment=(
+                GENERIC_DEVICE_ASSIGNMENT
+                if devices == DEFAULT_TEST_TILE_DEVICES
+                else FixedDeviceAssignment()
+            ),
         )
         for y in range(height)
         for x in range(width)

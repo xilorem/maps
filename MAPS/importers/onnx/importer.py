@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING
 
 from MAPS.core.graph import Graph
 from MAPS.importers.model import ImportedModel
-from MAPS.transforms import decompose_graph
 
 from .graph_parser import parse_graph
 from .preprocess import InputShapes, prepare_onnx_model
@@ -58,7 +57,6 @@ def import_onnx_model(
         onnx_model.graph,
         graph_name=onnx_model.graph.name or Path(path).stem,
     )
-    graph = decompose_graph(graph)
     constants = parse_constants(
         onnx_model.graph,
         names={tensor.name for tensor in graph.initializers},

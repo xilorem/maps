@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from MAPS.core.graph import Graph
+from MAPS.core.graph import Graph, Node
 from MAPS.ops.common import CompositeOpPayload
 
 from .graph_utils import build_graph_edges_from_nodes
@@ -11,8 +11,24 @@ from .graph_utils import build_graph_edges_from_nodes
 def decompose_graph(graph: Graph) -> Graph:
     """Replace composite nodes with the primitive nodes produced by their op specs."""
 
+    decomposed, _ = decompose_graph_with_sources(graph)
+    return decomposed
+
+
+def decompose_graph_with_sources(
+    graph: Graph,
+) -> tuple[Graph, tuple[tuple[Node, tuple[Node, ...]], ...]]:
+    """Decompose a Graph and retain deterministic source-to-result provenance."""
+
     tensors = {tensor.name: tensor for tensor in graph.tensors}
     nodes = []
+    decompositions = []
+    retained_node_names = {
+        node.name
+        for node in graph.nodes
+        if not isinstance(node.payload, CompositeOpPayload)
+    }
+    generated_node_names: set[str] = set()
 
     for node in graph.nodes:
         if not isinstance(node.payload, CompositeOpPayload):
@@ -24,7 +40,17 @@ def decompose_graph(graph: Graph) -> Graph:
             if tensor.name in tensors:
                 raise ValueError(f"tensor '{tensor.name}' is already present in graph metadata")
             tensors[tensor.name] = tensor
+        for lowered_node in lowered_nodes:
+            if (
+                lowered_node.name in retained_node_names
+                or lowered_node.name in generated_node_names
+            ):
+                raise ValueError(
+                    f"generated node name collision: '{lowered_node.name}'"
+                )
+            generated_node_names.add(lowered_node.name)
         nodes.extend(lowered_nodes)
+        decompositions.append((node, lowered_nodes))
 
     lowered_nodes = tuple(nodes)
     graph_output_names = tuple(tensor.name for tensor in graph.outputs)
@@ -37,4 +63,4 @@ def decompose_graph(graph: Graph) -> Graph:
         inputs=graph.inputs,
         outputs=graph.outputs,
         initializers=graph.initializers,
-    )
+    ), tuple(decompositions)

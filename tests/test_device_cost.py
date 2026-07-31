@@ -125,7 +125,9 @@ def test_gemm_cost_uses_systolic_device_when_available() -> None:
     model = GemmCostModel()
     tile_work = _tile_work()
 
-    assert model.cost(tile_work, redmule_tile) < model.cost(tile_work, scalar_tile)
+    assert model.cost(tile_work, redmule_tile, MAGIA_REDMULE_DEVICE) < model.cost(
+        tile_work, scalar_tile, GENERIC_SCALAR_DEVICE
+    )
 
 
 def test_redmule_gemm_cost_accounts_for_array_shape() -> None:
@@ -135,8 +137,8 @@ def test_redmule_gemm_cost_accounts_for_array_shape() -> None:
     compact_work = _tile_work(m_size=4, n_size=8, k_size=16)
     wide_work = _tile_work(m_size=1, n_size=32, k_size=16)
 
-    assert model.cost(compact_work, redmule_tile) == 46
-    assert model.cost(wide_work, redmule_tile) == 92
+    assert model.cost(compact_work, redmule_tile, MAGIA_REDMULE_DEVICE) == 46
+    assert model.cost(wide_work, redmule_tile, MAGIA_REDMULE_DEVICE) == 92
 
 
 def test_tensix_matrix_device_uses_matrix_kind() -> None:
@@ -170,13 +172,14 @@ def test_gemm_cost_prefers_matrix_device_when_available() -> None:
     model = GemmCostModel()
     tile_work = _tile_work(m_size=64, n_size=64, k_size=64)
 
-    assert model.cost(tile_work, matrix_tile) == TENSIX_MATRIX_DEVICE.cycles(tile_work)
+    assert model.cost(
+        tile_work, matrix_tile, TENSIX_MATRIX_DEVICE
+    ) == TENSIX_MATRIX_DEVICE.cycles(tile_work)
 
 
-def test_gemm_cost_accepts_multiple_preferred_device_kinds() -> None:
-    model = GemmCostModel(preferred_device_kinds=(DeviceKind.MATRIX, DeviceKind.SYSTOLIC))
-
-    assert model._preferred_device_kinds() == (DeviceKind.MATRIX, DeviceKind.SYSTOLIC)
+def test_gemm_cost_requires_the_hardware_assigned_device() -> None:
+    with pytest.raises(ValueError, match="requires a fixed assigned Device"):
+        GemmCostModel().cost(_tile_work(), magia_mesh(width=1, height=1).tile(0, 0))
 
 
 def test_vector_device_rejects_zero_length() -> None:
@@ -331,4 +334,6 @@ def test_magia_gemm_still_uses_redmule_with_spatz_present() -> None:
     work = _tile_work()
 
     assert not SPATZ_DEVICE.supports(WorkKind.GEMM)
-    assert GemmCostModel().cost(work, tile) == MAGIA_REDMULE_DEVICE.cycles(work)
+    assert GemmCostModel().cost(
+        work, tile, MAGIA_REDMULE_DEVICE
+    ) == MAGIA_REDMULE_DEVICE.cycles(work)

@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import cast
 
-from MAPS.arch import Mesh
+from MAPS.arch import Mesh, WorkKind, WorkSignature
 from MAPS.core.graph import Node
 from MAPS.core.tensor import Tensor
 from MAPS.ops.common.payload import OpPayload
@@ -105,6 +105,12 @@ class StageCandidateAnalyzer:
                 node_tile_work,
             )
             cost_models = tuple(payload.cost_model for payload in payloads)
+            device_names = tuple(
+                _fixed_device_name(node, submesh.tiles)
+                if getattr(payload, "work_kind", None) is WorkKind.GEMM
+                else None
+                for node, payload in zip(stage_nodes, payloads)
+            )
             placement_cycles = tuple(
                 int(
                     cost_model.placement_cost(
@@ -122,9 +128,11 @@ class StageCandidateAnalyzer:
                 StageTileFacts(
                     tile_id=tile.tile_id,
                     compute_cycles=sum(
-                        cost_models[node_index].cost(
+                        _node_cost(
+                            cost_models[node_index],
                             node_tile_work[node_index][tile_index],
                             tile,
+                            device_names[node_index],
                         )
                         + placement_cycles[node_index]
                         for node_index in range(len(stage_nodes))
@@ -152,6 +160,7 @@ class StageCandidateAnalyzer:
                     logical_shape=logical_shape,
                     nodes=stage_nodes,
                     node_output_layouts=layouts,
+                    device_names=device_names,
                 ),
                 tile_facts=tile_facts,
             )
@@ -164,6 +173,28 @@ class StageCandidateAnalyzer:
             ):
                 best_candidate = candidate
         return best_candidate
+
+
+def _fixed_device_name(node: Node, tiles: tuple) -> str:
+    signature = WorkSignature.from_node(node)
+    assigned = tuple(tile.assigned_device(signature) for tile in tiles)
+    device_names = {device.name for device in assigned}
+    if len(device_names) != 1:
+        raise ValueError(
+            f"node {node.name} with {signature} has inconsistent fixed Device "
+            f"assignments across tiles: {sorted(device_names)}"
+        )
+    return assigned[0].name
+
+
+def _node_cost(cost_model, tile_work, tile, device_name: str | None) -> int:
+    if device_name is None:
+        return cost_model.cost(tile_work, tile)
+    return cost_model.cost(
+        tile_work,
+        tile,
+        tile.device_by_name(device_name),
+    )
 
 
 def logical_shape_options(tile_count: int) -> tuple[tuple[int, int], ...]:

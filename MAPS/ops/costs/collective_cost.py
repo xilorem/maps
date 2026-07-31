@@ -23,7 +23,13 @@ class AllReduceCostModel(OpCostModel):
         if self.collective_axis not in {"x", "y"}:
             raise ValueError("AllReduceCostModel collective_axis must be 'x' or 'y'")
 
-    def cost(self, tile_work: object, tile: object) -> int:
+    def cost(
+        self,
+        tile_work: object,
+        tile: object,
+        assigned_device: object | None = None,
+    ) -> int:
+        del assigned_device
         del tile_work, tile
         return 0
 

@@ -281,11 +281,18 @@ def _stats_tensor(name: str, op: GroupNormalizationPayload) -> Tensor:
         rank=op.x.rank,
         dims=(op.x.dims[0], op.num_groups, *(1 for _ in op.x.dims[2:])),
         elem_bytes=op.x.elem_bytes,
+        dtype=op.x.dtype,
     )
 
 
 def _same_shape_tensor(name: str, reference: Tensor) -> Tensor:
-    return Tensor(name, reference.rank, reference.dims, reference.elem_bytes)
+    return Tensor(
+        name,
+        reference.rank,
+        reference.dims,
+        reference.elem_bytes,
+        dtype=reference.dtype,
+    )
 
 
 def decompose_group_normalization_node(

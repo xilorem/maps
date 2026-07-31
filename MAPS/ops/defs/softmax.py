@@ -222,6 +222,7 @@ def _same_shape_tensor(name: str, reference: Tensor) -> Tensor:
         rank=reference.rank,
         dims=reference.dims,
         elem_bytes=reference.elem_bytes,
+        dtype=reference.dtype,
     )
 
 
@@ -233,6 +234,7 @@ def _reduced_tensor(name: str, reference: Tensor, axis: int) -> Tensor:
         rank=reference.rank,
         dims=tuple(dims),
         elem_bytes=reference.elem_bytes,
+        dtype=reference.dtype,
     )
 
 

@@ -2,7 +2,16 @@
 
 from __future__ import annotations
 
-from MAPS.arch import DMADevice, DMAJob, DeviceKind, ScalarDevice, WorkKind
+from MAPS.arch import (
+    DMADevice,
+    DMAJob,
+    DeviceKind,
+    FixedDeviceAssignment,
+    ScalarDevice,
+    WorkKind,
+    WorkSignature,
+)
+from MAPS.core.dtype import TensorDType
 
 IDMA_READ_DEVICE = DMADevice(
     name="idma_read",
@@ -75,4 +84,20 @@ GENERIC_SCALAR_DEVICE = ScalarDevice(
         WorkKind.SUB: 1,
         WorkKind.TRANSPOSE: 1,
     },
+    capabilities=frozenset(
+        WorkSignature(
+            work_kind=WorkKind.GEMM,
+            input_dtypes=(dtype,) * input_count,
+            output_dtypes=(dtype,),
+        )
+        for dtype in (TensorDType.FLOAT16, TensorDType.FLOAT32)
+        for input_count in (2, 3)
+    ),
+)
+
+GENERIC_DEVICE_ASSIGNMENT = FixedDeviceAssignment(
+    {
+        signature: GENERIC_SCALAR_DEVICE.name
+        for signature in GENERIC_SCALAR_DEVICE.capabilities
+    }
 )

@@ -19,7 +19,13 @@ class ReductionCostModel(OpCostModel):
         if self.work_kind not in (WorkKind.REDUCE_SUM, WorkKind.REDUCE_MAX):
             raise ValueError("ReductionCostModel work_kind must be REDUCE_SUM or REDUCE_MAX")
 
-    def cost(self, tile_work: ReductionTileWork, tile: Tile) -> int:
+    def cost(
+        self,
+        tile_work: ReductionTileWork,
+        tile: Tile,
+        assigned_device: object | None = None,
+    ) -> int:
+        del assigned_device
         devices = tuple(device for device in tile.devices if device.supports(self.work_kind))
         if not devices:
             raise ValueError(f"tile {tile.tile_id} has no device for {self.work_kind.name} work")
