@@ -107,9 +107,9 @@ class _TransformPayload(OpPayload):
 
     @property
     def cost_model(self) -> OpCostModel:
-        from MAPS.ops.costs.elementwise_cost import ElementwiseCostModel
+        from MAPS.ops.costs.conv_transform_cost import ConvTransformCostModel
 
-        return ElementwiseCostModel(work_kind=self.work_kind)
+        return ConvTransformCostModel()
 
 
 @dataclass(frozen=True)

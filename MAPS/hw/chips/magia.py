@@ -182,6 +182,7 @@ def magia_mesh(
             for x in range(width)
         ),
         precision_lowering_recipes=MAGIA_PRECISION_LOWERING_RECIPES,
+        required_graph_rewrites=("conv_to_gemm",),
     )
 
 

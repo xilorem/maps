@@ -24,6 +24,12 @@ def print_stage_metric_breakdown(
             f"compute={breakdown.compute_cycles} "
             f"communication={breakdown.communication_cycles}"
         )
+        for label in dict.fromkeys(
+            getattr(node.payload.cost_model, "diagnostic_label", None)
+            for node in stage_nodes
+        ):
+            if label is not None:
+                print(f"    cost_diagnostic={label}")
 
 
 def _stage_label(stage_nodes: tuple[Node, ...]) -> str:

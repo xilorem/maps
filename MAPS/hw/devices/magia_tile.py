@@ -64,6 +64,8 @@ MAGIA_CORE_DEVICE = ScalarDevice(
         WorkKind.SQRT: 1,
         WorkKind.SUB: 1,
         WorkKind.TRANSPOSE: 1,
+        WorkKind.IM2COL: 1,
+        WorkKind.OUTPUT_REFORMAT: 1,
     },
     capabilities=frozenset(
         {
@@ -76,6 +78,16 @@ MAGIA_CORE_DEVICE = ScalarDevice(
                 work_kind=WorkKind.GEMM,
                 input_dtypes=(TensorDType.FLOAT32,) * 3,
                 output_dtypes=(TensorDType.FLOAT32,),
+            ),
+            WorkSignature(
+                work_kind=WorkKind.IM2COL,
+                input_dtypes=(TensorDType.FLOAT16,),
+                output_dtypes=(TensorDType.FLOAT16,),
+            ),
+            WorkSignature(
+                work_kind=WorkKind.OUTPUT_REFORMAT,
+                input_dtypes=(TensorDType.FLOAT16,),
+                output_dtypes=(TensorDType.FLOAT16,),
             ),
         }
     ),

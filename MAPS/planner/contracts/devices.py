@@ -10,6 +10,8 @@ def node_requires_fixed_device_assignment(node: Node) -> bool:
     return getattr(node.payload, "work_kind", None) in {
         WorkKind.GEMM,
         WorkKind.CAST,
+        WorkKind.IM2COL,
+        WorkKind.OUTPUT_REFORMAT,
     }
 
 

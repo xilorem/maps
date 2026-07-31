@@ -70,9 +70,6 @@ class WorkKind(Enum):
             WorkKind.SQRT,
             WorkKind.SUB,
             WorkKind.TRANSPOSE,
-            WorkKind.IM2COL,
-            WorkKind.WEIGHT_PACK,
-            WorkKind.OUTPUT_REFORMAT,
         }:
             return WorkKind.ELEMENTWISE
         return self

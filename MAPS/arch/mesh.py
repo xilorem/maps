@@ -20,6 +20,7 @@ class Mesh:
     noc: NoC
     tiles: tuple[Tile, ...]
     precision_lowering_recipes: tuple[PrecisionLoweringRecipe, ...] = ()
+    required_graph_rewrites: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         # check for invalid sizes
