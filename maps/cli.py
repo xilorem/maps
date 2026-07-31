@@ -55,25 +55,25 @@ def _add_target(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--target", choices=tuple(_TARGETS), default="magia")
 
 
-def _plan_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="maps plan")
+def _add_planning_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("model", type=Path)
     _add_target(parser)
     parser.add_argument("--mesh", type=_mesh)
     parser.add_argument("--token-slots", type=int, default=2)
-    parser.add_argument("--max-stage-nodes", type=int, default=0)
     parser.add_argument("--output", type=Path, required=True)
+
+
+def _plan_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="maps plan")
+    _add_planning_arguments(parser)
+    parser.add_argument("--max-stage-nodes", type=int, default=0)
     return parser
 
 
 def _package_build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="maps package")
-    parser.add_argument("model", type=Path)
-    _add_target(parser)
-    parser.add_argument("--mesh", type=_mesh)
-    parser.add_argument("--token-slots", type=int, default=2)
+    _add_planning_arguments(parser)
     parser.add_argument("--pipeline-token-capacity", type=int, default=1)
-    parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--maps-translate", type=Path)
     return parser
 

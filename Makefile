@@ -4,7 +4,8 @@ MAPS_IR_DIR ?= maps-ir
 GENERATED_DIR ?= generated
 MODEL ?= examples/simple_three_stage.onnx
 TARGET ?= magia
-MESH ?= $(if $(filter n300d,$(TARGET)),8x8,4x4)
+MESH ?=
+MESH_OPTION = $(if $(strip $(MESH)),--mesh $(MESH))
 TOKEN_SLOTS ?= 2
 MAX_STAGE_NODES ?= 0
 PIPELINE_TOKEN_CAPACITY ?= 1
@@ -22,7 +23,7 @@ test:
 plan:
 	$(PYTHON) -m maps.cli plan $(MODEL) \
 		--target $(TARGET) \
-		--mesh $(MESH) \
+		$(MESH_OPTION) \
 		--token-slots $(TOKEN_SLOTS) \
 		--max-stage-nodes $(MAX_STAGE_NODES) \
 		--output $(EXECUTION_PLAN)
@@ -30,7 +31,7 @@ plan:
 package:
 	$(PYTHON) -m maps.cli package $(MODEL) \
 		--target $(TARGET) \
-		--mesh $(MESH) \
+		$(MESH_OPTION) \
 		--token-slots $(TOKEN_SLOTS) \
 		--pipeline-token-capacity $(PIPELINE_TOKEN_CAPACITY) \
 		--maps-translate $(MAPS_TRANSLATE) \

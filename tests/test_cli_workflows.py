@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -116,6 +118,39 @@ def test_n300d_package_request_fails_before_deployment_work(
     assert "n300d deployment backend is unsupported" in capsys.readouterr().err
 
 
+@pytest.mark.parametrize(
+    ("target_name", "mesh_shape"),
+    (("magia", (4, 4)), ("n300d", (8, 8))),
+)
+def test_plan_command_plans_a_representative_model_for_each_target(
+    target_name: str,
+    mesh_shape: tuple[int, int],
+    tmp_path: Path,
+) -> None:
+    repository = Path(__file__).parents[1]
+    output = tmp_path / f"{target_name}.json"
+
+    assert main(
+        [
+            "plan",
+            str(repository / "examples" / "simple_three_stage.onnx"),
+            "--target",
+            target_name,
+            "--mesh",
+            f"{mesh_shape[0]}x{mesh_shape[1]}",
+            "--max-stage-nodes",
+            "1",
+            "--output",
+            str(output),
+        ]
+    ) == 0
+
+    payload = json.loads(output.read_text(encoding="utf-8"))
+    assert payload["name"] == "simple_three_stage"
+    assert (payload["mesh"]["width"], payload["mesh"]["height"]) == mesh_shape
+    assert payload["stages"]
+
+
 def test_make_exposes_target_neutral_cli_workflows() -> None:
     makefile = (Path(__file__).parents[1] / "Makefile").read_text(encoding="utf-8")
 
@@ -125,3 +160,53 @@ def test_make_exposes_target_neutral_cli_workflows() -> None:
     assert "--target $(TARGET)" in makefile
     assert "examples/magia_example.py" not in makefile
     assert "-m MAPS.cli" not in makefile
+
+
+@pytest.mark.parametrize(
+    ("target_name", "mesh"),
+    (("magia", "4x4"), ("n300d", "8x8")),
+)
+def test_make_plan_executes_the_cli_for_each_target(
+    target_name: str,
+    mesh: str,
+    tmp_path: Path,
+) -> None:
+    repository = Path(__file__).parents[1]
+    output = tmp_path / f"{target_name}.json"
+
+    result = subprocess.run(
+        [
+            "make",
+            "plan",
+            f"TARGET={target_name}",
+            f"MESH={mesh}",
+            f"EXECUTION_PLAN={output}",
+            "MAX_STAGE_NODES=1",
+        ],
+        cwd=repository,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert output.is_file()
+
+
+def test_make_package_reports_the_n300d_deployment_limitation(
+    tmp_path: Path,
+) -> None:
+    repository = Path(__file__).parents[1]
+    output = tmp_path / "n300d.maps"
+
+    result = subprocess.run(
+        ["make", "package", "TARGET=n300d", f"PACKAGE={output}"],
+        cwd=repository,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert "n300d deployment backend is unsupported" in result.stderr
+    assert not output.exists()
