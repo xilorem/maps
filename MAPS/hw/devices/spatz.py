@@ -5,7 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from math import ceil
 
-from MAPS.arch import DeviceKind, VectorDevice, WorkKind
+from MAPS.arch import DeviceKind, VectorDevice, WorkKind, WorkSignature
+from MAPS.core.dtype import TensorDType
 
 SPATZ_LANES = 4
 SPATZ_LANE_WIDTH_BYTES = 4
@@ -36,6 +37,35 @@ _KERNEL_PROFILES = {
     WorkKind.REDUCE_SUM: _KernelProfile(compute_passes=1, reduction=True),
     WorkKind.REDUCE_MAX: _KernelProfile(compute_passes=1, reduction=True),
 }
+
+_BINARY_WORK_KINDS = frozenset({WorkKind.ADD, WorkKind.SUB, WorkKind.DIV})
+
+
+def _spatz_capabilities() -> frozenset[WorkSignature]:
+    capabilities = {
+        WorkSignature(
+            work_kind=work_kind,
+            input_dtypes=(dtype, dtype) if work_kind in _BINARY_WORK_KINDS else (dtype,),
+            output_dtypes=(dtype,),
+        )
+        for work_kind in _KERNEL_PROFILES
+        for dtype in (TensorDType.FLOAT16, TensorDType.FLOAT32)
+    }
+    capabilities.update(
+        {
+            WorkSignature(
+                work_kind=WorkKind.CAST,
+                input_dtypes=(TensorDType.FLOAT16,),
+                output_dtypes=(TensorDType.FLOAT32,),
+            ),
+            WorkSignature(
+                work_kind=WorkKind.CAST,
+                input_dtypes=(TensorDType.FLOAT32,),
+                output_dtypes=(TensorDType.FLOAT16,),
+            ),
+        }
+    )
+    return frozenset(capabilities)
 
 
 @dataclass(frozen=True)
@@ -120,4 +150,5 @@ SPATZ_DEVICE = SpatzDevice(
     name="spatz",
     kind=DeviceKind.VECTOR,
     throughput={work_kind: 1 for work_kind in _KERNEL_PROFILES},
+    capabilities=_spatz_capabilities(),
 )

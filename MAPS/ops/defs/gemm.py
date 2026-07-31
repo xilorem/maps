@@ -96,6 +96,10 @@ class GemmPayload(OpPayload):
     output: Tensor
     transpose_w: bool = False
 
+    @property
+    def work_kind(self) -> WorkKind:
+        return WorkKind.GEMM
+
     def __post_init__(self) -> None:
         for tensor_name, tensor in (
             ("X", self.x),

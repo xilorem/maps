@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from .memory import L2Memory
 from .noc import NoC
 from .tile import Tile
+from .execution import PrecisionLoweringRecipe
 
 
 @dataclass(frozen=True)
@@ -18,6 +19,7 @@ class Mesh:
     l2_memory: L2Memory
     noc: NoC
     tiles: tuple[Tile, ...]
+    precision_lowering_recipes: tuple[PrecisionLoweringRecipe, ...] = ()
 
     def __post_init__(self) -> None:
         # check for invalid sizes
@@ -29,6 +31,15 @@ class Mesh:
         # check for valid tiles and noc descriptions
         self._validate_tiles(self.width, self.height, self.tiles)
         self._validate_noc(self.width, self.height, self.noc)
+        self._validate_precision_lowering_recipes(self.precision_lowering_recipes)
+
+    @staticmethod
+    def _validate_precision_lowering_recipes(
+        recipes: tuple[PrecisionLoweringRecipe, ...],
+    ) -> None:
+        sources = [recipe.source_signature for recipe in recipes]
+        if len(set(sources)) != len(sources):
+            raise ValueError("duplicate precision lowering recipe source signature")
 
 
     @staticmethod

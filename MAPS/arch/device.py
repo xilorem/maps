@@ -5,6 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum, auto
 from math import ceil
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from MAPS.core.dtype import TensorDType
+    from MAPS.core.graph import Node
 
 
 class DeviceKind(Enum):
@@ -41,6 +46,7 @@ class WorkKind(Enum):
     IM2COL = auto()
     WEIGHT_PACK = auto()
     OUTPUT_REFORMAT = auto()
+    CAST = auto()
     DMA = auto()
 
     @property
@@ -78,6 +84,46 @@ class DMAJob(Enum):
 
 
 @dataclass(frozen=True)
+class WorkSignature:
+    """Complete graph-visible type contract for one operation."""
+
+    work_kind: WorkKind
+    input_dtypes: tuple[TensorDType, ...]
+    output_dtypes: tuple[TensorDType, ...]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "input_dtypes", tuple(self.input_dtypes))
+        object.__setattr__(self, "output_dtypes", tuple(self.output_dtypes))
+
+    @classmethod
+    def from_node(cls, node: "Node") -> "WorkSignature":
+        """Derive the ordered typed-work identity of a primitive Node."""
+
+        work_kind = getattr(node.payload, "work_kind", None)
+        if not isinstance(work_kind, WorkKind):
+            raise ValueError(f"node {node.name} does not declare a WorkKind")
+
+        untyped_tensors = tuple(
+            tensor.name
+            for tensor in node.inputs + node.outputs
+            if tensor.dtype is None
+        )
+        if untyped_tensors:
+            names = ", ".join(untyped_tensors)
+            raise ValueError(f"node {node.name} has untyped tensors: {names}")
+
+        return cls(
+            work_kind=work_kind,
+            input_dtypes=tuple(
+                cast("TensorDType", tensor.dtype) for tensor in node.inputs
+            ),
+            output_dtypes=tuple(
+                cast("TensorDType", tensor.dtype) for tensor in node.outputs
+            ),
+        )
+
+
+@dataclass(frozen=True)
 class Device:
     """Base class for tile-local device models."""
 
@@ -85,6 +131,7 @@ class Device:
     kind: DeviceKind
     throughput: dict[WorkKind, int]
     startup_cycles: int = 0
+    capabilities: frozenset[WorkSignature] = frozenset()
 
     def __post_init__(self) -> None:
         if type(self) is Device:
@@ -100,8 +147,11 @@ class Device:
         if any(value <= 0 for value in self.throughput.values()):
             raise ValueError("device throughput values must be > 0")
         object.__setattr__(self, "throughput", dict(self.throughput))
+        object.__setattr__(self, "capabilities", frozenset(self.capabilities))
 
-    def supports(self, work_kind: WorkKind) -> bool:
+    def supports(self, work_kind: WorkKind | WorkSignature) -> bool:
+        if isinstance(work_kind, WorkSignature):
+            return work_kind in self.capabilities
         return work_kind in self.throughput or work_kind.fallback_kind in self.throughput
 
     def cycles(self, work: object) -> int:

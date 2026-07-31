@@ -10,8 +10,10 @@ from .device import (
     SystolicDevice,
     VectorDevice,
     WorkKind,
+    WorkSignature,
 )
 from .memory import L1Memory, L2Memory
+from .execution import FixedDeviceAssignment, PrecisionLoweringRecipe
 from .mesh import Mesh
 from .noc import (
     EndpointKind,
@@ -33,6 +35,7 @@ __all__ = [
     "Device",
     "DeviceKind",
     "EndpointKind",
+    "FixedDeviceAssignment",
     "L1Memory",
     "L2Memory",
     "MatrixDevice",
@@ -43,6 +46,7 @@ __all__ = [
     "NoCLink",
     "NoCNode",
     "NoCRoute",
+    "PrecisionLoweringRecipe",
     "RoutingPolicy",
     "ScalarDevice",
     "SystolicDevice",
@@ -51,4 +55,5 @@ __all__ = [
     "TrafficPolicy",
     "VectorDevice",
     "WorkKind",
+    "WorkSignature",
 ]
