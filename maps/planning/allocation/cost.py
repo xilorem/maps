@@ -1,9 +1,9 @@
-"""Generic planner-side node cost estimation entry points."""
+"""Allocation cost-estimation entry points for Operation payloads."""
 
 from __future__ import annotations
 
-from MAPS.arch import WorkSignature
-from MAPS.core.graph import Node
+from maps.hardware import WorkSignature
+from maps.graph import Node
 from MAPS.core.layout import TensorLayout
 
 

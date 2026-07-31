@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from MAPS.core.graph import Graph, Node
-from MAPS.planner.contracts.stages import StagePlan
+from maps.planning.stages import StagePlan
 
 
 @dataclass(frozen=True)
@@ -19,7 +19,7 @@ class ExecutionPlanLoweringContext:
     """
 
     graph: Graph
-    stage_selection: dict[int, tuple[Node, ...]]
+    stage_formation: dict[int, tuple[Node, ...]]
     node_stage_ids: dict[int, int]
     node_stage_layer_ids: dict[int, int]
     node_graph_layer_ids: dict[int, int]
@@ -33,18 +33,18 @@ def build_lowering_context(
 ) -> ExecutionPlanLoweringContext:
     """Index graph ownership and ordering for a consistent lowering operation."""
 
-    stage_selection = _resolve_stage_selection(graph, stage_plans)
+    stage_formation = _resolve_stage_formation(graph, stage_plans)
     return ExecutionPlanLoweringContext(
         graph=graph,
-        stage_selection=stage_selection,
+        stage_formation=stage_formation,
         node_stage_ids={
             id(node): stage_id
-            for stage_id, stage_nodes in stage_selection.items()
+            for stage_id, stage_nodes in stage_formation.items()
             for node in stage_nodes
         },
         node_stage_layer_ids={
             id(node): layer_idx
-            for stage_nodes in stage_selection.values()
+            for stage_nodes in stage_formation.values()
             for layer_idx, node in enumerate(stage_nodes)
         },
         node_graph_layer_ids={
@@ -63,7 +63,7 @@ def build_lowering_context(
     )
 
 
-def _resolve_stage_selection(
+def _resolve_stage_formation(
     graph: Graph,
     stage_plans: dict[int, StagePlan],
 ) -> dict[int, tuple[Node, ...]]:
@@ -71,13 +71,13 @@ def _resolve_stage_selection(
 
     if any(not plan.nodes for plan in stage_plans.values()):
         raise ValueError("every stage plan must contain its selected nodes")
-    stage_selection = {
+    stage_formation = {
         stage_id: plan.nodes
         for stage_id, plan in stage_plans.items()
     }
     selected_node_ids = [
         id(node)
-        for nodes in stage_selection.values()
+        for nodes in stage_formation.values()
         for node in nodes
     ]
     graph_node_ids = {id(node) for node in graph.nodes}
@@ -85,4 +85,4 @@ def _resolve_stage_selection(
         raise ValueError("stage plans contain a graph node more than once")
     if set(selected_node_ids) != graph_node_ids:
         raise ValueError("stage plans must cover every graph node exactly once")
-    return stage_selection
+    return stage_formation

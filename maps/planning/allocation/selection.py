@@ -1,13 +1,13 @@
-"""L1-feasible seeding and greedy tile-allocation growth."""
+"""L1-feasible seeding and greedy virtual tile-allocation growth."""
 
 from __future__ import annotations
 
-from MAPS.arch import Mesh
-from MAPS.core.graph import Graph, Node
-from MAPS.planner.contracts.stages import StageSelection
-from MAPS.planner.workload.candidates import StageCandidate, StageCandidateAnalyzer
-from MAPS.planner.workload.context import WorkloadContext
-from MAPS.planner.workload.metrics import (
+from maps.hardware import Mesh
+from maps.graph import Graph, Node
+from maps.planning.stages import StageFormation
+from maps.planning.allocation.candidates import StageCandidate, StageCandidateAnalyzer
+from maps.planning.allocation.context import AllocationContext
+from maps.planning.allocation.metrics import (
     SelectionEvaluation,
     evaluate_candidate_selection,
     selection_objective,
@@ -15,7 +15,7 @@ from MAPS.planner.workload.metrics import (
 
 
 def seed_stage_candidates(
-    context: WorkloadContext,
+    context: AllocationContext,
     mesh: Mesh,
     analyzer: StageCandidateAnalyzer,
     debug: bool,
@@ -27,22 +27,22 @@ def seed_stage_candidates(
     on the physical mesh.
     """
 
-    stage_ids = tuple(context.stage_selection)
+    stage_ids = tuple(context.stage_formation)
     if len(stage_ids) > mesh.num_tiles:
         raise ValueError(
-            f"deterministic stage selection produced {len(stage_ids)} stages for "
+            f"deterministic Stage formation produced {len(stage_ids)} stages for "
             f"a {mesh.num_tiles}-tile target; every stage requires at least one "
-            "tile. Lower stage_selection.max_stage_nodes to a value other than 1 "
+            "tile. Lower stage_formation.max_stage_nodes to a value other than 1 "
             "only if it enables more compatible coalescing, or select another "
-            "target. Workload balancing does not split or rewrite selected groups."
+            "target. Allocation does not split or rewrite formed Stages."
         )
 
-    _debug(debug, "[workload_balancing] phase=initial_l1_seeding")
+    _debug(debug, "[allocation] phase=initial_l1_seeding")
     candidates = {
         stage_id: initial_candidate_for_stage(
             mesh=mesh,
             stage_id=stage_id,
-            stage_selection=context.stage_selection,
+            stage_formation=context.stage_formation,
             analyzer=analyzer,
             debug=debug,
         )
@@ -55,7 +55,7 @@ def seed_stage_candidates(
 
 
 def grow_stage_candidates(
-    context: WorkloadContext,
+    context: AllocationContext,
     mesh: Mesh,
     selected_candidates: dict[int, StageCandidate],
     analyzer: StageCandidateAnalyzer,
@@ -76,15 +76,15 @@ def grow_stage_candidates(
 
     selected_candidates = dict(selected_candidates)
     used_tiles = _used_tile_count(selected_candidates)
-    active_stage_ids = set(context.stage_selection)
+    active_stage_ids = set(context.stage_formation)
 
-    _debug(debug, f"[workload_balancing] start used_tiles={used_tiles}/{mesh.num_tiles}")
+    _debug(debug, f"[allocation] start used_tiles={used_tiles}/{mesh.num_tiles}")
     _debug(
         debug,
-        "[workload_balancing] "
+        "[allocation] "
         f"initial_tile_counts={_candidate_tile_counts(selected_candidates)}",
     )
-    _debug(debug, "[workload_balancing] phase=greedy_growth")
+    _debug(debug, "[allocation] phase=greedy_growth")
 
     current_evaluation = evaluate_candidate_selection(
         selected_candidates,
@@ -103,9 +103,9 @@ def grow_stage_candidates(
             )
         )
 
-        _debug(debug, f"[workload_balancing] used_tiles={used_tiles}/{mesh.num_tiles}")
-        _debug(debug, f"[workload_balancing] current_selection_metrics={_format_metrics(current_metrics)}")
-        _debug(debug, f"[workload_balancing] stage_order_by_workload={stage_order}")
+        _debug(debug, f"[allocation] used_tiles={used_tiles}/{mesh.num_tiles}")
+        _debug(debug, f"[allocation] current_selection_metrics={_format_metrics(current_metrics)}")
+        _debug(debug, f"[allocation] stage_order_by_bottleneck={stage_order}")
 
         chosen_stage_id: int | None = None
         chosen_tile_count: int | None = None
@@ -113,8 +113,8 @@ def grow_stage_candidates(
         for stage_id in stage_order:
             _debug(
                 debug,
-                "[workload_balancing] "
-                f"try_stage={stage_id} nodes={_stage_label(context.stage_selection[stage_id])} "
+                "[allocation] "
+                f"try_stage={stage_id} nodes={_stage_label(context.stage_formation[stage_id])} "
                 f"current_tile_count={selected_candidates[stage_id].plan.tile_count} "
                 f"current_logical_shape={selected_candidates[stage_id].plan.logical_shape} "
                 f"current_metric={current_metrics[stage_id]}",
@@ -146,21 +146,21 @@ def grow_stage_candidates(
                     active_stage_ids.remove(stage_id)
                     _debug(
                         debug,
-                        "[workload_balancing] "
+                        "[allocation] "
                         f"stage={stage_id} doubled_current_tile_count="
                         f"{doubled_current_count} no_improvement prune_stage",
                     )
                     continue
                 _debug(
                     debug,
-                    "[workload_balancing] "
+                    "[allocation] "
                     f"stage={stage_id} doubled_current_tile_count="
                     f"{doubled_current_count} improvement_available",
                 )
             else:
                 _debug(
                     debug,
-                    "[workload_balancing] "
+                    "[allocation] "
                     f"stage={stage_id} doubled_current_tile_count="
                     f"{doubled_current_count} outside_remaining_budget",
                 )
@@ -175,10 +175,10 @@ def grow_stage_candidates(
                 current_evaluation = candidate_evaluation
                 break
 
-            _debug(debug, f"[workload_balancing] stage={stage_id} no_valid_growth")
+            _debug(debug, f"[allocation] stage={stage_id} no_valid_growth")
 
         if chosen_stage_id is None or chosen_tile_count is None:
-            _debug(debug, "[workload_balancing] no_global_improvement_available")
+            _debug(debug, "[allocation] no_global_improvement_available")
             break
 
         previous_count = used_tiles
@@ -186,14 +186,14 @@ def grow_stage_candidates(
 
         _debug(
             debug,
-            "[workload_balancing] "
+            "[allocation] "
             f"choose worst_stage={chosen_stage_id} new_tile_count={chosen_tile_count}",
         )
 
         assert used_tiles > previous_count
         _debug(
             debug,
-            "[workload_balancing] "
+            "[allocation] "
             f"updated_tile_counts={_candidate_tile_counts(selected_candidates)}",
         )
 
@@ -203,25 +203,25 @@ def grow_stage_candidates(
 def initial_candidate_for_stage(
     mesh: Mesh,
     stage_id: int,
-    stage_selection: StageSelection,
+    stage_formation: StageFormation,
     analyzer: StageCandidateAnalyzer,
     debug: bool = False,
 ) -> StageCandidate:
     """Return the smallest L1-feasible candidate for one stage."""
 
-    stage_nodes = stage_selection[stage_id]
+    stage_nodes = stage_formation[stage_id]
     for tile_count in range(1, mesh.num_tiles + 1):
         candidate = analyzer.candidate(stage_id, tile_count)
         if candidate is None:
             _debug(
                 debug,
-                "[workload_balancing] "
+                "[allocation] "
                 f"seed stage={stage_id} tile_count={tile_count} skip=L1-infeasible",
             )
             continue
         _debug(
             debug,
-            "[workload_balancing] "
+            "[allocation] "
             f"seed stage={stage_id} choose tile_count={tile_count} "
             f"logical_shape={candidate.plan.logical_shape}",
         )
@@ -233,7 +233,7 @@ def initial_candidate_for_stage(
         f"has no L1-feasible layout on mesh {mesh.shape}; "
         f"attempted_tile_counts=1..{mesh.num_tiles} "
         "layout_families=all_rectangular_factorizations. The caller can lower "
-        "stage_selection.max_stage_nodes or select another target."
+        "stage_formation.max_stage_nodes or select another target."
     )
 
 
@@ -269,7 +269,7 @@ def _growth_candidate_for_stage(
         )
     _debug(
         debug,
-        "[workload_balancing] "
+        "[allocation] "
         f"stage={stage_id} candidate_tile_counts={candidate_counts}",
     )
 
@@ -278,7 +278,7 @@ def _growth_candidate_for_stage(
         if candidate is None:
             _debug(
                 debug,
-                "[workload_balancing] "
+                "[allocation] "
                 f"stage={stage_id} candidate_tile_count={candidate_count} "
                 "skip=L1-infeasible",
             )
@@ -304,7 +304,7 @@ def _growth_candidate_for_stage(
         if not improved:
             _debug(
                 debug,
-                "[workload_balancing] "
+                "[allocation] "
                 f"stage={stage_id} candidate_tile_count={candidate_count} "
                 f"skip=no_metric_improvement candidate_metric={candidate_metric} "
                 f"current_metric={current_metric}",
@@ -312,7 +312,7 @@ def _growth_candidate_for_stage(
             continue
         _debug(
             debug,
-            "[workload_balancing] "
+            "[allocation] "
             f"stage={stage_id} candidate_tile_count={candidate_count} "
             f"accepted_improvement={current_metric - candidate_metric}",
         )

@@ -8,12 +8,12 @@ from MAPS.core.tensor import Tensor
 from MAPS.hw.chips import magia_mesh
 from maps.operations.gemm import GemmPayload
 from MAPS.pipeline import InitializerInput, LocalInput, TransitionSource
-from MAPS.planner.contracts.stages import StagePlacement, StagePlan
+from maps.planning.stages import StagePlacement, StagePlan
 from MAPS.planner.passes.execution_plan_lowering import lower_execution_plan
 from MAPS.planner.passes.execution_plan_validation import validate_execution_plan
 from MAPS.planner.validation.contracts import PlannerConstraints
 from MAPS.planner.validation.memory import estimate_stage_l1_memory_for_tile
-from MAPS.planner.workload.memory import permanent_l1_allocation_for_tile
+from maps.planning.allocation.memory import permanent_l1_allocation_for_tile
 from MAPS.transitions import (
     InputTransition,
     IntermediateTransition,

@@ -1,13 +1,14 @@
-"""Deterministic graph-level stage coalescing."""
+"""Deterministic formation of Graph Nodes into Stages."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-from MAPS.core.graph import Graph, Node
-from MAPS.planner.contracts.options import StageSelectionOptions
-from MAPS.planner.contracts.stages import StageSelection
-from MAPS.planner.validation.stages import (
+from maps.graph import Graph, Node
+
+from .options import StageFormationOptions
+from maps.planning.stages import StageFormation
+from maps.planning.stage_validation import (
     StageCommunicationEdges,
     explicit_stage_group_key,
     internal_edges_are_compatible,
@@ -27,11 +28,11 @@ class _Unit:
 
 def form_stages(
     graph: Graph,
-    options: StageSelectionOptions | None = None,
-) -> StageSelection:
+    options: StageFormationOptions | None = None,
+) -> StageFormation:
     """Collapse explicit units, then greedily coalesce compatible linear chains."""
 
-    options = options or StageSelectionOptions()
+    options = options or StageFormationOptions()
     communication_edges = StageCommunicationEdges.from_graph(graph)
     units = _explicit_units(graph)
     if options.max_stage_nodes > 1:
@@ -116,7 +117,7 @@ def form_stages(
 
 
 def _validate_explicit_stage_edges(
-    stages: StageSelection,
+    stages: StageFormation,
     units: tuple[_Unit, ...],
     communication_edges: StageCommunicationEdges,
 ) -> None:

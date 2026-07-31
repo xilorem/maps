@@ -6,7 +6,7 @@ from collections import deque
 from collections.abc import Iterable, Iterator
 
 from MAPS.arch import EndpointKind, Mesh, Tile
-from MAPS.planner.contracts.stages import StagePlacement
+from maps.planning.stages import StagePlacement
 
 
 def future_feasible_after_choice(

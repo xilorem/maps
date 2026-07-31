@@ -1,19 +1,19 @@
-"""Generate feasible virtual layout candidates for a stage."""
+"""Generate feasible virtual layout candidates for a Stage."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import cast
 
-from MAPS.arch import Mesh
-from MAPS.core.graph import Node
-from MAPS.core.tensor import Tensor
+from maps.hardware import Mesh
+from maps.graph import Node
+from maps.graph import Tensor
 from maps.operations import OpPayload
-from MAPS.planner.contracts.stages import StagePlan, StageSelection
+from maps.planning.stages import StagePlan, StageFormation
 from MAPS.planner.device_assignment import assigned_device_name
-from MAPS.planner.workload.layouts import resolve_stage_layouts, verify_stage_locality
-from MAPS.planner.workload.memory import permanent_l1_allocation_for_tile_work
-from MAPS.planner.workload.submesh import representative_connected_submesh
+from maps.planning.allocation.layouts import resolve_stage_layouts, verify_stage_locality
+from maps.planning.allocation.memory import permanent_l1_allocation_for_tile_work
+from maps.planning.allocation.submesh import representative_connected_submesh
 
 
 @dataclass(frozen=True)
@@ -40,18 +40,18 @@ class StageCandidate:
 
 
 class StageCandidateAnalyzer:
-    """Lazily analyze and cache candidates within one workload invocation."""
+    """Lazily analyze and cache candidates within one Allocation invocation."""
 
     def __init__(
         self,
-        stage_selection: StageSelection,
+        stage_formation: StageFormation,
         mesh: Mesh,
         initializer_tensors: frozenset[Tensor],
         num_token_slots: int = 2,
     ) -> None:
-        self._stage_selection = {
+        self._stage_formation = {
             stage_id: tuple(stage_nodes)
-            for stage_id, stage_nodes in stage_selection.items()
+            for stage_id, stage_nodes in stage_formation.items()
         }
         self._mesh = mesh
         self._initializer_tensors = initializer_tensors
@@ -69,7 +69,7 @@ class StageCandidateAnalyzer:
         if key not in self._cache:
             self._cache[key] = self._analyze(
                 stage_id,
-                self._stage_selection[stage_id],
+                self._stage_formation[stage_id],
                 tile_count,
             )
         return self._cache[key]

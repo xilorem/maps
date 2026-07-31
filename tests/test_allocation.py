@@ -1,3 +1,5 @@
+"""Focused behavior tests for virtual resource Allocation."""
+
 from typing import ClassVar
 
 import pytest
@@ -12,18 +14,18 @@ from maps.operations import OpCostModel
 from maps.operations import TileWork
 from maps.operations.gemm import GemmPayload
 from maps.operations.elementwise import ElementwiseTileWork, UnaryElementwisePayload
-from MAPS.planner.passes.stage_selection import form_stages
-from MAPS.planner.passes.workload_balancing import balance_workload
-from MAPS.planner.workload import allocation as allocation_module
-from MAPS.planner.workload.candidates import (
+from maps.planning.allocation import allocate
+from maps.planning.allocation import selection as allocation_module
+from maps.planning.allocation.candidates import (
     StageCandidate,
     StageCandidateAnalyzer,
 )
-from MAPS.planner.workload.metrics import (
+from maps.planning.allocation.metrics import (
     SelectionEvaluation,
     StageMetricBreakdown,
 )
-from MAPS.planner.workload.memory import permanent_l1_allocation_for_tile
+from maps.planning.allocation.memory import permanent_l1_allocation_for_tile
+from maps.planning.stage_formation import form_stages
 from tests.noc_utils import rectangular_test_noc, rectangular_test_tiles
 
 
@@ -65,7 +67,7 @@ def _mesh_with_l1(width: int, height: int, l1_size: int) -> Mesh:
     )
 
 
-def test_balance_workload_uses_full_tile_budget() -> None:
+def test_allocate_uses_full_tile_budget() -> None:
     node0 = _gemm_node("gemm0", m=16, k=16, n=16)
     node1 = _gemm_node("gemm1", m=16, k=16, n=16)
     graph = Graph(name="g", nodes=(node0, node1))
@@ -73,14 +75,14 @@ def test_balance_workload_uses_full_tile_budget() -> None:
 
     allocation = {
         stage_id: plan.tile_count
-        for stage_id, plan in balance_workload(graph, mesh, form_stages(graph)).items()
+        for stage_id, plan in allocate(graph, mesh, form_stages(graph)).items()
     }
 
     assert allocation == {0: 8, 1: 8}
     assert sum(allocation.values()) == mesh.num_tiles
 
 
-def test_balance_workload_gives_more_tiles_to_heavier_gemm() -> None:
+def test_allocate_gives_more_tiles_to_heavier_gemm() -> None:
     heavy = _gemm_node("heavy", m=64, k=64, n=64)
     light = _gemm_node("light", m=8, k=8, n=8)
     graph = Graph(name="g", nodes=(heavy, light))
@@ -88,14 +90,14 @@ def test_balance_workload_gives_more_tiles_to_heavier_gemm() -> None:
 
     allocation = {
         stage_id: plan.tile_count
-        for stage_id, plan in balance_workload(graph, mesh, form_stages(graph)).items()
+        for stage_id, plan in allocate(graph, mesh, form_stages(graph)).items()
     }
 
     assert allocation[0] > allocation[1]
     assert sum(allocation.values()) == mesh.num_tiles
 
 
-def test_workload_diagnostics_charge_inter_stage_writes_to_producer_tiles(
+def test_allocation_diagnostics_charge_inter_stage_writes_to_producer_tiles(
     capsys,
 ) -> None:
     producer = _gemm_node("producer", m=8, k=8, n=8)
@@ -125,15 +127,15 @@ def test_workload_diagnostics_charge_inter_stage_writes_to_producer_tiles(
         nodes=(producer, consumer),
     )
     mesh = _mesh_with_l1(2, 1, l1_size=4096)
-    stage_selection = {0: (producer,), 1: (consumer,)}
-    balance_workload(graph, mesh, stage_selection, debug=True)
+    stage_formation = {0: (producer,), 1: (consumer,)}
+    allocate(graph, mesh, stage_formation, debug=True)
 
     output = capsys.readouterr().out
     assert "stage=0 nodes=producer compute=512 communication=128" in output
     assert "stage=1 nodes=consumer compute=512 communication=0" in output
 
 
-def test_workload_diagnostics_include_graph_input_and_output_transitions(
+def test_allocation_diagnostics_include_graph_input_and_output_transitions(
     capsys,
 ) -> None:
     node = _gemm_node("gemm", m=8, k=8, n=8)
@@ -146,18 +148,18 @@ def test_workload_diagnostics_include_graph_input_and_output_transitions(
     )
     mesh = _mesh_with_l1(1, 1, l1_size=4096)
 
-    balance_workload(graph, mesh, {0: (node,)}, debug=True)
+    allocate(graph, mesh, {0: (node,)}, debug=True)
 
     output = capsys.readouterr().out
     assert "stage=0 nodes=gemm compute=512 communication=384" in output
 
 
-def test_balance_workload_preserves_layout_decisions() -> None:
+def test_allocate_preserves_layout_decisions() -> None:
     node = _gemm_node("gemm", m=16, k=16, n=16)
     graph = Graph(name="g", nodes=(node,))
     mesh = _mesh_with_l1(4, 1, l1_size=32768)
 
-    plans = balance_workload(graph, mesh, form_stages(graph))
+    plans = allocate(graph, mesh, form_stages(graph))
 
     assert plans[0].tile_count == 4
     assert plans[0].logical_shape[0] * plans[0].logical_shape[1] == 4
@@ -165,12 +167,12 @@ def test_balance_workload_preserves_layout_decisions() -> None:
     assert plans[0].node_output_layouts[-1][0].logical_height == plans[0].logical_shape[1]
 
 
-def test_balance_workload_starts_from_minimum_l1_feasible_tile_count() -> None:
+def test_allocate_starts_from_minimum_l1_feasible_tile_count() -> None:
     node = _gemm_node("gemm", m=4, k=4, n=4)
     graph = Graph(name="g", nodes=(node,))
     mesh = _mesh_with_l1(2, 1, l1_size=128)
 
-    plans = balance_workload(graph, mesh, form_stages(graph))
+    plans = allocate(graph, mesh, form_stages(graph))
 
     assert plans[0].tile_count == 2
 
@@ -260,7 +262,7 @@ def _plateau_node(
 
 
 @pytest.mark.parametrize("debug", (False, True))
-def test_balance_workload_reuses_candidates_across_growth_probes(
+def test_allocate_reuses_candidates_across_growth_probes(
     debug: bool,
     capsys,
 ) -> None:
@@ -284,14 +286,14 @@ def test_balance_workload_reuses_candidates_across_growth_probes(
     )
     mesh = _mesh_with_l1(2, 1, l1_size=4096)
 
-    plans = balance_workload(graph, mesh, {0: (node,)}, debug=debug)
+    plans = allocate(graph, mesh, {0: (node,)}, debug=debug)
     capsys.readouterr()
 
     assert plans[0].tile_count == 2
     assert _CountingUnaryPayload.build_calls == 5
 
 
-def test_balance_workload_rejects_growth_that_worsens_global_objective(
+def test_allocate_rejects_growth_that_worsens_global_objective(
     monkeypatch,
     capsys,
 ) -> None:
@@ -335,7 +337,7 @@ def test_balance_workload_rejects_growth_that_worsens_global_objective(
         evaluate_selection,
     )
 
-    plans = balance_workload(
+    plans = allocate(
         graph,
         mesh,
         {0: (first,), 1: (second,)},
@@ -357,7 +359,7 @@ def test_planner_selected_token_slots_control_l1_feasibility() -> None:
     mesh = _mesh_with_l1(2, 1, l1_size=80)
     selection = form_stages(graph)
 
-    plans = balance_workload(
+    plans = allocate(
         graph,
         mesh,
         selection,
@@ -366,7 +368,7 @@ def test_planner_selected_token_slots_control_l1_feasibility() -> None:
 
     assert plans[0].tile_count == 2
     with pytest.raises(ValueError, match="has no L1-feasible layout"):
-        balance_workload(
+        allocate(
             graph,
             mesh,
             selection,
@@ -374,16 +376,16 @@ def test_planner_selected_token_slots_control_l1_feasibility() -> None:
         )
 
 
-def test_balance_workload_accepts_explicit_stage_selection() -> None:
+def test_allocate_accepts_explicit_stage_formation() -> None:
     node0 = _gemm_node("gemm0", m=16, k=16, n=16)
     node1 = _gemm_node("gemm1", m=16, k=16, n=16)
     graph = Graph(name="g", nodes=(node0, node1))
     mesh = _mesh_with_l1(2, 2, l1_size=4096)
 
-    plans = balance_workload(
+    plans = allocate(
         graph,
         mesh,
-        stage_selection={0: (node0, node1)},
+        stage_formation={0: (node0, node1)},
     )
 
     assert tuple(plans) == (0,)
@@ -425,27 +427,27 @@ def _elementwise_chain() -> tuple[Graph, Node, Node]:
     )
 
 
-def test_balance_workload_accepts_automatically_formed_compatible_stage() -> None:
+def test_allocate_accepts_automatically_formed_compatible_stage() -> None:
     graph, first, second = _elementwise_chain()
     mesh = _mesh_with_l1(2, 1, l1_size=4096)
 
-    plans = balance_workload(graph, mesh, form_stages(graph))
+    plans = allocate(graph, mesh, form_stages(graph))
 
     assert tuple(plans) == (0,)
     assert plans[0].nodes == (first, second)
 
 
-def test_balance_workload_accepts_caller_supplied_compatible_stage() -> None:
+def test_allocate_accepts_caller_supplied_compatible_stage() -> None:
     graph, first, second = _elementwise_chain()
     mesh = _mesh_with_l1(2, 1, l1_size=4096)
 
-    plans = balance_workload(graph, mesh, {7: (first, second)})
+    plans = allocate(graph, mesh, {7: (first, second)})
 
     assert tuple(plans) == (7,)
     assert plans[7].nodes == (first, second)
 
 
-def test_balance_workload_rejects_caller_supplied_incompatible_internal_edge() -> None:
+def test_allocate_rejects_caller_supplied_incompatible_internal_edge() -> None:
     first = _gemm_node("first", m=4, k=4, n=4)
     second_weight = Tensor("second_weight", 2, (4, 4), 2)
     output = Tensor("output", 2, (4, 4), 2)
@@ -467,10 +469,10 @@ def test_balance_workload_rejects_caller_supplied_incompatible_internal_edge() -
         ValueError,
         match=r"stage 0 has incompatible internal dependency first->second",
     ):
-        balance_workload(graph, mesh, {0: (first, second)})
+        allocate(graph, mesh, {0: (first, second)})
 
 
-def test_balance_workload_rejects_caller_split_explicit_stage_group() -> None:
+def test_allocate_rejects_caller_split_explicit_stage_group() -> None:
     graph, first, second = _elementwise_chain()
     first = Node(
         first.name,
@@ -501,7 +503,7 @@ def test_balance_workload_rejects_caller_split_explicit_stage_group() -> None:
         ValueError,
         match=r"explicit stage group 'together' is split across stages 0 and 1",
     ):
-        balance_workload(graph, mesh, {0: (first,), 1: (second,)})
+        allocate(graph, mesh, {0: (first,), 1: (second,)})
 
 
 class _FailingLayoutUnaryPayload(UnaryElementwisePayload):
@@ -509,7 +511,7 @@ class _FailingLayoutUnaryPayload(UnaryElementwisePayload):
         raise ValueError("concrete layout invariant failed")
 
 
-def test_balance_workload_propagates_concrete_layout_invariant_failure() -> None:
+def test_allocate_propagates_concrete_layout_invariant_failure() -> None:
     graph, first, second = _elementwise_chain()
     failing_second = Node(
         second.name,
@@ -532,10 +534,10 @@ def test_balance_workload_propagates_concrete_layout_invariant_failure() -> None
     mesh = _mesh_with_l1(2, 1, l1_size=4096)
 
     with pytest.raises(ValueError, match="concrete layout invariant failed"):
-        balance_workload(graph, mesh, {0: (first, failing_second)})
+        allocate(graph, mesh, {0: (first, failing_second)})
 
 
-def test_balance_workload_can_use_selected_stage_groups() -> None:
+def test_allocate_can_use_selected_stage_groups() -> None:
     node0 = _gemm_node("gemm0", m=16, k=16, n=16)
     node1 = _gemm_node(
         "gemm1",
@@ -587,7 +589,7 @@ def test_stage_candidate_uses_l1_feasible_logical_shape_for_fixed_tile_count() -
     assert candidate.plan.logical_shape[0] * candidate.plan.logical_shape[1] == 6
 
 
-def test_balance_workload_grows_an_improving_stage_past_two_tiles() -> None:
+def test_allocate_grows_an_improving_stage_past_two_tiles() -> None:
     node = _gemm_node("gemm", m=32, k=32, n=32)
     graph = Graph(
         name="growth",
@@ -596,7 +598,7 @@ def test_balance_workload_grows_an_improving_stage_past_two_tiles() -> None:
     )
     mesh = _mesh_with_l1(4, 4, l1_size=32768)
 
-    plans = balance_workload(graph, mesh, {0: (node,)})
+    plans = allocate(graph, mesh, {0: (node,)})
 
     assert plans[0].tile_count > 2
 
@@ -613,7 +615,7 @@ def test_growth_prunes_stage_when_doubling_current_count_does_not_improve(
     )
     mesh = _mesh_with_l1(5, 1, l1_size=4096)
 
-    plans = balance_workload(
+    plans = allocate(
         graph,
         mesh,
         {0: (no_scale,), 1: (scales,)},

@@ -1,22 +1,22 @@
-"""Data contracts exchanged between planner passes."""
+"""Stage formation, Allocation, and Placement contracts owned by Planning."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-from MAPS.core.graph import Node
+from maps.graph import Node
 from MAPS.core.submesh import Submesh
 
-StageSelection = dict[int, tuple[Node, ...]]
+StageFormation = dict[int, tuple[Node, ...]]
 
 
 @dataclass(frozen=True)
 class StagePlan:
-    """The workload-balancing result for one selected stage.
+    """The Allocation result for one formed Stage.
 
     ``tile_count`` and ``logical_shape`` describe virtual execution. ``nodes``
     and ``node_output_layouts`` have matching order and preserve the complete
-    selected stage. Physical placement is deliberately absent and is represented
+    formed Stage. Physical placement is deliberately absent and is represented
     by the separate ``StagePlacement`` contract produced by spatial mapping.
     """
 

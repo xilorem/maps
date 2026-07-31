@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from MAPS.arch import Mesh
 from MAPS.core.graph import Node
-from MAPS.planner.contracts.stages import StagePlacement, StagePlan
+from maps.planning.stages import StagePlacement, StagePlan
 from MAPS.planner.spatial.evaluation import evaluate_mapping
 from MAPS.planner.spatial.topology import owner_by_tile_id
 from MAPS.transitions import VirtualTransition

@@ -27,7 +27,7 @@ def main():
     execution_plan = build_execution_plan(
         DEFAULT_MODEL_PATH,
         mesh,
-        print_workload_balancing=True,
+        print_allocation=True,
         print_spatial_mapping=True,
         print_spatial_mapping_progress=True,
     )

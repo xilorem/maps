@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from MAPS.planner.contracts.stages import StagePlacement
+from maps.planning.stages import StagePlacement
 
 
 @dataclass(frozen=True)

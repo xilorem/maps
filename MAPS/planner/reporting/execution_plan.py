@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from MAPS.pipeline.execution_plan import ExecutionPlan
-from MAPS.planner.contracts.stages import StagePlacement, StagePlan, virtual_submesh
+from maps.planning.stages import StagePlacement, StagePlan, virtual_submesh
 from MAPS.planner.spatial.evaluation import evaluate_mapping
-from MAPS.planner.workload.metrics import worst_tile_compute_workload
+from maps.planning.allocation.metrics import worst_tile_stage_compute
 from MAPS.transitions import VirtualTransition
 
 
@@ -24,7 +24,7 @@ def print_execution_plan_stage_cost(
 
     worst_stage_compute = max(
         (
-            worst_tile_compute_workload(
+            worst_tile_stage_compute(
                 stage_nodes=plan.nodes,
                 node_output_layouts=plan.node_output_layouts,
                 submesh=virtual_submesh(plan),

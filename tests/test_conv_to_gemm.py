@@ -109,7 +109,7 @@ def test_magia_lowers_fp16_conv_to_auditable_redmule_execution(
     options = _quiet_magia_options()
     options = replace(
         options,
-        workload=replace(options.workload, print_progress=True),
+        allocation=replace(options.allocation, print_progress=True),
     )
 
     bundle = plan_model(

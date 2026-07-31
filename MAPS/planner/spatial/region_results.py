@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from MAPS.arch import Mesh
 from MAPS.core.submesh import Submesh
-from MAPS.planner.contracts.stages import StagePlacement, StagePlan, virtual_submesh
+from maps.planning.stages import StagePlacement, StagePlan, virtual_submesh
 
 
 def placements_from_regions(

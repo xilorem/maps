@@ -3,7 +3,7 @@ from MAPS.core.graph import Edge, Graph, Node, OpKind
 from MAPS.core.submesh import Submesh
 from MAPS.core.tensor import Tensor
 from maps.operations.gemm import GemmPayload
-from MAPS.planner.contracts.stages import StagePlacement, StagePlan, virtual_submesh
+from maps.planning.stages import StagePlacement, StagePlan, virtual_submesh
 from MAPS.planner.passes.spatial_mapping import map_spatially
 from MAPS.planner.spatial.evaluation import MappingEvaluator, evaluate_mapping
 from MAPS.planner.spatial.ownership import assign_stage_ownerships

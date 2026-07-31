@@ -1,13 +1,13 @@
-"""Stage-selection validation shared by formation and workload balancing."""
+"""Stage validation shared by formation and Allocation."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-from MAPS.core.graph import Graph, Node
-from MAPS.core.tensor import Tensor
+from maps.graph import Graph, Node
+from maps.graph import Tensor
 from maps.operations import find_layout_relation
-from MAPS.planner.contracts.stages import StageSelection
+from maps.planning.stages import StageFormation
 
 STAGE_GROUP_ID_ATTR = "stage_group_id"
 
@@ -74,16 +74,16 @@ class StageCommunicationEdges:
         return None
 
 
-def validate_stage_selection(
+def validate_stage_formation(
     graph: Graph,
-    stage_selection: StageSelection,
-) -> StageSelection:
-    """Return a complete Stage selection whose boundaries and edges are valid."""
+    stage_formation: StageFormation,
+) -> StageFormation:
+    """Return a complete Stage formation whose boundaries and edges are valid."""
 
     graph_node_ids = {id(node) for node in graph.nodes}
     selected_node_ids: set[int] = set()
-    resolved: StageSelection = {}
-    for stage_id, stage_nodes in stage_selection.items():
+    resolved: StageFormation = {}
+    for stage_id, stage_nodes in stage_formation.items():
         if not stage_nodes:
             raise ValueError(f"stage {stage_id} must contain at least one node")
         for node in stage_nodes:
@@ -125,9 +125,9 @@ def validate_stage_selection(
     return resolved
 
 
-def _validate_explicit_group_ownership(stage_selection: StageSelection) -> None:
+def _validate_explicit_group_ownership(stage_formation: StageFormation) -> None:
     stage_id_by_group: dict[object, int] = {}
-    for stage_id, stage_nodes in stage_selection.items():
+    for stage_id, stage_nodes in stage_formation.items():
         for node in stage_nodes:
             group_key = explicit_stage_group_key(node)
             if group_key is None:

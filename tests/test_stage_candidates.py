@@ -11,7 +11,7 @@ from maps.operations import OpCostModel
 from maps.operations import LayoutRelation
 from maps.operations import OpPayload, sharded_layout
 from maps.operations.elementwise import ElementwiseTileWork, UnaryElementwisePayload
-from MAPS.planner.workload.candidates import StageCandidateAnalyzer
+from maps.planning.allocation.candidates import StageCandidateAnalyzer
 from tests.noc_utils import rectangular_test_noc, rectangular_test_tiles
 
 
@@ -126,7 +126,7 @@ class _InverseSliceCostPayload(UnaryElementwisePayload):
 def test_stage_candidate_contains_immutable_per_tile_intrinsic_facts() -> None:
     node = _unary_node("stage")
     analyzer = StageCandidateAnalyzer(
-        stage_selection={7: (node,)},
+        stage_formation={7: (node,)},
         mesh=_mesh(2),
         initializer_tensors=frozenset(),
         num_token_slots=2,

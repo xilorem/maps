@@ -17,7 +17,7 @@ from MAPS.pipeline import ExecutionContract
 from MAPS.planner.contracts.options import (
     PlannerOptions,
     SpatialMappingOptions,
-    WorkloadBalancingOptions,
+    AllocationOptions,
 )
 from MAPS.planner.plan import build_execution_plan_bundle
 
@@ -307,7 +307,7 @@ def write_deployment_package(
         magia_mesh(width=mesh_width, height=mesh_height),
         PlannerOptions(
             execution=ExecutionContract(num_token_slots=num_token_slots),
-            workload=WorkloadBalancingOptions(
+            allocation=AllocationOptions(
                 print_progress=progress is not None,
             ),
             spatial_mapping=SpatialMappingOptions(

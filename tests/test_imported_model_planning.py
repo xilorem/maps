@@ -84,7 +84,7 @@ def test_plan_model_runs_mandatory_decomposition_and_serializes_provenance(
     assert payload["provenance"]["rewrite_report"][0]["source_node"] == "softmax"
 
 
-def test_plan_model_rejects_missing_tensor_types_before_stage_selection() -> None:
+def test_plan_model_rejects_missing_tensor_types_before_stage_formation() -> None:
     x = Tensor("x", 1, (4,), 4)
     output = Tensor("output", 1, (4,), 4)
     node = Node(

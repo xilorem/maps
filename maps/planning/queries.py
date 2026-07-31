@@ -1,11 +1,11 @@
-"""Shared read-only queries over stage plans and graph nodes."""
+"""Read-only queries over Planning Stage Plans and Graph Nodes."""
 
 from __future__ import annotations
 
-from MAPS.arch import Tile
-from MAPS.core.graph import Node
+from maps.hardware import Tile
+from maps.graph import Node
 from MAPS.core.layout import TensorSlice
-from MAPS.planner.contracts.stages import StagePlan
+from maps.planning.stages import StagePlan
 
 
 def node_output_layouts(plan: StagePlan, node: Node) -> tuple:

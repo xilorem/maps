@@ -3,7 +3,7 @@ from MAPS.core.dtype import TensorDType
 from MAPS.core.graph import Node, OpKind
 from MAPS.core.submesh import Submesh
 from MAPS.core.tensor import Tensor
-from MAPS.planner.workload.cost import cost_estimator, placement_cost_estimator
+from maps.planning.allocation.cost import cost_estimator, placement_cost_estimator
 from maps.operations.collective import AllReducePayload
 
 

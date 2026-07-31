@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections import deque
 
 from MAPS.arch import Mesh
-from MAPS.planner.contracts.stages import StagePlacement, StagePlan
+from maps.planning.stages import StagePlacement, StagePlan
 from MAPS.planner.spatial.evaluation import MappingEvaluator
 from MAPS.planner.spatial.models import (
     MappingEvaluation,

@@ -64,4 +64,4 @@ def test_magia_example_builds_and_writes_one_execution_plan_bundle(
     )
     options = calls["options"]
     assert options.execution.num_token_slots == 2
-    assert options.stage_selection.max_stage_nodes == 1
+    assert options.stage_formation.max_stage_nodes == 1

@@ -15,8 +15,8 @@ from MAPS.pipeline import ExecutionContract
 from MAPS.planner.contracts.options import (
     PlannerOptions,
     SpatialMappingOptions,
-    StageSelectionOptions,
-    WorkloadBalancingOptions,
+    StageFormationOptions,
+    AllocationOptions,
 )
 from MAPS.planner.passes.execution_plan_validation import validate_execution_plan
 from MAPS.planner.validation.contracts import PlannerConstraints
@@ -37,8 +37,8 @@ def main():
         mesh,
         PlannerOptions(
             execution=ExecutionContract(num_token_slots=2),
-            stage_selection=StageSelectionOptions(max_stage_nodes=1),
-            workload=WorkloadBalancingOptions(
+            stage_formation=StageFormationOptions(max_stage_nodes=1),
+            allocation=AllocationOptions(
                 compute_weight=1.0,
                 communication_weight=10.0,
                 print_progress=True,

@@ -1,8 +1,10 @@
+"""Focused behavior tests for deterministic Stage formation."""
+
 from MAPS.core.graph import Graph, Node, OpKind
 from MAPS.core.tensor import Tensor
 from maps.operations.elementwise import BinaryElementwisePayload, UnaryElementwisePayload
-from MAPS.planner.contracts.options import StageSelectionOptions
-from MAPS.planner.passes.stage_selection import form_stages
+from maps.planning import StageFormationOptions
+from maps.planning.stage_formation import form_stages
 
 
 def test_form_stages_defaults_to_singleton_groups() -> None:
@@ -82,11 +84,11 @@ def test_form_stages_coalesces_exact_elementwise_chain_left_to_right() -> None:
     assert form_stages(graph) == {0: (first, second, third)}
     assert form_stages(
         graph,
-        StageSelectionOptions(max_stage_nodes=2),
+        StageFormationOptions(max_stage_nodes=2),
     ) == {0: (first, second), 1: (third,)}
     assert form_stages(
         graph,
-        StageSelectionOptions(max_stage_nodes=1),
+        StageFormationOptions(max_stage_nodes=1),
     ) == {0: (first,), 1: (second,), 2: (third,)}
 
 

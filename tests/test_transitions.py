@@ -17,7 +17,7 @@ from MAPS.core.submesh import Submesh
 from MAPS.core.tensor import Tensor
 from MAPS.hw.chips import magia_mesh
 from maps.operations import OperationPayload
-from MAPS.planner.contracts.stages import StagePlacement, StagePlan
+from maps.planning.stages import StagePlacement, StagePlan
 from MAPS.planner.spatial.traffic import build_virtual_traffic
 from MAPS.transitions import (
     InputTransition,

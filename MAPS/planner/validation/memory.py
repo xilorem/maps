@@ -21,7 +21,7 @@ from MAPS.pipeline.layer import (
     TransitionSource,
 )
 from MAPS.pipeline.stage import Stage
-from MAPS.planner.workload.memory import permanent_l1_allocation_bytes
+from maps.planning.allocation.memory import permanent_l1_allocation_bytes
 from MAPS.transitions.contracts import InputTransition
 
 

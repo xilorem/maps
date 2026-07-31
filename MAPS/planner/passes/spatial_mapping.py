@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from MAPS.arch import Mesh
-from MAPS.planner.contracts.stages import StagePlacement, StagePlan
+from maps.planning.stages import StagePlacement, StagePlan
 from MAPS.planner.spatial.diagnostics import (
     print_placement_grid,
     print_spatial_mapping_details,

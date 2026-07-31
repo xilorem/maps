@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from MAPS.arch import Mesh
-from MAPS.planner.contracts.stages import StagePlacement, StagePlan
+from maps.planning.stages import StagePlacement, StagePlan
 from MAPS.planner.spatial.models import VirtualTraffic
 from MAPS.planner.spatial.ownership import stage_order
 from MAPS.planner.spatial.region_results import placements_from_regions

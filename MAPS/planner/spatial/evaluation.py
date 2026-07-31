@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 from MAPS.arch import Mesh
 from MAPS.core.layout import tensor_slice_num_bytes
-from MAPS.planner.contracts.stages import StagePlacement, StagePlan
+from maps.planning.stages import StagePlacement, StagePlan
 from MAPS.planner.spatial.models import MappingEvaluation, StageIOBreakdown, TileIOScore
 from MAPS.transitions import (
     VirtualInputTransition,

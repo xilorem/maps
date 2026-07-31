@@ -1,13 +1,13 @@
-"""Compute and communication bottleneck metrics for workload allocation."""
+"""Compute and communication bottleneck metrics for Allocation."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-from MAPS.arch import Mesh
-from MAPS.core.graph import Graph, Node
-from MAPS.planner.contracts.stages import StagePlan, virtual_submesh
-from MAPS.planner.workload.candidates import StageCandidate
+from maps.hardware import Mesh
+from maps.graph import Graph, Node
+from maps.planning.stages import StagePlan, virtual_submesh
+from maps.planning.allocation.candidates import StageCandidate
 from MAPS.transitions import build_virtual_transitions
 
 
@@ -76,7 +76,7 @@ def _virtual_communication_cycles(
 ) -> dict[int, dict[int, int]]:
     """Estimate producer-side virtual-tile communication cycles."""
 
-    # Virtual traffic is a pre-placement analysis shared by workload estimation
+    # Virtual traffic is a pre-placement analysis shared by Allocation estimation
     # and spatial mapping; it does not depend on physical mapping decisions.
     from MAPS.planner.spatial.traffic import build_virtual_traffic
 
@@ -120,7 +120,7 @@ def selection_objective(metrics: dict[int, float]) -> tuple[float, ...]:
     return tuple(sorted(metrics.values(), reverse=True))
 
 
-def worst_tile_compute_workload(
+def worst_tile_stage_compute(
     stage_nodes: tuple[Node, ...],
     node_output_layouts: tuple[tuple, ...],
     submesh,
@@ -131,7 +131,7 @@ def worst_tile_compute_workload(
     return max(
         (
             sum(
-                _node_compute_workload(
+                _node_compute_cycles(
                     node,
                     output_layouts,
                     tile,
@@ -147,7 +147,7 @@ def worst_tile_compute_workload(
     )
 
 
-def _node_compute_workload(
+def _node_compute_cycles(
     node: Node,
     output_layouts: tuple,
     tile,

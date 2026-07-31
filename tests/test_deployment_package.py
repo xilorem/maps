@@ -16,7 +16,7 @@ from MAPS.deployment import (
 )
 from MAPS.hw.chips import magia_mesh
 from MAPS.pipeline import ExecutionContract
-from MAPS.planner.contracts.options import PlannerOptions, StageSelectionOptions
+from MAPS.planner.contracts.options import PlannerOptions, StageFormationOptions
 from MAPS.planner.plan import build_execution_plan_bundle
 import MAPS.deployment.package as package_module
 
@@ -332,7 +332,7 @@ def test_planner_execution_plan_generates_deterministic_runtime_package(
         magia_mesh(width=4, height=4),
         PlannerOptions(
             execution=ExecutionContract(num_token_slots=2),
-            stage_selection=StageSelectionOptions(max_stage_nodes=1),
+            stage_formation=StageFormationOptions(max_stage_nodes=1),
             print_execution_plan_cost=False,
         ),
     )

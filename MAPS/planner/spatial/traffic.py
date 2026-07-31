@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from MAPS.core.layout import tensor_slice_num_bytes
-from MAPS.planner.contracts.stages import StagePlan, virtual_submesh
+from maps.planning.stages import StagePlan, virtual_submesh
 from MAPS.planner.spatial.models import VirtualTraffic
 from MAPS.transitions import (
     VirtualInputTransition,

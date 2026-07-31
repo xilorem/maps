@@ -14,8 +14,8 @@ from MAPS.core.layout import (
 )
 from MAPS.core.tensor import Tensor
 from maps.operations import OpPayload
-from MAPS.planner.contracts.queries import node_output_index, node_output_layouts
-from MAPS.planner.contracts.stages import StagePlacement, StagePlan
+from maps.planning.queries import node_output_index, node_output_layouts
+from maps.planning.stages import StagePlacement, StagePlan
 
 from .contracts import (
     InputDestination,

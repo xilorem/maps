@@ -1,8 +1,8 @@
-"""Per-tile, stage-local permanent L1 allocation accounting."""
+"""Per-tile, Stage-local permanent L1 Allocation accounting."""
 
 from __future__ import annotations
 
-from MAPS.core.tensor import Tensor
+from maps.graph import Tensor
 from maps.operations import TileWork
 
 L1_ALLOCATION_ALIGNMENT_BYTES = 16

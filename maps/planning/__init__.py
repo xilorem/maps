@@ -2,26 +2,14 @@
 
 from __future__ import annotations
 
-from maps.graph import Graph
-from maps.hardware import Mesh
-from MAPS.pipeline import ExecutionPlan
-from MAPS.planner.contracts.options import StageSelectionOptions
-from MAPS.planner.device_assignment import assigned_device_name
-from MAPS.planner.passes.execution_plan_lowering import lower_execution_plan
-from MAPS.planner.passes.execution_plan_validation import require_valid_execution_plan
-from MAPS.planner.passes.spatial_mapping import map_spatially
-from MAPS.planner.passes.stage_selection import form_stages
-from MAPS.planner.passes.workload_balancing import balance_workload
-from MAPS.planner.reporting.execution_plan import print_execution_plan_stage_cost
-from MAPS.planner.validation.contracts import PlannerConstraints
-from MAPS.transitions import build_virtual_transitions
+from typing import TYPE_CHECKING
 
-from .options import (
-    AllocationOptions,
-    PlacementOptions,
-    PlanningOptions,
-    StageFormationOptions,
-)
+if TYPE_CHECKING:
+    from maps.graph import Graph
+    from maps.hardware import Mesh
+    from MAPS.pipeline import ExecutionPlan
+
+    from .options import PlanningOptions
 
 
 def plan(
@@ -36,24 +24,35 @@ def plan(
     filesystem work.
     """
 
+    from MAPS.planner.device_assignment import assigned_device_name
+    from MAPS.planner.passes.execution_plan_lowering import lower_execution_plan
+    from MAPS.planner.passes.execution_plan_validation import (
+        require_valid_execution_plan,
+    )
+    from MAPS.planner.passes.spatial_mapping import map_spatially
+    from MAPS.planner.reporting.execution_plan import print_execution_plan_stage_cost
+    from MAPS.planner.validation.contracts import PlannerConstraints
+    from MAPS.transitions import build_virtual_transitions
+    from maps.planning.allocation import allocate
+    from maps.planning.stage_formation import form_stages
+
+    from .options import PlanningOptions
+
     options = options or PlanningOptions()
 
-    # TODO(maps-repository-architecture 09-11): contract these imports as Stage
-    # formation, Allocation, Placement, Transitions, and Execution Plan ownership
-    # migrate into this module. Keep their established composition order here.
+    # TODO(maps-repository-architecture 10-11): contract Placement, Transitions,
+    # and Execution Plan ownership as their implementations migrate here.
     for node in graph.nodes:
         assigned_device_name(node, mesh.tiles)
 
     stage_formation = form_stages(
         graph,
-        StageSelectionOptions(
-            max_stage_nodes=options.stage_formation.max_stage_nodes,
-        ),
+        options.stage_formation,
     )
-    stage_plans = balance_workload(
+    stage_plans = allocate(
         graph,
         mesh,
-        stage_selection=stage_formation,
+        stage_formation=stage_formation,
         debug=options.allocation.print_progress,
         compute_weight=options.allocation.compute_weight,
         communication_weight=options.allocation.communication_weight,
@@ -93,6 +92,25 @@ def plan(
         )
 
     return execution_plan
+
+
+def __getattr__(name: str):
+    """Load public Planning contracts without coupling internal phase imports."""
+
+    if name == "ExecutionPlan":
+        from MAPS.pipeline import ExecutionPlan
+
+        return ExecutionPlan
+    if name in {
+        "AllocationOptions",
+        "PlacementOptions",
+        "PlanningOptions",
+        "StageFormationOptions",
+    }:
+        from . import options
+
+        return getattr(options, name)
+    raise AttributeError(name)
 
 
 __all__ = [

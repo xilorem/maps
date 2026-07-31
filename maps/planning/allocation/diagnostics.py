@@ -1,23 +1,23 @@
-"""Human-readable diagnostics for workload-balancing results."""
+"""Human-readable diagnostics for Allocation results."""
 
 from __future__ import annotations
 
-from MAPS.core.graph import Node
-from MAPS.planner.contracts.stages import StageSelection
-from MAPS.planner.workload.metrics import SelectionEvaluation
+from maps.graph import Node
+from maps.planning.stages import StageFormation
+from maps.planning.allocation.metrics import SelectionEvaluation
 
 
 def print_stage_metric_breakdown(
     enabled: bool,
-    stage_selection: StageSelection,
+    stage_formation: StageFormation,
     evaluation: SelectionEvaluation,
 ) -> None:
     """Print the canonical final compute and communication bottlenecks."""
 
     if not enabled:
         return
-    print("[workload_balancing] final_stage_metric_breakdown:")
-    for stage_id, stage_nodes in stage_selection.items():
+    print("[allocation] final_stage_metric_breakdown:")
+    for stage_id, stage_nodes in stage_formation.items():
         breakdown = evaluation.stage_breakdowns[stage_id]
         print(
             f"  stage={stage_id} nodes={_stage_label(stage_nodes)} "

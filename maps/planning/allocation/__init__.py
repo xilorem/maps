@@ -1,23 +1,24 @@
-"""Workload-balancing pass facade."""
+"""Allocate virtual tiles, logical shapes, layouts, and Devices to Stages."""
 
 from __future__ import annotations
 
-from MAPS.arch import Mesh
-from MAPS.core.graph import Graph
-from MAPS.planner.contracts.stages import StagePlan, StageSelection
-from MAPS.planner.workload.allocation import (
+from maps.graph import Graph
+from maps.hardware import Mesh
+from maps.planning.stages import StageFormation, StagePlan
+
+from maps.planning.allocation.selection import (
     grow_stage_candidates,
     seed_stage_candidates,
 )
-from MAPS.planner.workload.candidates import StageCandidateAnalyzer
-from MAPS.planner.workload.context import build_workload_context
-from MAPS.planner.workload.diagnostics import print_stage_metric_breakdown
+from maps.planning.allocation.candidates import StageCandidateAnalyzer
+from maps.planning.allocation.context import build_allocation_context
+from maps.planning.allocation.diagnostics import print_stage_metric_breakdown
 
 
-def balance_workload(
+def allocate(
     graph: Graph,
     mesh: Mesh,
-    stage_selection: StageSelection,
+    stage_formation: StageFormation,
     debug: bool = False,
     compute_weight: float = 1.0,
     communication_weight: float = 1.0,
@@ -26,7 +27,7 @@ def balance_workload(
     """Choose virtual tile allocations and tensor layouts for all stages.
 
     Contract:
-        ``stage_selection`` must cover every graph node exactly once.
+        ``stage_formation`` must cover every graph node exactly once.
         ``compute_weight`` and ``communication_weight`` weight their respective
         costs when comparing feasible allocations; they do not relax memory
         constraints.
@@ -42,13 +43,13 @@ def balance_workload(
         final, but they contain no required physical placement decision.
 
     Raises:
-        ValueError: If stage selection is invalid or no complete L1-feasible
+        ValueError: If Stage formation is invalid or no complete L1-feasible
             allocation fits on the mesh.
     """
 
-    context = build_workload_context(graph, stage_selection)
+    context = build_allocation_context(graph, stage_formation)
     analyzer = StageCandidateAnalyzer(
-        context.stage_selection,
+        context.stage_formation,
         mesh,
         context.initializer_tensors,
         num_token_slots,
@@ -77,22 +78,22 @@ def balance_workload(
 
     if debug:
         print(
-            "[workload_balancing] "
+            "[allocation] "
             f"final_tile_counts="
             f"{ {stage_id: plan.tile_count for stage_id, plan in plans.items()} }"
         )
         print(
-            "[workload_balancing] "
+            "[allocation] "
             f"final_logical_shapes="
             f"{ {stage_id: plan.logical_shape for stage_id, plan in plans.items()} }"
         )
 
     print_stage_metric_breakdown(
         enabled=debug,
-        stage_selection=context.stage_selection,
+        stage_formation=context.stage_formation,
         evaluation=evaluation,
     )
     return plans
 
 
-__all__ = ["balance_workload"]
+__all__ = ["allocate"]

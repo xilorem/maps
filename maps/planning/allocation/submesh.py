@@ -1,10 +1,10 @@
-"""Connected abstract submeshes used during virtual workload planning."""
+"""Connected abstract submeshes used during virtual Allocation."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-from MAPS.arch import Mesh, Tile
+from maps.hardware import Mesh, Tile
 
 
 @dataclass(frozen=True)

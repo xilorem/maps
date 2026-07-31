@@ -10,11 +10,11 @@ from MAPS.pipeline.execution import ExecutionContract
 from MAPS.pipeline.execution_plan import ExecutionPlan
 from MAPS.pipeline.layer import Layer, LayerInput, LayerOutput
 from MAPS.pipeline.stage import Stage
-from MAPS.planner.contracts.queries import (
+from maps.planning.queries import (
     node_output_layouts,
     required_input_slices,
 )
-from MAPS.planner.contracts.stages import StagePlacement, StagePlan
+from maps.planning.stages import StagePlacement, StagePlan
 from MAPS.planner.lowering.context import (
     ExecutionPlanLoweringContext,
     build_lowering_context,

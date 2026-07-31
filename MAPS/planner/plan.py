@@ -15,8 +15,8 @@ from MAPS.pipeline.execution_plan import ExecutionPlan
 from MAPS.planner.contracts.options import (
     PlannerOptions,
     SpatialMappingOptions,
-    StageSelectionOptions,
-    WorkloadBalancingOptions,
+    StageFormationOptions,
+    AllocationOptions,
 )
 from MAPS.planner.device_assignment import assigned_device_name
 from MAPS.planner.passes.execution_plan_lowering import lower_execution_plan
@@ -25,8 +25,8 @@ from MAPS.planner.passes.execution_plan_validation import (
     validate_execution_plan,
 )
 from MAPS.planner.passes.spatial_mapping import map_spatially
-from MAPS.planner.passes.stage_selection import form_stages
-from MAPS.planner.passes.workload_balancing import balance_workload
+from maps.planning.stage_formation import form_stages
+from maps.planning.allocation import allocate
 from MAPS.planner.reporting.execution_plan import print_execution_plan_stage_cost
 from MAPS.planner.validation.contracts import PlannerConstraints
 from MAPS.transitions import build_virtual_transitions
@@ -77,7 +77,7 @@ def plan_graph(
     )
     validation = validate_execution_plan(
         execution_plan,
-        PlannerConstraints(max_stage_nodes=options.stage_selection.max_stage_nodes),
+        PlannerConstraints(max_stage_nodes=options.stage_formation.max_stage_nodes),
     )
     if not validation.is_valid:
         details = "; ".join(
@@ -104,15 +104,15 @@ def _plan_decisions(
 ):
     for node in graph.nodes:
         assigned_device_name(node, mesh.tiles)
-    stage_selection = form_stages(graph, options.stage_selection)
+    stage_formation = form_stages(graph, options.stage_formation)
 
-    stage_plans = balance_workload(
+    stage_plans = allocate(
         graph,
         mesh,
-        stage_selection=stage_selection,
-        debug=options.workload.print_progress,
-        compute_weight=options.workload.compute_weight,
-        communication_weight=options.workload.communication_weight,
+        stage_formation=stage_formation,
+        debug=options.allocation.print_progress,
+        compute_weight=options.allocation.compute_weight,
+        communication_weight=options.allocation.communication_weight,
         num_token_slots=options.execution.num_token_slots,
     )
     virtual_transitions = build_virtual_transitions(graph, stage_plans)
@@ -132,7 +132,7 @@ def _plan_decisions(
 def build_execution_plan(
     model_path: str | Path,
     mesh: Mesh,
-    print_workload_balancing: bool = False,
+    print_allocation: bool = False,
     print_spatial_mapping: bool = False,
     print_spatial_mapping_progress: bool = False,
     output_json_path: str | Path | None = None,
@@ -149,11 +149,11 @@ def build_execution_plan(
         mesh,
         PlannerOptions(
             execution=ExecutionContract(num_token_slots=num_token_slots),
-            stage_selection=StageSelectionOptions(max_stage_nodes=max_stage_nodes),
-            workload=WorkloadBalancingOptions(
+            stage_formation=StageFormationOptions(max_stage_nodes=max_stage_nodes),
+            allocation=AllocationOptions(
                 compute_weight=1.0,
                 communication_weight=10.0,
-                print_progress=print_workload_balancing,
+                print_progress=print_allocation,
             ),
             spatial_mapping=SpatialMappingOptions(
                 print_progress=print_spatial_mapping_progress,

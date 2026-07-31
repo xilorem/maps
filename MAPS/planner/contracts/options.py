@@ -8,7 +8,7 @@ from MAPS.pipeline.execution import ExecutionContract
 
 
 @dataclass(frozen=True)
-class WorkloadBalancingOptions:
+class AllocationOptions:
     """Weights and diagnostics used while allocating virtual stage tiles.
 
     ``compute_weight`` and ``communication_weight`` scale the two components of
@@ -35,7 +35,7 @@ class SpatialMappingOptions:
 
 
 @dataclass(frozen=True)
-class StageSelectionOptions:
+class StageFormationOptions:
     """Deterministic graph-level stage coalescing configuration.
 
     Zero selects maximal eligible coalescing, one disables automatic
@@ -61,11 +61,11 @@ class PlannerOptions:
     """Complete configuration for planning an already imported graph.
 
     Pass-specific options remain grouped by pass. ``execution`` is shared by
-    workload feasibility and Execution Plan lowering.
+    Allocation feasibility and Execution Plan lowering.
     """
 
-    stage_selection: StageSelectionOptions = field(default_factory=StageSelectionOptions)
-    workload: WorkloadBalancingOptions = field(default_factory=WorkloadBalancingOptions)
+    stage_formation: StageFormationOptions = field(default_factory=StageFormationOptions)
+    allocation: AllocationOptions = field(default_factory=AllocationOptions)
     spatial_mapping: SpatialMappingOptions = field(default_factory=SpatialMappingOptions)
     execution: ExecutionContract = field(default_factory=ExecutionContract)
     print_execution_plan_cost: bool = True
