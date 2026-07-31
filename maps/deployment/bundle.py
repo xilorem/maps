@@ -8,17 +8,23 @@ import json
 from pathlib import Path
 from typing import Any
 
-from maps.graph import ConstantStore, Graph, validate_constants
+from maps.graph import (
+    ConstantStore,
+    Graph,
+    GraphRewriteEffect,
+    Node,
+    validate_constants,
+)
+from maps.hardware import WorkSignature
 from maps.planning import (
     ExecutionPlan,
     PlanningConstraints,
     require_valid_execution_plan,
 )
 from maps.planning.transitions.contracts import InputTransition, OutputTransition
-from maps.target import RewriteReport, SpecializationResult
+from maps.target import RewriteEvent, RewriteReport, SpecializationResult
 
 from .serialization import execution_plan_json_payload
-
 from .weights import PackedWeights, pack_weights
 
 
@@ -45,15 +51,38 @@ class DeploymentBundle:
 def build_deployment_bundle(
     specialization: SpecializationResult,
     execution_plan: ExecutionPlan,
+    *,
+    graph_rewrite_effects: tuple[GraphRewriteEffect, ...] = (),
 ) -> DeploymentBundle:
     """Aggregate a specialized Imported Model and its Execution Plan."""
 
+    graph_rewrite_events = tuple(
+        RewriteEvent(
+            rewrite_name=effect.rewrite_name,
+            source_node=effect.source_node.name,
+            original_signature=_node_signature(effect.source_node),
+            resulting_signatures=tuple(
+                WorkSignature.from_node(node)
+                for node in effect.resulting_nodes
+            ),
+        )
+        for effect in graph_rewrite_effects
+    )
     return DeploymentBundle(
         execution_plan=execution_plan,
         graph=specialization.model.graph,
         constants=specialization.model.constants,
-        rewrite_report=specialization.report,
+        rewrite_report=RewriteReport(
+            graph_rewrite_events + specialization.report.events
+        ),
     )
+
+
+def _node_signature(node: Node) -> WorkSignature | None:
+    try:
+        return WorkSignature.from_node(node)
+    except ValueError:
+        return None
 
 
 def _signature_payload(signature) -> dict[str, Any] | None:

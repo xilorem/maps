@@ -4,12 +4,14 @@ import pytest
 
 from MAPS.arch import L1Memory, L2Memory, Mesh
 from maps.graph import ConstantStore, Graph, ImportedModel, Node, OpKind, Tensor
-from maps.deployment import write_execution_plan_bundle
-from maps.graph import import_onnx_model
+from maps.deployment import build_deployment_bundle, write_execution_plan_bundle
+from maps.graph import import_onnx_model, run_graph_rewrites_with_effects
 from maps.operations.elementwise import UnaryElementwisePayload
 from maps.operations.softmax import SoftmaxPayload
 from MAPS.planner.contracts.options import PlannerOptions, SpatialMappingOptions
 from MAPS.planner.plan import plan_model
+from maps.planning import PlacementOptions, PlanningOptions, plan
+from maps.target import SpecializationOptions, magia
 from tests.noc_utils import rectangular_test_noc, rectangular_test_tiles
 
 
@@ -57,8 +59,31 @@ def test_plan_model_runs_mandatory_decomposition_and_serializes_provenance(
     assert len(imported.graph.nodes) == 1
     assert isinstance(imported.graph.nodes[0].payload, SoftmaxPayload)
 
-    bundle = plan_model(imported, _mesh(), _quiet_options())
-    independently_planned = plan_model(imported, _mesh(), _quiet_options())
+    mesh = magia.build_mesh(width=2, height=1)
+    rewritten, rewrite_effects = run_graph_rewrites_with_effects(imported)
+    specialization = magia.specialize(
+        rewritten,
+        mesh,
+        SpecializationOptions(enable_precision_lowering=False),
+    )
+    execution_plan = plan(
+        specialization.model.graph,
+        mesh,
+        PlanningOptions(
+            placement=PlacementOptions(print_placement=False),
+            print_execution_plan_cost=False,
+        ),
+    )
+    bundle = build_deployment_bundle(
+        specialization,
+        execution_plan,
+        graph_rewrite_effects=rewrite_effects,
+    )
+    independently_planned = build_deployment_bundle(
+        specialization,
+        execution_plan,
+        graph_rewrite_effects=rewrite_effects,
+    )
 
     assert bundle.constants is imported.constants
     assert len(bundle.graph.nodes) > 1

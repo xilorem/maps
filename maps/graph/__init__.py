@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from onnx import ModelProto
 
     from .onnx.preprocess import InputShapes
-    from .rewrites import GraphRewrite
+    from .rewrites import GraphRewrite, GraphRewriteEffect
 
 
 def import_onnx_graph(
@@ -65,10 +65,18 @@ def run_graph_rewrites(model: ImportedModel) -> ImportedModel:
     return run_rewrites(model)
 
 
+def run_graph_rewrites_with_effects(
+    model: ImportedModel,
+) -> tuple[ImportedModel, tuple[GraphRewriteEffect, ...]]:
+    from .rewrites import run_graph_rewrites_with_effects as run_rewrites
+
+    return run_rewrites(model)
+
+
 def __getattr__(name: str):
     """Load type-like rewrite contracts without coupling the Graph model."""
 
-    if name == "GraphRewrite":
+    if name in {"GraphRewrite", "GraphRewriteEffect"}:
         from . import rewrites
 
         return getattr(rewrites, name)
@@ -81,6 +89,7 @@ __all__ = [
     "Edge",
     "Graph",
     "GraphRewrite",
+    "GraphRewriteEffect",
     "ImportedModel",
     "InputShapes",
     "Node",
@@ -95,6 +104,7 @@ __all__ = [
     "load_onnx_model",
     "prepare_onnx_model",
     "run_graph_rewrites",
+    "run_graph_rewrites_with_effects",
     "validate_constants",
     "validate_imported_model",
 ]

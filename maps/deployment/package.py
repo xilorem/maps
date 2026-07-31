@@ -11,7 +11,7 @@ import subprocess
 import tempfile
 from typing import Any, Callable
 
-from maps.graph import import_onnx_model, run_graph_rewrites
+from maps.graph import import_onnx_model, run_graph_rewrites_with_effects
 from maps.planning import (
     AllocationOptions,
     ExecutionContract,
@@ -305,7 +305,9 @@ def write_deployment_package(
         f"{mesh_width}x{mesh_height} mesh..."
     )
     mesh = magia.build_mesh(width=mesh_width, height=mesh_height)
-    rewritten = run_graph_rewrites(import_onnx_model(model))
+    rewritten, graph_rewrite_effects = run_graph_rewrites_with_effects(
+        import_onnx_model(model)
+    )
     specialization = magia.specialize(
         rewritten,
         mesh,
@@ -327,7 +329,11 @@ def write_deployment_package(
             print_execution_plan_cost=False,
         ),
     )
-    bundle = build_deployment_bundle(specialization, execution_plan)
+    bundle = build_deployment_bundle(
+        specialization,
+        execution_plan,
+        graph_rewrite_effects=graph_rewrite_effects,
+    )
 
     staging_parent = Path(
         tempfile.mkdtemp(prefix=f".{output.name}.staging-", dir=output.parent)
