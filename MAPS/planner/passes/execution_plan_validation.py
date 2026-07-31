@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from MAPS.core.layout import TensorSlice, TensorSubSlice
-from MAPS.arch import WorkKind, WorkSignature
+from MAPS.arch import WorkSignature
 from MAPS.pipeline.execution_plan import ExecutionPlan
 from MAPS.pipeline.layer import InitializerInput, LocalInput, TransitionSource
 from MAPS.planner.validation.contracts import (
@@ -16,6 +16,7 @@ from MAPS.planner.validation.memory import (
     estimate_stage_l1_memory_for_tile,
     estimate_stage_l2_memory,
 )
+from MAPS.planner.contracts.devices import node_requires_fixed_device_assignment
 from MAPS.transitions.contracts import (
     InputTransition,
     IntermediateTransition,
@@ -183,14 +184,17 @@ def _validate_layer_device(
 ) -> None:
     stage = execution_plan.stages[stage_id]
     layer = stage.layers[layer_index]
-    work_kind = getattr(layer.node.payload, "work_kind", None)
-    if work_kind is not WorkKind.GEMM:
+    if not node_requires_fixed_device_assignment(layer.node):
         return
     try:
         signature = WorkSignature.from_node(layer.node)
-    except ValueError:
-        # Legacy hand-built plans may still omit TensorDTypes until the final
-        # execution-contract migration ticket.
+    except ValueError as exc:
+        append_violation(
+            violations,
+            "layer_device_assignment_invalid",
+            f"stage {stage_id} layer {layer_index} cannot validate its Device "
+            f"Assignment: {exc}",
+        )
         return
     if layer.device_name is None:
         append_violation(

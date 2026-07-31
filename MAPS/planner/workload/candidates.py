@@ -5,11 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import cast
 
-from MAPS.arch import Mesh, WorkKind, WorkSignature
+from MAPS.arch import Mesh, WorkSignature
 from MAPS.core.graph import Node
 from MAPS.core.tensor import Tensor
 from MAPS.ops.common.payload import OpPayload
 from MAPS.planner.contracts.stages import StagePlan, StageSelection
+from MAPS.planner.contracts.devices import node_requires_fixed_device_assignment
 from MAPS.planner.workload.layouts import resolve_stage_layouts, verify_stage_locality
 from MAPS.planner.workload.memory import permanent_l1_allocation_for_tile_work
 from MAPS.planner.workload.submesh import representative_connected_submesh
@@ -107,7 +108,7 @@ class StageCandidateAnalyzer:
             cost_models = tuple(payload.cost_model for payload in payloads)
             device_names = tuple(
                 _fixed_device_name(node, submesh.tiles)
-                if getattr(payload, "work_kind", None) is WorkKind.GEMM
+                if node_requires_fixed_device_assignment(node)
                 else None
                 for node, payload in zip(stage_nodes, payloads)
             )
@@ -177,7 +178,10 @@ class StageCandidateAnalyzer:
 
 def _fixed_device_name(node: Node, tiles: tuple) -> str:
     signature = WorkSignature.from_node(node)
-    assigned = tuple(tile.assigned_device(signature) for tile in tiles)
+    try:
+        assigned = tuple(tile.assigned_device(signature) for tile in tiles)
+    except ValueError as exc:
+        raise ValueError(f"node {node.name} with {signature}: {exc}") from exc
     device_names = {device.name for device in assigned}
     if len(device_names) != 1:
         raise ValueError(

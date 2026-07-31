@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+
 from MAPS.arch import WorkKind
 from MAPS.core.layout import (
     LayoutAxis,

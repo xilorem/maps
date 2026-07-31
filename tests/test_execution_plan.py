@@ -1,6 +1,7 @@
 from dataclasses import replace
 from pathlib import Path
 
+from MAPS.core.dtype import TensorDType
 from MAPS.core.graph import Edge, Graph, Node, OpKind
 from MAPS.core.submesh import Submesh
 from MAPS.core.tensor import Tensor
@@ -53,13 +54,13 @@ def test_lower_execution_plan_unifies_communication_and_initializer_residency(
     physical0 = Submesh(mesh=mesh, submesh_id=2, tile_ids=frozenset((8, 9)))
     physical1 = Submesh(mesh=mesh, submesh_id=3, tile_ids=frozenset((16, 17)))
 
-    x = Tensor(name="x", rank=2, dims=(4, 4), elem_bytes=2)
-    w0 = Tensor(name="w0", rank=2, dims=(4, 8), elem_bytes=2)
-    y0 = Tensor(name="y0", rank=2, dims=(4, 8), elem_bytes=2)
-    w1 = Tensor(name="w1", rank=2, dims=(8, 8), elem_bytes=2)
-    y1 = Tensor(name="y1", rank=2, dims=(4, 8), elem_bytes=2)
-    w2 = Tensor(name="w2", rank=2, dims=(8, 6), elem_bytes=2)
-    z = Tensor(name="z", rank=2, dims=(4, 6), elem_bytes=2)
+    x = Tensor("x", 2, (4, 4), 2, dtype=TensorDType.FLOAT16)
+    w0 = Tensor("w0", 2, (4, 8), 2, dtype=TensorDType.FLOAT16)
+    y0 = Tensor("y0", 2, (4, 8), 2, dtype=TensorDType.FLOAT16)
+    w1 = Tensor("w1", 2, (8, 8), 2, dtype=TensorDType.FLOAT16)
+    y1 = Tensor("y1", 2, (4, 8), 2, dtype=TensorDType.FLOAT16)
+    w2 = Tensor("w2", 2, (8, 6), 2, dtype=TensorDType.FLOAT16)
+    z = Tensor("z", 2, (4, 6), 2, dtype=TensorDType.FLOAT16)
 
     payload0 = GemmPayload(x=x, w=w0, y=None, output=y0)
     payload1 = GemmPayload(x=y0, w=w1, y=None, output=y1)
@@ -112,6 +113,7 @@ def test_lower_execution_plan_unifies_communication_and_initializer_residency(
                 payload0.output_layouts(virtual0, logical_shape=(2, 1)),
                 payload1.output_layouts(virtual0, logical_shape=(2, 1)),
             ),
+            device_names=("redmule", "redmule"),
         ),
         1: StagePlan(
             stage_id=1,
@@ -121,6 +123,7 @@ def test_lower_execution_plan_unifies_communication_and_initializer_residency(
             node_output_layouts=(
                 payload2.output_layouts(virtual1, logical_shape=(2, 1)),
             ),
+            device_names=("redmule",),
         ),
     }
     placements = {

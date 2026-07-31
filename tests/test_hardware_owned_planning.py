@@ -2,6 +2,7 @@ from dataclasses import replace
 
 import pytest
 
+from MAPS.arch import FixedDeviceAssignment
 from MAPS.core import Graph, Node, OpKind, Tensor, TensorDType
 from MAPS.core.graph import Edge
 from MAPS.hw.chips import magia_mesh
@@ -114,3 +115,45 @@ def test_execution_plan_validation_rejects_incapable_layer_device_name() -> None
     assert report.violations[0].kind == "layer_device_assignment_invalid"
     assert "gemm" in report.violations[0].message
     assert "core" in report.violations[0].message
+
+
+def test_execution_plan_validation_rejects_missing_layer_device_name() -> None:
+    execution_plan = plan_graph(
+        _gemm_graph(TensorDType.FLOAT16, with_bias=False),
+        magia_mesh(width=1, height=1),
+        _quiet_options(),
+    )
+    layer = replace(execution_plan.stages[0].layers[0], device_name=None)
+    stage = replace(execution_plan.stages[0], layers=(layer,))
+
+    report = validate_execution_plan(
+        replace(execution_plan, stages=(stage,)),
+        PlannerConstraints(),
+    )
+
+    assert not report.is_valid
+    assert report.violations[0].kind == "layer_device_assignment_invalid"
+    assert "has no retained Device name" in report.violations[0].message
+
+
+def test_gemm_planning_error_names_node_signature_tile_and_considered_devices() -> None:
+    mesh = magia_mesh(width=1, height=1)
+    unassigned_tile = replace(
+        mesh.tiles[0],
+        device_assignment=FixedDeviceAssignment(),
+    )
+    unassigned_mesh = replace(mesh, tiles=(unassigned_tile,))
+
+    with pytest.raises(ValueError) as error:
+        plan_graph(
+            _gemm_graph(TensorDType.FLOAT16, with_bias=False),
+            unassigned_mesh,
+            _quiet_options(),
+        )
+
+    message = str(error.value)
+    assert "node gemm" in message
+    assert "WorkSignature" in message
+    assert "tile 0" in message
+    assert "configured assignment=None" in message
+    assert "considered devices: idma_read, idma_write, core, spatz, redmule" in message

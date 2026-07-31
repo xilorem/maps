@@ -24,6 +24,16 @@ class RewriteEvent:
 
 
 @dataclass(frozen=True)
+class _RewriteEffect:
+    """Rewrite provenance before the canonical pass stamps its identity."""
+
+    source_node: str
+    original_signature: WorkSignature | None
+    resulting_signatures: tuple[WorkSignature, ...]
+    converted_initializers: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class RewriteReport:
     """Deterministic provenance emitted by the Graph Rewrite Phase."""
 
@@ -37,18 +47,37 @@ class GraphRewriteResult:
 
 
 @dataclass(frozen=True)
+class _TransformResult:
+    model: ImportedModel
+    effects: tuple[_RewriteEffect, ...] = ()
+
+
+@dataclass(frozen=True)
 class GraphRewrite:
     """One named Imported Model transformation in the canonical sequence."""
 
     name: str
-    transform: Callable[[ImportedModel], GraphRewriteResult]
+    transform: Callable[[ImportedModel], _TransformResult]
 
     def __post_init__(self) -> None:
         if not self.name:
             raise ValueError("Graph Rewrite name must not be empty")
 
     def apply(self, model: ImportedModel) -> GraphRewriteResult:
-        return self.transform(model)
+        result = self.transform(model)
+        return GraphRewriteResult(
+            model=result.model,
+            events=tuple(
+                RewriteEvent(
+                    rewrite_name=self.name,
+                    source_node=effect.source_node,
+                    original_signature=effect.original_signature,
+                    resulting_signatures=effect.resulting_signatures,
+                    converted_initializers=effect.converted_initializers,
+                )
+                for effect in result.effects
+            ),
+        )
 
 
 def _signature_or_none(node) -> WorkSignature | None:
@@ -58,11 +87,10 @@ def _signature_or_none(node) -> WorkSignature | None:
         return None
 
 
-def _decompose_operations(model: ImportedModel) -> GraphRewriteResult:
+def _decompose_operations(model: ImportedModel) -> _TransformResult:
     graph, decompositions = decompose_graph_with_sources(model.graph)
     events = tuple(
-        RewriteEvent(
-            rewrite_name="operation_decomposition",
+        _RewriteEffect(
             source_node=source.name,
             original_signature=_signature_or_none(source),
             resulting_signatures=tuple(
@@ -71,9 +99,9 @@ def _decompose_operations(model: ImportedModel) -> GraphRewriteResult:
         )
         for source, resulting_nodes in decompositions
     )
-    return GraphRewriteResult(
+    return _TransformResult(
         model=ImportedModel(graph=graph, constants=model.constants),
-        events=events,
+        effects=events,
     )
 
 
