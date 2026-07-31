@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from MAPS.arch import Mesh
+from MAPS.pipeline.execution_plan import ExecutionPlan
+from MAPS.pipeline.pipeline import Pipeline
 from MAPS.planner.contracts.stages import StagePlacement, StagePlan, virtual_submesh
 from MAPS.planner.spatial.evaluation import evaluate_mapping
 from MAPS.planner.workload.metrics import worst_tile_compute_workload
@@ -10,7 +11,7 @@ from MAPS.transitions import VirtualTransition
 
 
 def print_pipeline_stage_cost(
-    mesh: Mesh,
+    execution_plan: ExecutionPlan | Pipeline,
     stage_plans: dict[int, StagePlan],
     placements: dict[int, StagePlacement],
     virtual_transitions: tuple[VirtualTransition, ...],
@@ -34,7 +35,7 @@ def print_pipeline_stage_cost(
         default=0,
     )
     evaluation = evaluate_mapping(
-        mesh,
+        execution_plan.mesh,
         stage_plans,
         placements,
         virtual_transitions,
