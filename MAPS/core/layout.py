@@ -102,6 +102,12 @@ class TensorSlice:
         return total
 
 
+def tensor_slice_num_bytes(tensor: Tensor, tensor_slice: TensorSlice) -> int:
+    """Return placement storage for one slice of a logical Tensor."""
+
+    return tensor_slice.num_elements * tensor.elem_bytes
+
+
 @dataclass(frozen=True)
 class TensorSubSlice:
     """One concrete multi-dimensional subslice relative to a parent slice."""
@@ -137,7 +143,7 @@ class TensorSliceRef:
 
     @property
     def num_bytes(self) -> int:
-        return self.tensor.slice_num_bytes(self.tensor_slice)
+        return tensor_slice_num_bytes(self.tensor, self.tensor_slice)
 
 
 def partition_range(total_length: int,

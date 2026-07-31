@@ -7,11 +7,12 @@ from MAPS.core.layout import (
     TensorRange,
     TensorSlice,
     _apply_layout_axis,
+    tensor_slice_num_bytes,
     tile_tensor_slice,
 )
 from MAPS.hw.chips import magia_mesh
 from MAPS.core.submesh import Submesh
-from MAPS.core.tensor import Tensor
+from maps.graph import Tensor
 
 
 def _format_slice_ranges(ranges: tuple[TensorRange, ...]) -> str:
@@ -33,7 +34,7 @@ def test_tensor_slice_num_elements_and_bytes_use_slice_shape() -> None:
     )
 
     assert tensor_slice.num_elements == 8 * 3 * 4
-    assert tensor.slice_num_bytes(tensor_slice) == tensor_slice.num_elements * 2
+    assert tensor_slice_num_bytes(tensor, tensor_slice) == tensor_slice.num_elements * 2
 
 
 def test_tensor_and_slice_support_rank_six() -> None:

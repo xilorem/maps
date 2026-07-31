@@ -1,10 +1,5 @@
+"""Migration bridge to the lowercase Graph-owned Imported Model."""
 
-from dataclasses import dataclass
+from maps.graph.model import ImportedModel, validate_imported_model
 
-from MAPS.core.constants import ConstantStore
-from MAPS.core.graph import Graph
-
-@dataclass(frozen=True)
-class ImportedModel:
-    graph: Graph
-    constants: ConstantStore
+__all__ = ["ImportedModel", "validate_imported_model"]

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from MAPS.arch import Device, Tile
+from MAPS.core.layout import tensor_slice_num_bytes
 from MAPS.ops.common.cost import OpCostModel
 from MAPS.ops.defs.conv_transforms import TransformTileWork
 
@@ -23,11 +24,11 @@ class ConvTransformCostModel(OpCostModel):
     ) -> int:
         del assigned_device
         bytes_read = sum(
-            ref.tensor.slice_num_bytes(ref.tensor_slice)
+            tensor_slice_num_bytes(ref.tensor, ref.tensor_slice)
             for ref in tile_work.input_slices
         )
         bytes_written = sum(
-            ref.tensor.slice_num_bytes(ref.tensor_slice)
+            tensor_slice_num_bytes(ref.tensor, ref.tensor_slice)
             for ref in tile_work.output_slices
         )
         total_bytes = bytes_read + bytes_written

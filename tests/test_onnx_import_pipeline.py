@@ -5,9 +5,7 @@ from tempfile import TemporaryDirectory
 
 import pytest
 
-from MAPS.core.graph import Graph
-from MAPS.importers.onnx.importer import import_onnx_graph
-from MAPS.importers.onnx.preprocess import prepare_onnx_model
+from maps.graph import Graph, import_onnx_graph, prepare_onnx_model
 from MAPS.ops.defs.gemm import GemmPayload
 
 

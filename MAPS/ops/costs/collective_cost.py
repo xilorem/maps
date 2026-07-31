@@ -7,7 +7,11 @@ from dataclasses import dataclass
 from MAPS.arch import Device, Tile
 from MAPS.transitions.transport import TransportCostModel
 from MAPS.core.graph import Node
-from MAPS.core.layout import TensorLayout, tile_tensor_slice
+from MAPS.core.layout import (
+    TensorLayout,
+    tensor_slice_num_bytes,
+    tile_tensor_slice,
+)
 from MAPS.ops.common.cost import OpCostModel
 
 
@@ -52,7 +56,10 @@ class AllReduceCostModel(OpCostModel):
             payload_tiles = tuple(
                 tile
                 for tile in group_tiles
-                if output_tensor.slice_num_bytes(tile_tensor_slice(output_tensor, output_layout, tile)) > 0
+                if tensor_slice_num_bytes(
+                    output_tensor,
+                    tile_tensor_slice(output_tensor, output_layout, tile),
+                ) > 0
             )
             if len(payload_tiles) <= 1:
                 group_costs.append(0)
@@ -64,7 +71,10 @@ class AllReduceCostModel(OpCostModel):
                     model.l1_to_l1(
                         tile,
                         root_tile,
-                        output_tensor.slice_num_bytes(tile_tensor_slice(output_tensor, output_layout, tile)),
+                        tensor_slice_num_bytes(
+                            output_tensor,
+                            tile_tensor_slice(output_tensor, output_layout, tile),
+                        ),
                     )
                     for tile in payload_tiles[1:]
                 ),
@@ -75,7 +85,10 @@ class AllReduceCostModel(OpCostModel):
                     model.l1_to_l1(
                         root_tile,
                         tile,
-                        output_tensor.slice_num_bytes(tile_tensor_slice(output_tensor, output_layout, tile)),
+                        tensor_slice_num_bytes(
+                            output_tensor,
+                            tile_tensor_slice(output_tensor, output_layout, tile),
+                        ),
                     )
                     for tile in payload_tiles[1:]
                 ),

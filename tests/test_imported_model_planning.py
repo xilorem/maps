@@ -3,10 +3,9 @@ import json
 import pytest
 
 from MAPS.arch import L1Memory, L2Memory, Mesh
-from MAPS.core import ConstantStore, Graph, Node, OpKind, Tensor
+from maps.graph import ConstantStore, Graph, ImportedModel, Node, OpKind, Tensor
 from MAPS.deployment import write_execution_plan_bundle
-from MAPS.importers.model import ImportedModel
-from MAPS.importers.onnx import import_onnx_model
+from maps.graph import import_onnx_model
 from MAPS.ops.defs.elementwise import UnaryElementwisePayload
 from MAPS.ops.defs.softmax import SoftmaxPayload
 from MAPS.planner.contracts.options import PlannerOptions, SpatialMappingOptions

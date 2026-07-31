@@ -5,7 +5,12 @@ from __future__ import annotations
 from typing import cast
 
 from MAPS.arch import Tile
-from MAPS.core.layout import TensorRange, TensorSlice, tile_tensor_slice
+from MAPS.core.layout import (
+    TensorRange,
+    TensorSlice,
+    tensor_slice_num_bytes,
+    tile_tensor_slice,
+)
 from MAPS.core.tensor import Tensor
 from MAPS.ops.common import OpPayload
 from MAPS.pipeline.execution_plan import ExecutionPlan
@@ -55,12 +60,14 @@ def estimate_stage_l1_memory_for_tile(
                     virtual_tile,
                 )
                 slot_count = execution_plan.execution.num_token_slots
-            allocation_sizes.append(tensor.slice_num_bytes(tensor_slice) * slot_count)
+            allocation_sizes.append(
+                tensor_slice_num_bytes(tensor, tensor_slice) * slot_count
+            )
         for binding in layer.outputs:
             tensor = execution_plan.tensors[binding.tensor_id]
             tensor_slice = tile_tensor_slice(tensor, binding.layout, virtual_tile)
             allocation_sizes.append(
-                tensor.slice_num_bytes(tensor_slice)
+                tensor_slice_num_bytes(tensor, tensor_slice)
                 * execution_plan.execution.num_token_slots
             )
     return permanent_l1_allocation_bytes(allocation_sizes)
@@ -101,7 +108,7 @@ def estimate_stage_l2_memory(
                 )
                 max_binding_bytes = max(
                     max_binding_bytes,
-                    tensor.slice_num_bytes(tensor_slice),
+                    tensor_slice_num_bytes(tensor, tensor_slice),
                 )
             l2_memory += max_binding_bytes
     return l2_memory

@@ -5,10 +5,10 @@ from dataclasses import dataclass
 import pytest
 
 from MAPS.arch import WorkKind
-from MAPS.core.graph import OpKind
-from MAPS.importers.onnx.graph_parser import parse_graph
-from MAPS.importers.onnx.tensor_parser import onnx_dtype_elem_bytes
-from MAPS.importers.onnx.utils import build_tensor_producer_table
+from maps.graph import OpKind, decompose_graph
+from maps.graph.onnx.graph_parser import parse_graph
+from maps.graph.onnx.tensor_parser import onnx_dtype_elem_bytes
+from maps.graph.onnx.utils import build_tensor_producer_table
 from MAPS.ops import SoftmaxPayload
 from MAPS.ops.defs.collective import AllReducePayload
 from MAPS.ops.defs.conv import ConvPayload
@@ -28,7 +28,6 @@ from MAPS.ops.defs.rearrange import ReshapePayload, TransposePayload
 from MAPS.ops.defs.split import SplitPayload, StaticSlicePayload
 from MAPS.ops.spec import OpSpec
 from MAPS.ops.common import OperationPayload
-from MAPS.transforms import decompose_graph
 
 
 def _make_tiny_matmul_graph():

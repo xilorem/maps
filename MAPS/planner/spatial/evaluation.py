@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from MAPS.arch import Mesh
+from MAPS.core.layout import tensor_slice_num_bytes
 from MAPS.planner.contracts.stages import StagePlacement, StagePlan
 from MAPS.planner.spatial.models import MappingEvaluation, StageIOBreakdown, TileIOScore
 from MAPS.transitions import (
@@ -211,8 +212,8 @@ def _compile_transfers(
                     _L2Transfer(
                         stage_id=transition.destination_stage_id,
                         virtual_tile_id=destination.virtual_tile_id,
-                        bytes=transition.tensor.slice_num_bytes(
-                            destination.tensor_slice
+                        bytes=tensor_slice_num_bytes(
+                            transition.tensor, destination.tensor_slice
                         ),
                     )
                 )
@@ -253,8 +254,8 @@ def _compile_transfers(
                     _L2Transfer(
                         stage_id=transition.source_stage_id,
                         virtual_tile_id=source.virtual_tile_id,
-                        bytes=transition.tensor.slice_num_bytes(
-                            source.tensor_slice
+                        bytes=tensor_slice_num_bytes(
+                            transition.tensor, source.tensor_slice
                         ),
                         row_bytes=row_bytes,
                         rows=rows,

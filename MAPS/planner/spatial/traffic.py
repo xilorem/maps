@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from MAPS.core.layout import tensor_slice_num_bytes
 from MAPS.planner.contracts.stages import StagePlan, virtual_submesh
 from MAPS.planner.spatial.models import VirtualTraffic
 from MAPS.transitions import (
@@ -41,7 +42,9 @@ def build_virtual_traffic(
     for transition in virtual_transitions:
         if isinstance(transition, VirtualInputTransition):
             for destination in transition.destinations:
-                bytes_ = transition.tensor.slice_num_bytes(destination.tensor_slice)
+                bytes_ = tensor_slice_num_bytes(
+                    transition.tensor, destination.tensor_slice
+                )
                 tile_id = destination.virtual_tile_id
                 input_weights[transition.destination_stage_id][tile_id] += bytes_
                 l2_read_weights[transition.destination_stage_id][tile_id] += bytes_
@@ -70,7 +73,7 @@ def build_virtual_traffic(
                 ] += bytes_
         elif isinstance(transition, VirtualOutputTransition):
             for source in transition.sources:
-                bytes_ = transition.tensor.slice_num_bytes(source.tensor_slice)
+                bytes_ = tensor_slice_num_bytes(transition.tensor, source.tensor_slice)
                 tile_id = source.virtual_tile_id
                 output_weights[transition.source_stage_id][tile_id] += bytes_
                 l2_write_weights[transition.source_stage_id][tile_id] += bytes_
