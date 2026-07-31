@@ -8,6 +8,7 @@ from MAPS.planner.contracts.stages import StageSelection
 from MAPS.planner.workload.candidates import StageCandidate, StageCandidateAnalyzer
 from MAPS.planner.workload.context import WorkloadContext
 from MAPS.planner.workload.metrics import (
+    SelectionEvaluation,
     evaluate_candidate_selection,
     selection_objective,
 )
@@ -61,7 +62,7 @@ def grow_stage_candidates(
     compute_weight: float,
     communication_weight: float,
     debug: bool,
-) -> dict[int, StageCandidate]:
+) -> tuple[dict[int, StageCandidate], SelectionEvaluation]:
     """Spend remaining tiles while improving the global bottleneck objective.
 
     On each iteration stages are ordered by their current bottleneck metric.
@@ -85,14 +86,15 @@ def grow_stage_candidates(
     )
     _debug(debug, "[workload_balancing] phase=greedy_growth")
 
+    current_evaluation = evaluate_candidate_selection(
+        selected_candidates,
+        mesh=mesh,
+        compute_weight=compute_weight,
+        communication_weight=communication_weight,
+        graph=context.graph,
+    )
     while used_tiles < mesh.num_tiles:
-        current_metrics = evaluate_candidate_selection(
-            selected_candidates,
-            mesh=mesh,
-            compute_weight=compute_weight,
-            communication_weight=communication_weight,
-            graph=context.graph,
-        )
+        current_metrics = current_evaluation.metrics
 
         stage_order = tuple(
             sorted(
@@ -167,8 +169,10 @@ def grow_stage_candidates(
 
             if growth is not None:
                 chosen_stage_id = stage_id
-                chosen_tile_count = growth.plan.tile_count
-                selected_candidates[stage_id] = growth
+                candidate, candidate_evaluation = growth
+                chosen_tile_count = candidate.plan.tile_count
+                selected_candidates[stage_id] = candidate
+                current_evaluation = candidate_evaluation
                 break
 
             _debug(debug, f"[workload_balancing] stage={stage_id} no_valid_growth")
@@ -193,7 +197,7 @@ def grow_stage_candidates(
             f"updated_tile_counts={_candidate_tile_counts(selected_candidates)}",
         )
 
-    return selected_candidates
+    return selected_candidates, current_evaluation
 
 
 def initial_candidate_for_stage(
@@ -233,58 +237,6 @@ def initial_candidate_for_stage(
     )
 
 
-def grow_tile_count_for_stage(
-    stage_id: int,
-    stage_selection: StageSelection,
-    mesh: Mesh,
-    tile_counts: dict[int, int],
-    used_tiles: int,
-    current_metric: float,
-    initializer_tensors: frozenset,
-    graph: Graph,
-    debug: bool = False,
-    compute_weight: float = 1.0,
-    communication_weight: float = 1.0,
-    current_selection_metrics: dict[int, float] | None = None,
-    num_token_slots: int = 2,
-) -> int | None:
-    """Return the smallest feasible stage growth that improves the objective."""
-
-    analyzer = StageCandidateAnalyzer(
-        stage_selection,
-        mesh,
-        initializer_tensors,
-        num_token_slots,
-    )
-    selected_candidates = {
-        selected_stage_id: analyzer.candidate(
-            selected_stage_id,
-            tile_count,
-        )
-        for selected_stage_id, tile_count in tile_counts.items()
-    }
-    if any(candidate is None for candidate in selected_candidates.values()):
-        raise ValueError("current tile counts must have L1-feasible candidates")
-    growth = _growth_candidate_for_stage(
-        stage_id=stage_id,
-        mesh=mesh,
-        selected_candidates={
-            selected_stage_id: candidate
-            for selected_stage_id, candidate in selected_candidates.items()
-            if candidate is not None
-        },
-        analyzer=analyzer,
-        used_tiles=used_tiles,
-        current_metric=current_metric,
-        debug=debug,
-        compute_weight=compute_weight,
-        communication_weight=communication_weight,
-        graph=graph,
-        current_selection_metrics=current_selection_metrics,
-    )
-    return None if growth is None else growth.plan.tile_count
-
-
 def _growth_candidate_for_stage(
     stage_id: int,
     mesh: Mesh,
@@ -298,7 +250,7 @@ def _growth_candidate_for_stage(
     communication_weight: float = 1.0,
     current_selection_metrics: dict[int, float] | None = None,
     candidate_counts: tuple[int, ...] | None = None,
-) -> StageCandidate | None:
+) -> tuple[StageCandidate, SelectionEvaluation] | None:
     """Return the first improving replacement candidate for one stage."""
 
     current_tile_count = selected_candidates[stage_id].plan.tile_count
@@ -333,13 +285,14 @@ def _growth_candidate_for_stage(
             continue
         candidate_selection = dict(selected_candidates)
         candidate_selection[stage_id] = candidate
-        candidate_metrics = evaluate_candidate_selection(
+        candidate_evaluation = evaluate_candidate_selection(
             candidate_selection,
             mesh=mesh,
             compute_weight=compute_weight,
             communication_weight=communication_weight,
             graph=graph,
         )
+        candidate_metrics = candidate_evaluation.metrics
         candidate_metric = candidate_metrics[stage_id]
         if current_selection_metrics is None:
             improved = candidate_metric < current_metric
@@ -363,7 +316,7 @@ def _growth_candidate_for_stage(
             f"stage={stage_id} candidate_tile_count={candidate_count} "
             f"accepted_improvement={current_metric - candidate_metric}",
         )
-        return candidate
+        return candidate, candidate_evaluation
     return None
 
 

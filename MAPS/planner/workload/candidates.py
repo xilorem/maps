@@ -15,10 +15,6 @@ from MAPS.planner.workload.memory import permanent_l1_allocation_for_tile_work
 from MAPS.planner.workload.submesh import representative_connected_submesh
 
 
-class NoL1FeasibleLayoutError(ValueError):
-    """No logical shape at one tile count fits permanent L1 residency."""
-
-
 @dataclass(frozen=True)
 class StageTileFacts:
     """Intrinsic facts for one virtual tile of a Stage Candidate."""
@@ -168,38 +164,6 @@ class StageCandidateAnalyzer:
             ):
                 best_candidate = candidate
         return best_candidate
-
-
-def best_stage_plan(
-    stage_nodes: tuple[Node, ...],
-    mesh: Mesh,
-    stage_id: int,
-    tile_count: int,
-    initializer_tensors: frozenset[Tensor],
-    num_token_slots: int = 2,
-) -> StagePlan:
-    """Choose the lowest-compute L1-feasible layout at one tile count.
-
-    Every factorization of ``tile_count`` is offered to each node payload as a
-    logical shape.  A candidate is legal only when the stage peak fits in every
-    representative tile's L1.  Compute cost breaks the primary tie, followed by
-    logical height for deterministic selection.
-    """
-
-    analyzer = StageCandidateAnalyzer(
-        stage_selection={stage_id: stage_nodes},
-        mesh=mesh,
-        initializer_tensors=initializer_tensors,
-        num_token_slots=num_token_slots,
-    )
-    candidate = analyzer.candidate(stage_id, tile_count)
-    if candidate is None:
-        names = "+".join(node.name for node in stage_nodes)
-        raise NoL1FeasibleLayoutError(
-            f"stage {names} has no valid logical shape for tile_count={tile_count} "
-            "using local stage layouts and permanent L1 allocation"
-        )
-    return candidate.plan
 
 
 def logical_shape_options(tile_count: int) -> tuple[tuple[int, int], ...]:

@@ -14,13 +14,14 @@ from MAPS.ops.defs.elementwise import ElementwiseTileWork, UnaryElementwisePaylo
 from MAPS.planner.passes.stage_selection import form_stages
 from MAPS.planner.passes.workload_balancing import balance_workload
 from MAPS.planner.workload import allocation as allocation_module
-from MAPS.planner.workload.allocation import grow_tile_count_for_stage
-from MAPS.planner.workload.candidates import StageCandidate
-from MAPS.planner.workload.metrics import (
-    estimate_selection_metrics,
-    virtual_communication_cycles,
+from MAPS.planner.workload.candidates import (
+    StageCandidate,
+    StageCandidateAnalyzer,
 )
-from MAPS.planner.workload.plans import best_plan_for_stage, plan_all_stages
+from MAPS.planner.workload.metrics import (
+    SelectionEvaluation,
+    StageMetricBreakdown,
+)
 from MAPS.planner.workload.memory import permanent_l1_allocation_for_tile
 from tests.noc_utils import rectangular_test_noc, rectangular_test_tiles
 
@@ -93,7 +94,9 @@ def test_balance_workload_gives_more_tiles_to_heavier_gemm() -> None:
     assert sum(allocation.values()) == mesh.num_tiles
 
 
-def test_virtual_traffic_charges_inter_stage_writes_to_producer_tiles() -> None:
+def test_workload_diagnostics_charge_inter_stage_writes_to_producer_tiles(
+    capsys,
+) -> None:
     producer = _gemm_node("producer", m=8, k=8, n=8)
     consumer = _gemm_node("consumer", m=8, k=8, n=8)
     consumer = Node(
@@ -122,17 +125,11 @@ def test_virtual_traffic_charges_inter_stage_writes_to_producer_tiles() -> None:
     )
     mesh = _mesh_with_l1(2, 1, l1_size=4096)
     stage_selection = {0: (producer,), 1: (consumer,)}
-    plans = plan_all_stages(
-        stage_selection,
-        mesh,
-        tile_counts={0: 1, 1: 1},
-        initializer_tensors=frozenset(),
-        debug=False,
-    )
+    balance_workload(graph, mesh, stage_selection, debug=True)
 
-    communication = virtual_communication_cycles(graph, mesh, plans)
-
-    assert communication[0][0] > communication[1][0]
+    output = capsys.readouterr().out
+    assert "stage=0 nodes=producer compute=512 communication=128" in output
+    assert "stage=1 nodes=consumer compute=512 communication=0" in output
 
 
 def test_balance_workload_preserves_layout_decisions() -> None:
@@ -228,7 +225,11 @@ def _plateau_node(
     )
 
 
-def test_balance_workload_reuses_candidates_across_growth_probes() -> None:
+@pytest.mark.parametrize("debug", (False, True))
+def test_balance_workload_reuses_candidates_across_growth_probes(
+    debug: bool,
+    capsys,
+) -> None:
     _CountingUnaryPayload.build_calls = 0
     input_tensor = Tensor("input", 1, (8,), 2, is_initializer=True)
     output = Tensor("output", 1, (8,), 2)
@@ -247,7 +248,8 @@ def test_balance_workload_reuses_candidates_across_growth_probes() -> None:
     )
     mesh = _mesh_with_l1(2, 1, l1_size=4096)
 
-    plans = balance_workload(graph, mesh, {0: (node,)})
+    plans = balance_workload(graph, mesh, {0: (node,)}, debug=debug)
+    capsys.readouterr()
 
     assert plans[0].tile_count == 2
     assert _CountingUnaryPayload.build_calls == 5
@@ -268,17 +270,23 @@ def test_balance_workload_rejects_growth_that_worsens_global_objective(
     def evaluate_selection(
         candidates: dict[int, StageCandidate],
         **kwargs: object,
-    ) -> dict[int, float]:
+    ) -> SelectionEvaluation:
         del kwargs
         tile_counts = tuple(
             candidates[stage_id].plan.tile_count
             for stage_id in sorted(candidates)
         )
-        return {
+        metrics = {
             (1, 1): {0: 10.0, 1: 9.0},
             (2, 1): {0: 5.0, 1: 20.0},
             (1, 2): {0: 10.0, 1: 8.0},
         }[tile_counts]
+        return SelectionEvaluation(
+            {
+                stage_id: StageMetricBreakdown(0, 0, metric)
+                for stage_id, metric in metrics.items()
+            }
+        )
 
     monkeypatch.setattr(
         allocation_module,
@@ -513,63 +521,19 @@ def test_balance_workload_can_use_selected_stage_groups() -> None:
         raise AssertionError("expected malformed explicit group to fail")
 
 
-def test_best_stage_plan_uses_l1_feasible_logical_shape_for_fixed_tile_count() -> None:
+def test_stage_candidate_uses_l1_feasible_logical_shape_for_fixed_tile_count() -> None:
     node = _gemm_node("gemm", m=4, k=16, n=7)
     mesh = _mesh_with_l1(6, 1, l1_size=32768)
 
-    plan = best_plan_for_stage(
-        stage_nodes=(node,),
-        mesh=mesh,
-        stage_id=0,
-        tile_count=6,
-        initializer_tensors=frozenset(),
-        debug=False,
-    )
+    candidate = StageCandidateAnalyzer(
+        {0: (node,)},
+        mesh,
+        frozenset(),
+    ).candidate(0, 6)
 
-    assert plan.tile_count == 6
-    assert plan.logical_shape[0] * plan.logical_shape[1] == 6
-
-
-def test_growth_prefers_tile_count_with_more_physical_shape_options() -> None:
-    node = _gemm_node("gemm", m=32, k=32, n=32)
-    mesh = _mesh_with_l1(4, 4, l1_size=32768)
-    stage_selection = {0: (node,)}
-    current_plan = best_plan_for_stage(
-        stage_nodes=(node,),
-        mesh=mesh,
-        stage_id=0,
-        tile_count=2,
-        initializer_tensors=frozenset(),
-        debug=False,
-    )
-    graph = Graph(
-        name="growth",
-        tensors=node.inputs + node.outputs,
-        nodes=(node,),
-    )
-    current_metric = estimate_selection_metrics(
-        {0: current_plan},
-        stage_selection,
-        mesh=mesh,
-        compute_weight=1.0,
-        communication_weight=1.0,
-        graph=graph,
-    )[0]
-
-    best_growth = grow_tile_count_for_stage(
-        stage_id=0,
-        stage_selection=stage_selection,
-        mesh=mesh,
-        tile_counts={0: 2},
-        used_tiles=2,
-        current_metric=current_metric,
-        initializer_tensors=frozenset(),
-        graph=graph,
-        debug=False,
-    )
-
-    assert best_growth is not None
-    assert best_growth > 2
+    assert candidate is not None
+    assert candidate.plan.tile_count == 6
+    assert candidate.plan.logical_shape[0] * candidate.plan.logical_shape[1] == 6
 
 
 def test_growth_prunes_stage_when_doubling_current_count_does_not_improve(
@@ -600,42 +564,30 @@ def test_growth_prunes_stage_when_doubling_current_count_does_not_improve(
     assert "stage=1 doubled_current_tile_count=4 no_improvement prune_stage" in output
 
 
-def test_best_stage_plan_rejects_tile_work_that_does_not_fit() -> None:
+def test_stage_candidate_rejects_tile_work_that_does_not_fit() -> None:
     node = _batched_gemm_node("batched", b=4, m=4, k=4, n=4)
     mesh = _mesh_with_l1(1, 1, l1_size=64)
 
-    try:
-        best_plan_for_stage(
-            stage_nodes=(node,),
-            mesh=mesh,
-            stage_id=0,
-            tile_count=1,
-            initializer_tensors=frozenset(),
-            debug=False,
-        )
-    except ValueError as exc:
-        assert "local stage layouts and permanent L1 allocation" in str(exc)
-    else:
-        raise AssertionError("expected tile-work L1 fit failure")
+    candidate = StageCandidateAnalyzer(
+        {0: (node,)},
+        mesh,
+        frozenset(),
+    ).candidate(0, 1)
+
+    assert candidate is None
 
 
-def test_best_stage_plan_counts_outputs_in_l1_fit() -> None:
+def test_stage_candidate_counts_outputs_in_l1_fit() -> None:
     node = _gemm_node("gemm", m=4, k=4, n=4)
     mesh = _mesh_with_l1(1, 1, l1_size=80)
 
-    try:
-        best_plan_for_stage(
-            stage_nodes=(node,),
-            mesh=mesh,
-            stage_id=0,
-            tile_count=1,
-            initializer_tensors=frozenset(),
-            debug=False,
-        )
-    except ValueError as exc:
-        assert "local stage layouts and permanent L1 allocation" in str(exc)
-    else:
-        raise AssertionError("expected output slice to be included in L1 fit")
+    candidate = StageCandidateAnalyzer(
+        {0: (node,)},
+        mesh,
+        frozenset(),
+    ).candidate(0, 1)
+
+    assert candidate is None
 
 
 def test_stage_l1_accounting_keeps_every_backend_allocation() -> None:
@@ -747,15 +699,12 @@ def test_permanent_l1_allocation_reproduces_tile_245_overflow() -> None:
         num_token_slots=2,
     ) == 858_624
 
-    with pytest.raises(ValueError, match="permanent L1 allocation"):
-        best_plan_for_stage(
-            stage_nodes=nodes,
-            mesh=mesh,
-            stage_id=0,
-            tile_count=1,
-            initializer_tensors=frozenset(),
-            num_token_slots=2,
-        )
+    assert StageCandidateAnalyzer(
+        {0: nodes},
+        mesh,
+        frozenset(),
+        num_token_slots=2,
+    ).candidate(0, 1) is None
 
 
 def test_permanent_l1_allocation_aligns_each_slice_start() -> None:

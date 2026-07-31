@@ -61,7 +61,7 @@ def balance_workload(
         debug,
     )
 
-    candidates = grow_stage_candidates(
+    candidates, evaluation = grow_stage_candidates(
         context,
         mesh,
         candidates,
@@ -89,13 +89,8 @@ def balance_workload(
 
     print_stage_metric_breakdown(
         enabled=debug,
-        plans=plans,
         stage_selection=context.stage_selection,
-        mesh=mesh,
-        graph_inputs=context.graph_inputs,
-        graph_outputs=context.graph_outputs,
-        producer_stage_id_by_tensor=context.producer_stage_id_by_tensor,
-        initializer_tensors=context.initializer_tensors,
+        evaluation=evaluation,
     )
     return plans
 
