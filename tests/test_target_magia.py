@@ -1,4 +1,3 @@
-from MAPS.planner.contracts.options import PlannerOptions, SpatialMappingOptions
 from maps.graph import TensorDType
 from maps.hardware import (
     DMAJob,
@@ -13,7 +12,7 @@ from maps.hardware import (
 from maps.operations.convolution_transforms import Im2ColPayload, OutputReformatPayload
 from maps.operations.cast import CastPayload
 from maps.operations.gemm import GemmPayload
-from maps.planner.plan import plan_graph
+from maps.planning import PlacementOptions, PlanningOptions, plan
 from maps.target import magia
 from maps.target import SpecializationOptions
 
@@ -106,15 +105,15 @@ def test_magia_specializes_convolution_deterministically_and_plans_it() -> None:
     ]
     assert [event.rewrite_name for event in first.report.events] == ["conv_to_gemm"]
 
-    plan = plan_graph(
+    execution_plan = plan(
         first.model.graph,
         magia.build_mesh(width=1, height=1),
-        PlannerOptions(
-            spatial_mapping=SpatialMappingOptions(print_mapping=False),
+        PlanningOptions(
+            placement=PlacementOptions(print_mapping=False),
             print_execution_plan_cost=False,
         ),
     )
-    assert [layer.device_name for layer in plan.stages[0].layers] == [
+    assert [layer.device_name for layer in execution_plan.stages[0].layers] == [
         "core",
         "redmule",
         "core",

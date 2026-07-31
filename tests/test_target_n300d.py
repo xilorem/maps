@@ -1,6 +1,5 @@
 import pytest
 
-from MAPS.planner.contracts.options import PlannerOptions, SpatialMappingOptions
 from maps.graph import TensorDType
 from maps.hardware import (
     DMAJob,
@@ -12,7 +11,7 @@ from maps.hardware import (
     WorkKind,
     WorkSignature,
 )
-from maps.planner.plan import plan_graph
+from maps.planning import PlacementOptions, PlanningOptions, plan
 from maps.target import n300d
 
 from tests.test_precision_lowering import _gemm_model
@@ -103,12 +102,12 @@ def test_n300d_specialization_is_deterministic_and_plans_tensix_work() -> None:
     assert first.model == model
     assert first.report.events == ()
 
-    plan = plan_graph(
+    execution_plan = plan(
         first.model.graph,
         n300d.build_mesh(),
-        PlannerOptions(
-            spatial_mapping=SpatialMappingOptions(print_mapping=False),
+        PlanningOptions(
+            placement=PlacementOptions(print_mapping=False),
             print_execution_plan_cost=False,
         ),
     )
-    assert plan.stages[0].layers[0].device_name == "tensix_matrix"
+    assert execution_plan.stages[0].layers[0].device_name == "tensix_matrix"
