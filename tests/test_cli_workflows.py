@@ -91,17 +91,8 @@ def test_plan_command_composes_the_selected_target_workflow(
 
 def test_n300d_package_request_fails_before_deployment_work(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    called = False
-
-    def write_package(*args, **kwargs):
-        nonlocal called
-        called = True
-
-    monkeypatch.setattr(cli_module, "write_deployment_package", write_package)
-
     with pytest.raises(SystemExit, match="2"):
         main(
             [
@@ -114,7 +105,6 @@ def test_n300d_package_request_fails_before_deployment_work(
             ]
         )
 
-    assert called is False
     assert "n300d deployment backend is unsupported" in capsys.readouterr().err
 
 

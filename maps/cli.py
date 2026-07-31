@@ -102,8 +102,6 @@ def _run_package(arguments: list[str]) -> int:
         return 0
 
     options = _package_build_parser().parse_args(arguments)
-    if options.target == "n300d":
-        raise ValueError("n300d deployment backend is unsupported")
     dimensions = _mesh_options(options.mesh)
     output = write_deployment_package(
         options.model,
