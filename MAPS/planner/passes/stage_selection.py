@@ -5,12 +5,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from MAPS.core.graph import Graph, Node
-from MAPS.core.tensor import Tensor
-from MAPS.ops.common.layout_relation import find_layout_relation
 from MAPS.planner.contracts.options import StageSelectionOptions
 from MAPS.planner.contracts.stages import StageSelection
-
-STAGE_GROUP_ID_ATTR = "stage_group_id"
+from MAPS.planner.validation.stages import (
+    StageCommunicationEdges,
+    explicit_stage_group_key,
+    internal_edges_are_compatible,
+)
 
 
 @dataclass(frozen=True)
@@ -24,66 +25,6 @@ class _Unit:
         return len(self.nodes)
 
 
-@dataclass(frozen=True)
-class _CommunicationEdges:
-    runtime_inputs: frozenset[Tensor]
-    graph_outputs: frozenset[Tensor]
-    producer_by_tensor: dict[Tensor, Node]
-    consumers_by_tensor: dict[Tensor, tuple[Node, ...]]
-
-    @classmethod
-    def from_graph(cls, graph: Graph) -> "_CommunicationEdges":
-        consumers_by_tensor: dict[Tensor, list[Node]] = {}
-        for node in graph.nodes:
-            for tensor in node.inputs:
-                consumers_by_tensor.setdefault(tensor, []).append(node)
-        return cls(
-            runtime_inputs=frozenset(graph.inputs) - frozenset(graph.initializers),
-            graph_outputs=frozenset(graph.outputs),
-            producer_by_tensor={
-                tensor: node
-                for node in graph.nodes
-                for tensor in node.outputs
-            },
-            consumers_by_tensor={
-                tensor: tuple(consumers)
-                for tensor, consumers in consumers_by_tensor.items()
-            },
-        )
-
-    def violation(self, nodes: tuple[Node, ...]) -> str | None:
-        node_ids = {id(node) for node in nodes}
-        for node in nodes[1:]:
-            for tensor in node.inputs:
-                if tensor in self.runtime_inputs:
-                    return (
-                        f"the incoming communication edge: Runtime Input "
-                        f"{tensor.name} reaches internal Layer {node.name}"
-                    )
-                producer = self.producer_by_tensor.get(tensor)
-                if producer is not None and id(producer) not in node_ids:
-                    return (
-                        f"the incoming communication edge: cross-stage input "
-                        f"{tensor.name} reaches internal Layer {node.name}"
-                    )
-        for node in nodes[:-1]:
-            for tensor in node.outputs:
-                if tensor in self.graph_outputs:
-                    return (
-                        f"the outgoing communication edge: graph output "
-                        f"{tensor.name} leaves internal Layer {node.name}"
-                    )
-                if any(
-                    id(consumer) not in node_ids
-                    for consumer in self.consumers_by_tensor.get(tensor, ())
-                ):
-                    return (
-                        f"the outgoing communication edge: cross-stage output "
-                        f"{tensor.name} leaves internal Layer {node.name}"
-                    )
-        return None
-
-
 def form_stages(
     graph: Graph,
     options: StageSelectionOptions | None = None,
@@ -91,7 +32,7 @@ def form_stages(
     """Collapse explicit units, then greedily coalesce compatible linear chains."""
 
     options = options or StageSelectionOptions()
-    communication_edges = _CommunicationEdges.from_graph(graph)
+    communication_edges = StageCommunicationEdges.from_graph(graph)
     units = _explicit_units(graph)
     if options.max_stage_nodes > 1:
         for unit in units:
@@ -102,12 +43,16 @@ def form_stages(
                     f"exceeding max_stage_nodes={options.max_stage_nodes}"
                 )
     if options.max_stage_nodes == 1:
-        stages = {
+        singleton_stages = {
             stage_id: unit.nodes
             for stage_id, unit in enumerate(units)
         }
-        _validate_explicit_stage_edges(stages, units, communication_edges)
-        return stages
+        _validate_explicit_stage_edges(
+            singleton_stages,
+            units,
+            communication_edges,
+        )
+        return singleton_stages
 
     unit_id_by_node = {
         id(node): unit_id
@@ -145,7 +90,7 @@ def form_stages(
         can_merge = (
             successors[current_last_unit] == {next_unit_id}
             and predecessors[next_unit_id] == {current_last_unit}
-            and _edges_are_compatible(
+            and internal_edges_are_compatible(
                 edges_by_units.get((current_last_unit, next_unit_id), ())
             )
             and communication_edges.violation(current + next_unit.nodes) is None
@@ -173,7 +118,7 @@ def form_stages(
 def _validate_explicit_stage_edges(
     stages: StageSelection,
     units: tuple[_Unit, ...],
-    communication_edges: _CommunicationEdges,
+    communication_edges: StageCommunicationEdges,
 ) -> None:
     stage_by_node_id = {
         id(node): stage_nodes
@@ -189,25 +134,8 @@ def _validate_explicit_stage_edges(
             raise ValueError(f"explicit stage group {unit.key!r} violates {violation}")
 
 
-def _edges_are_compatible(
-    edges: tuple[tuple[Node, int, Node, int], ...]
-    | list[tuple[Node, int, Node, int]],
-) -> bool:
-    if not edges:
-        return False
-    for _, _, consumer, input_index in edges:
-        relation = find_layout_relation(
-            consumer.payload,
-            input_index=input_index,
-            output_index=0,
-        )
-        if relation is None or not relation.guarantees_slice_containment:
-            return False
-    return True
-
-
 def _explicit_units(graph: Graph) -> tuple[_Unit, ...]:
-    keys = tuple(_explicit_stage_group_key(node) for node in graph.nodes)
+    keys = tuple(explicit_stage_group_key(node) for node in graph.nodes)
     positions_by_key: dict[object, list[int]] = {}
     for position, key in enumerate(keys):
         if key is not None:
@@ -259,20 +187,4 @@ def _dependency_connected(nodes: tuple[Node, ...]) -> bool:
         visited.add(node_id)
         pending.extend(neighbors[node_id] - visited)
     return visited == node_ids
-
-
-def _explicit_stage_group_key(node: Node) -> object | None:
-    if STAGE_GROUP_ID_ATTR not in node.attributes:
-        return None
-    group_key = node.attributes[STAGE_GROUP_ID_ATTR]
-    try:
-        hash(group_key)
-    except TypeError as exc:
-        raise ValueError(
-            f"node {node.name} has an unhashable "
-            f"{STAGE_GROUP_ID_ATTR}: {group_key!r}"
-        ) from exc
-    return group_key
-
-
 __all__ = ["form_stages"]

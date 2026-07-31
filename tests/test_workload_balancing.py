@@ -193,6 +193,147 @@ def test_balance_workload_accepts_explicit_stage_selection() -> None:
     assert len(plans[0].node_output_layouts) == 2
 
 
+def _elementwise_chain() -> tuple[Graph, Node, Node]:
+    input_tensor = Tensor("input", 1, (8,), 2)
+    intermediate = Tensor("intermediate", 1, (8,), 2)
+    output = Tensor("output", 1, (8,), 2)
+    first = Node(
+        "first",
+        OpKind.ELEMENTWISE,
+        inputs=(input_tensor,),
+        outputs=(intermediate,),
+        payload=UnaryElementwisePayload("Relu", input_tensor, intermediate),
+    )
+    second = Node(
+        "second",
+        OpKind.ELEMENTWISE,
+        inputs=(intermediate,),
+        outputs=(output,),
+        payload=UnaryElementwisePayload("Neg", intermediate, output),
+    )
+    return (
+        Graph(
+            "elementwise_chain",
+            tensors=(input_tensor, intermediate, output),
+            nodes=(first, second),
+            inputs=(input_tensor,),
+            outputs=(output,),
+        ),
+        first,
+        second,
+    )
+
+
+def test_balance_workload_accepts_automatically_formed_compatible_stage() -> None:
+    graph, first, second = _elementwise_chain()
+    mesh = _mesh_with_l1(2, 1, l1_size=4096)
+
+    plans = balance_workload(graph, mesh, form_stages(graph))
+
+    assert tuple(plans) == (0,)
+    assert plans[0].nodes == (first, second)
+
+
+def test_balance_workload_accepts_caller_supplied_compatible_stage() -> None:
+    graph, first, second = _elementwise_chain()
+    mesh = _mesh_with_l1(2, 1, l1_size=4096)
+
+    plans = balance_workload(graph, mesh, {7: (first, second)})
+
+    assert tuple(plans) == (7,)
+    assert plans[7].nodes == (first, second)
+
+
+def test_balance_workload_rejects_caller_supplied_incompatible_internal_edge() -> None:
+    first = _gemm_node("first", m=4, k=4, n=4)
+    second_weight = Tensor("second_weight", 2, (4, 4), 2)
+    output = Tensor("output", 2, (4, 4), 2)
+    second = Node(
+        "second",
+        OpKind.GEMM,
+        inputs=(first.outputs[0], second_weight),
+        outputs=(output,),
+        payload=GemmPayload(first.outputs[0], second_weight, None, output),
+    )
+    graph = Graph(
+        "incompatible_internal_edge",
+        nodes=(first, second),
+        initializers=(first.inputs[1], second_weight),
+    )
+    mesh = _mesh_with_l1(2, 1, l1_size=4096)
+
+    with pytest.raises(
+        ValueError,
+        match=r"stage 0 has incompatible internal dependency first->second",
+    ):
+        balance_workload(graph, mesh, {0: (first, second)})
+
+
+def test_balance_workload_rejects_caller_split_explicit_stage_group() -> None:
+    graph, first, second = _elementwise_chain()
+    first = Node(
+        first.name,
+        first.kind,
+        inputs=first.inputs,
+        outputs=first.outputs,
+        payload=first.payload,
+        attributes={"stage_group_id": "together"},
+    )
+    second = Node(
+        second.name,
+        second.kind,
+        inputs=second.inputs,
+        outputs=second.outputs,
+        payload=second.payload,
+        attributes={"stage_group_id": "together"},
+    )
+    graph = Graph(
+        graph.name,
+        tensors=graph.tensors,
+        nodes=(first, second),
+        inputs=graph.inputs,
+        outputs=graph.outputs,
+    )
+    mesh = _mesh_with_l1(2, 1, l1_size=4096)
+
+    with pytest.raises(
+        ValueError,
+        match=r"explicit stage group 'together' is split across stages 0 and 1",
+    ):
+        balance_workload(graph, mesh, {0: (first,), 1: (second,)})
+
+
+class _FailingLayoutUnaryPayload(UnaryElementwisePayload):
+    def output_layouts(self, submesh, logical_shape=None):
+        raise ValueError("concrete layout invariant failed")
+
+
+def test_balance_workload_propagates_concrete_layout_invariant_failure() -> None:
+    graph, first, second = _elementwise_chain()
+    failing_second = Node(
+        second.name,
+        second.kind,
+        inputs=second.inputs,
+        outputs=second.outputs,
+        payload=_FailingLayoutUnaryPayload(
+            "Neg",
+            second.inputs[0],
+            second.outputs[0],
+        ),
+    )
+    graph = Graph(
+        graph.name,
+        tensors=graph.tensors,
+        nodes=(first, failing_second),
+        inputs=graph.inputs,
+        outputs=graph.outputs,
+    )
+    mesh = _mesh_with_l1(2, 1, l1_size=4096)
+
+    with pytest.raises(ValueError, match="concrete layout invariant failed"):
+        balance_workload(graph, mesh, {0: (first, failing_second)})
+
+
 def test_balance_workload_can_use_selected_stage_groups() -> None:
     node0 = _gemm_node("gemm0", m=16, k=16, n=16)
     node1 = _gemm_node(

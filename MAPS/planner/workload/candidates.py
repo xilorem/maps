@@ -11,6 +11,10 @@ from MAPS.planner.workload.layouts import resolve_stage_layouts, verify_stage_lo
 from MAPS.planner.workload.submesh import representative_connected_submesh
 
 
+class NoL1FeasibleLayoutError(ValueError):
+    """No logical shape at one tile count fits permanent L1 residency."""
+
+
 def best_stage_plan(
     stage_nodes: tuple[Node, ...],
     mesh: Mesh,
@@ -29,13 +33,10 @@ def best_stage_plan(
 
     submesh = representative_connected_submesh(mesh, stage_id, tile_count)
     best_plan: StagePlan | None = None
-    best_workload: int | None = None
+    best_workload = float("inf")
     for logical_shape in logical_shape_options(tile_count):
-        try:
-            layouts = resolve_stage_layouts(stage_nodes, submesh, logical_shape)
-            verify_stage_locality(stage_nodes, layouts, submesh)
-        except ValueError:
-            continue
+        layouts = resolve_stage_layouts(stage_nodes, submesh, logical_shape)
+        verify_stage_locality(stage_nodes, layouts, submesh)
         allocated_l1_bytes = permanent_l1_allocation_for_stage(
             stage_nodes,
             layouts,
@@ -63,7 +64,7 @@ def best_stage_plan(
             best_plan, best_workload = plan, workload
     if best_plan is None:
         names = "+".join(node.name for node in stage_nodes)
-        raise ValueError(
+        raise NoL1FeasibleLayoutError(
             f"stage {names} has no valid logical shape for tile_count={tile_count} "
             "using local stage layouts and permanent L1 allocation"
         )

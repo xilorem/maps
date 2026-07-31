@@ -5,6 +5,7 @@ from __future__ import annotations
 from MAPS.arch import Mesh
 from MAPS.core.graph import Graph, Node
 from MAPS.planner.contracts.stages import StagePlan, StageSelection
+from MAPS.planner.workload.candidates import NoL1FeasibleLayoutError
 from MAPS.planner.workload.context import WorkloadContext
 from MAPS.planner.workload.metrics import estimate_selection_metrics, selection_objective
 from MAPS.planner.workload.plans import best_plan_for_stage, plan_all_stages
@@ -226,7 +227,7 @@ def initial_tile_count_for_stage(
                 debug=False,
                 num_token_slots=num_token_slots,
             )
-        except ValueError as exc:
+        except NoL1FeasibleLayoutError as exc:
             _debug(
                 debug,
                 "[workload_balancing] "
@@ -336,7 +337,7 @@ def _growth_candidate_for_stage(
                 debug=False,
                 num_token_slots=num_token_slots,
             )
-        except ValueError as exc:
+        except NoL1FeasibleLayoutError as exc:
             _debug(
                 debug,
                 "[workload_balancing] "
