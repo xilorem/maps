@@ -10,6 +10,7 @@ from .magia import (
     MAGIA_MESH_HEIGHT,
     MAGIA_MESH_WIDTH,
     magia_mesh,
+    magia_planner_options,
 )
 from .n300d import (
     N300D_L1_RESERVED_BYTES,
@@ -32,6 +33,7 @@ __all__ = [
     "MAGIA_MESH_HEIGHT",
     "MAGIA_MESH_WIDTH",
     "magia_mesh",
+    "magia_planner_options",
     "N300D_L1_RESERVED_BYTES",
     "N300D_L1_SIZE_BYTES",
     "N300D_L1_STACK_BYTES",

@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
 
-from MAPS.arch import WorkSignature
+from MAPS.arch import Mesh, WorkSignature
 from MAPS.core.constants import validate_constants
 from MAPS.importers.model import ImportedModel
 
 from .decompose import decompose_graph_with_sources
+from .precision import precision_lower_model
+
+if TYPE_CHECKING:
+    from MAPS.planner.contracts.options import GraphRewriteOptions
 
 
 @dataclass(frozen=True)
@@ -105,6 +109,22 @@ def _decompose_operations(model: ImportedModel) -> _TransformResult:
     )
 
 
+def _precision_lower_operations(model: ImportedModel, mesh: Mesh) -> _TransformResult:
+    rewritten, effects = precision_lower_model(model, mesh)
+    return _TransformResult(
+        model=rewritten,
+        effects=tuple(
+            _RewriteEffect(
+                source_node=effect.source_node,
+                original_signature=effect.original_signature,
+                resulting_signatures=effect.resulting_signatures,
+                converted_initializers=effect.converted_initializers,
+            )
+            for effect in effects
+        ),
+    )
+
+
 CANONICAL_GRAPH_REWRITES = (
     GraphRewrite("operation_decomposition", _decompose_operations),
 )
@@ -112,14 +132,32 @@ CANONICAL_GRAPH_REWRITES = (
 
 def run_graph_rewrites(
     model: ImportedModel,
+    *,
+    mesh: Mesh | None = None,
+    options: "GraphRewriteOptions | None" = None,
 ) -> tuple[ImportedModel, RewriteReport]:
     """Apply MAPS-owned rewrites in their one canonical order."""
+
+    if options is None:
+        from MAPS.planner.contracts.options import GraphRewriteOptions
+
+        options = GraphRewriteOptions()
 
     validate_constants(model.graph, model.constants)
     rewritten = model
     events = []
     for graph_rewrite in CANONICAL_GRAPH_REWRITES:
         result = graph_rewrite.apply(rewritten)
+        rewritten = result.model
+        events.extend(result.events)
+
+    if options.enable_precision_lowering:
+        if mesh is None:
+            raise ValueError("Precision Lowering requires a Mesh")
+        result = GraphRewrite(
+            "precision_lowering",
+            lambda current: _precision_lower_operations(current, mesh),
+        ).apply(rewritten)
         rewritten = result.model
         events.extend(result.events)
 

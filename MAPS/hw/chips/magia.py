@@ -22,11 +22,13 @@ from MAPS.hw.devices import (
     MAGIA_DEVICE_ASSIGNMENT,
     MAGIA_IDMA_READ_DEVICE,
     MAGIA_IDMA_WRITE_DEVICE,
+    MAGIA_PRECISION_LOWERING_RECIPES,
     MAGIA_REDMULE_DEVICE,
     MAGIA_SPATZ_DEVICE,
     MAGIA_TILE_DEVICES,
 )
 from MAPS.utils.print_mesh import print_mesh
+from MAPS.planner.contracts.options import GraphRewriteOptions, PlannerOptions
 
 MAGIA_MESH_WIDTH = 8
 MAGIA_MESH_HEIGHT = 8
@@ -179,6 +181,20 @@ def magia_mesh(
             for y in range(height)
             for x in range(width)
         ),
+        precision_lowering_recipes=MAGIA_PRECISION_LOWERING_RECIPES,
+    )
+
+
+def magia_planner_options(
+    *,
+    enable_precision_lowering: bool = True,
+) -> PlannerOptions:
+    """Return MAGIA defaults with optional precision lowering enabled."""
+
+    return PlannerOptions(
+        graph_rewrites=GraphRewriteOptions(
+            enable_precision_lowering=enable_precision_lowering,
+        )
     )
 
 

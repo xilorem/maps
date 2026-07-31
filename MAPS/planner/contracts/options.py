@@ -50,6 +50,13 @@ class StageSelectionOptions:
 
 
 @dataclass(frozen=True)
+class GraphRewriteOptions:
+    """Control supported optional Graph Rewrites in canonical order."""
+
+    enable_precision_lowering: bool = False
+
+
+@dataclass(frozen=True)
 class PlannerOptions:
     """Complete configuration for planning an already imported graph.
 
@@ -62,3 +69,4 @@ class PlannerOptions:
     spatial_mapping: SpatialMappingOptions = field(default_factory=SpatialMappingOptions)
     execution: ExecutionContract = field(default_factory=ExecutionContract)
     print_execution_plan_cost: bool = True
+    graph_rewrites: GraphRewriteOptions = field(default_factory=GraphRewriteOptions)

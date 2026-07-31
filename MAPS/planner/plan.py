@@ -186,7 +186,11 @@ def plan_model(
 
     from MAPS.deployment.bundle import DeploymentBundle
 
-    rewritten, rewrite_report = run_graph_rewrites(model)
+    rewritten, rewrite_report = run_graph_rewrites(
+        model,
+        mesh=mesh,
+        options=options.graph_rewrites,
+    )
     stage_plans, virtual_transitions, placements = _plan_decisions(
         rewritten.graph,
         mesh,
