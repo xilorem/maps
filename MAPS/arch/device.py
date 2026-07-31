@@ -70,6 +70,7 @@ class WorkKind(Enum):
             WorkKind.SQRT,
             WorkKind.SUB,
             WorkKind.TRANSPOSE,
+            WorkKind.WEIGHT_PACK,
         }:
             return WorkKind.ELEMENTWISE
         return self

@@ -20,7 +20,11 @@ from MAPS.ops.defs.conv_transforms import (
 from MAPS.ops.defs.direct_conv import Conv2DPayload
 
 from .effects import RewriteEffect, RewriteTransformResult
-from .graph_utils import build_graph_edges_from_nodes
+from .graph_utils import (
+    add_generated_tensor,
+    build_graph_edges_from_nodes,
+    reserve_generated_node_name,
+)
 
 
 def lower_fp16_convolutions(model: ImportedModel) -> RewriteTransformResult:
@@ -77,7 +81,7 @@ def lower_fp16_convolutions(model: ImportedModel) -> RewriteTransformResult:
                 initializers[packed_weight.name] = packed_weight
                 constants = constants.replace(packed_constant)
             else:
-                _add_tensor(packed_weight, tensors)
+                add_generated_tensor(packed_weight, tensors)
                 initializers[packed_weight.name] = packed_weight
                 constants = ConstantStore(constants.constants + (packed_constant,))
             packed_weights[op.w.name] = packed_weight
@@ -101,8 +105,8 @@ def lower_fp16_convolutions(model: ImportedModel) -> RewriteTransformResult:
             elem_bytes=op.output.elem_bytes,
             dtype=op.output.dtype,
         )
-        _add_tensor(im2col_output, tensors)
-        _add_tensor(gemm_output, tensors)
+        add_generated_tensor(im2col_output, tensors)
+        add_generated_tensor(gemm_output, tensors)
 
         stage_group = f"{node.name}::conv_to_gemm"
         im2col = Node(
@@ -149,7 +153,7 @@ def lower_fp16_convolutions(model: ImportedModel) -> RewriteTransformResult:
         )
         replacements = (im2col, gemm, output_reformat)
         for replacement in replacements:
-            _reserve_node_name(replacement.name, node.name, node_names)
+            reserve_generated_node_name(replacement.name, node_names)
         lowered_nodes.extend(replacements)
         effects.append(
             RewriteEffect(
@@ -208,15 +212,3 @@ def _pack_weight(
             data=packed.tobytes(),
         ),
     )
-
-
-def _add_tensor(tensor: Tensor, tensors: dict[str, Tensor]) -> None:
-    if tensor.name in tensors:
-        raise ValueError(f"generated tensor name collision: '{tensor.name}'")
-    tensors[tensor.name] = tensor
-
-
-def _reserve_node_name(name: str, source_name: str, node_names: set[str]) -> None:
-    if name != source_name and name in node_names:
-        raise ValueError(f"generated node name collision: '{name}'")
-    node_names.add(name)

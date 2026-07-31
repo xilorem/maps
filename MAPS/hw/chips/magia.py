@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from MAPS.arch import (
     EndpointKind,
+    GraphRewriteKind,
     L1Memory,
     L2Memory,
     Mesh,
@@ -182,7 +183,7 @@ def magia_mesh(
             for x in range(width)
         ),
         precision_lowering_recipes=MAGIA_PRECISION_LOWERING_RECIPES,
-        required_graph_rewrites=("conv_to_gemm",),
+        required_graph_rewrites=(GraphRewriteKind.CONV_TO_GEMM,),
     )
 
 

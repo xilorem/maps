@@ -16,7 +16,11 @@ from MAPS.ops.defs.cast import CastPayload
 from MAPS.ops.defs.gemm import GemmPayload
 
 from .effects import RewriteEffect, RewriteTransformResult
-from .graph_utils import build_graph_edges_from_nodes
+from .graph_utils import (
+    add_generated_tensor,
+    build_graph_edges_from_nodes,
+    reserve_generated_node_name,
+)
 
 
 def precision_lower_model(
@@ -122,7 +126,7 @@ def precision_lower_model(
                         initializers[tensor.name] = converted
                         constants = constants.replace(converted_constant)
                     else:
-                        _add_tensor(converted, tensors)
+                        add_generated_tensor(converted, tensors)
                         initializers[converted.name] = converted
                         constants = ConstantStore(
                             constants.constants + (converted_constant,)
@@ -146,8 +150,8 @@ def precision_lower_model(
                 outputs=(cast_tensor,),
                 payload=CastPayload(x=tensor, output=cast_tensor),
             )
-            _reserve_node_name(cast_node.name, node_names)
-            _add_tensor(cast_tensor, tensors)
+            reserve_generated_node_name(cast_node.name, node_names)
+            add_generated_tensor(cast_tensor, tensors)
             replacement_nodes.append(cast_node)
             target_inputs.append(cast_tensor)
 
@@ -164,7 +168,7 @@ def precision_lower_model(
             )
         )
         for target_output in target_outputs:
-            _add_tensor(target_output, tensors)
+            add_generated_tensor(target_output, tensors)
 
         lowered_gemm = Node(
             name=node.name,
@@ -203,7 +207,7 @@ def precision_lower_model(
                 outputs=(output,),
                 payload=CastPayload(x=target_output, output=output),
             )
-            _reserve_node_name(restore_node.name, node_names)
+            reserve_generated_node_name(restore_node.name, node_names)
             replacement_nodes.append(restore_node)
 
         lowered_nodes.extend(replacement_nodes)
@@ -257,18 +261,6 @@ def _require_assignment(
                 f"device {expected_device_name}, but tile {tile.tile_id} assigns "
                 f"{device.name}"
             )
-
-
-def _reserve_node_name(name: str, node_names: set[str]) -> None:
-    if name in node_names:
-        raise ValueError(f"generated node name collision: '{name}'")
-    node_names.add(name)
-
-
-def _add_tensor(tensor: Tensor, tensors: dict[str, Tensor]) -> None:
-    if tensor.name in tensors:
-        raise ValueError(f"generated tensor name collision: '{tensor.name}'")
-    tensors[tensor.name] = tensor
 
 
 def _convert_constant(constant: Constant, target_dtype: TensorDType) -> Constant:

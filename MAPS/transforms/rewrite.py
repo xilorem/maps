@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Callable
 
-from MAPS.arch import Mesh, WorkSignature
+from MAPS.arch import GraphRewriteKind, Mesh, WorkSignature
 from MAPS.core.constants import validate_constants
 from MAPS.importers.model import ImportedModel
 
@@ -121,7 +121,10 @@ def run_graph_rewrites(
         rewritten = result.model
         events.extend(result.events)
 
-    if mesh is not None and "conv_to_gemm" in mesh.required_graph_rewrites:
+    if (
+        mesh is not None
+        and GraphRewriteKind.CONV_TO_GEMM in mesh.required_graph_rewrites
+    ):
         result = GraphRewrite("conv_to_gemm", lower_fp16_convolutions).apply(
             rewritten
         )

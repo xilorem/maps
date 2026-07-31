@@ -14,7 +14,7 @@ from .device import (
 )
 from .memory import L1Memory, L2Memory
 from .execution import FixedDeviceAssignment, PrecisionLoweringRecipe
-from .mesh import Mesh
+from .mesh import GraphRewriteKind, Mesh
 from .noc import (
     EndpointKind,
     NoC,
@@ -36,6 +36,7 @@ __all__ = [
     "DeviceKind",
     "EndpointKind",
     "FixedDeviceAssignment",
+    "GraphRewriteKind",
     "L1Memory",
     "L2Memory",
     "MatrixDevice",

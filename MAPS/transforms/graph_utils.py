@@ -6,6 +6,22 @@ from MAPS.core.graph import Edge, Node
 from MAPS.core.tensor import Tensor
 
 
+def add_generated_tensor(tensor: Tensor, tensors: dict[str, Tensor]) -> None:
+    """Register generated Tensor metadata with deterministic collision failure."""
+
+    if tensor.name in tensors:
+        raise ValueError(f"generated tensor name collision: '{tensor.name}'")
+    tensors[tensor.name] = tensor
+
+
+def reserve_generated_node_name(name: str, node_names: set[str]) -> None:
+    """Reserve a generated Node name with deterministic collision failure."""
+
+    if name in node_names:
+        raise ValueError(f"generated node name collision: '{name}'")
+    node_names.add(name)
+
+
 def build_graph_edges_from_nodes(
     nodes: tuple[Node, ...],
     tensors: dict[str, Tensor],

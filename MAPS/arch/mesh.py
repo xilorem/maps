@@ -3,11 +3,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum, auto
 
 from .memory import L2Memory
 from .noc import NoC
 from .tile import Tile
 from .execution import PrecisionLoweringRecipe
+
+
+class GraphRewriteKind(Enum):
+    """Hardware-requested, type-preserving Graph Rewrites."""
+
+    CONV_TO_GEMM = auto()
 
 
 @dataclass(frozen=True)
@@ -20,7 +27,7 @@ class Mesh:
     noc: NoC
     tiles: tuple[Tile, ...]
     precision_lowering_recipes: tuple[PrecisionLoweringRecipe, ...] = ()
-    required_graph_rewrites: tuple[str, ...] = ()
+    required_graph_rewrites: tuple[GraphRewriteKind, ...] = ()
 
     def __post_init__(self) -> None:
         # check for invalid sizes
