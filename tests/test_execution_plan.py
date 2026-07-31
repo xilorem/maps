@@ -7,12 +7,21 @@ from maps.planning.submesh import Submesh
 from MAPS.core.tensor import Tensor
 from MAPS.hw.chips import magia_mesh
 from maps.operations.gemm import GemmPayload
-from MAPS.pipeline import InitializerInput, LocalInput, TransitionSource
+from maps.planning import (
+    ExecutionPlan,
+    InitializerInput,
+    Layer,
+    LayerInput,
+    LayerOutput,
+    LocalInput,
+    PlanningConstraints,
+    Stage,
+    TransitionSource,
+    validate_execution_plan,
+)
+from maps.planning.construction import construct_execution_plan
+from maps.planning.memory import estimate_stage_l1_memory_for_tile
 from maps.planning.stages import StagePlacement, StagePlan
-from MAPS.planner.passes.execution_plan_lowering import lower_execution_plan
-from MAPS.planner.passes.execution_plan_validation import validate_execution_plan
-from MAPS.planner.validation.contracts import PlannerConstraints
-from MAPS.planner.validation.memory import estimate_stage_l1_memory_for_tile
 from maps.planning.allocation.memory import permanent_l1_allocation_for_tile
 from maps.planning.transitions import (
     InputTransition,
@@ -45,7 +54,7 @@ def _placement(
     )
 
 
-def test_lower_execution_plan_unifies_communication_and_initializer_residency(
+def test_construct_execution_plan_unifies_communication_and_initializer_residency(
     tmp_path: Path,
 ) -> None:
     mesh = magia_mesh()
@@ -133,7 +142,7 @@ def test_lower_execution_plan_unifies_communication_and_initializer_residency(
     virtual_submeshes = {0: virtual0, 1: virtual1}
     virtual_transitions = build_virtual_transitions(graph, plans)
 
-    execution_plan = lower_execution_plan(
+    execution_plan = construct_execution_plan(
         graph,
         mesh,
         plans,
@@ -193,7 +202,7 @@ def test_lower_execution_plan_unifies_communication_and_initializer_residency(
                 frozenset(graph.initializers),
             )
 
-    report = validate_execution_plan(execution_plan, PlannerConstraints())
+    report = validate_execution_plan(execution_plan, PlanningConstraints())
     assert report.is_valid, report.violations
 
     payload = execution_plan_json_payload(execution_plan)
@@ -256,7 +265,6 @@ def test_lower_execution_plan_unifies_communication_and_initializer_residency(
 def test_execution_plan_validation_rejects_transition_endpoint_mismatches() -> None:
     from MAPS.arch import L2Memory, Mesh
     from maps.planning.layouts import TensorRange, TensorSlice
-    from MAPS.pipeline import ExecutionPlan, Layer, LayerInput, Stage
     from maps.planning.transitions import InputDestination
     from tests.noc_utils import rectangular_test_noc, rectangular_test_tiles
 
@@ -302,7 +310,7 @@ def test_execution_plan_validation_rejects_transition_endpoint_mismatches() -> N
     )
     invalid_plan = replace(execution_plan, transitions=(invalid_transition,))
 
-    report = validate_execution_plan(invalid_plan, PlannerConstraints())
+    report = validate_execution_plan(invalid_plan, PlanningConstraints())
 
     assert {violation.kind for violation in report.violations} >= {
         "transition_destination_tile_out_of_mesh",
@@ -316,7 +324,7 @@ def test_execution_plan_validation_rejects_transition_endpoint_mismatches() -> N
 
     binding_report = validate_execution_plan(
         invalid_binding_plan,
-        PlannerConstraints(),
+        PlanningConstraints(),
     )
 
     assert "stage_tensor_binding_invalid" in {
@@ -337,7 +345,7 @@ def test_execution_plan_validation_rejects_transition_endpoint_mismatches() -> N
 
     residency_report = validate_execution_plan(
         missing_residency_plan,
-        PlannerConstraints(),
+        PlanningConstraints(),
     )
 
     assert "initializer_residency_tiles_mismatch" in {
@@ -351,7 +359,7 @@ def test_execution_plan_validation_rejects_transition_endpoint_mismatches() -> N
     )
     initializer_transition_report = validate_execution_plan(
         initializer_transition_plan,
-        PlannerConstraints(),
+        PlanningConstraints(),
     )
     assert "initializer_transition" in {
         violation.kind
@@ -375,7 +383,7 @@ def test_execution_plan_validation_rejects_transition_endpoint_mismatches() -> N
     for invalid_reference, expected_violation in negative_reference_cases:
         negative_report = validate_execution_plan(
             replace(execution_plan, transitions=(invalid_reference,)),
-            PlannerConstraints(),
+            PlanningConstraints(),
         )
         assert expected_violation in {
             violation.kind
@@ -393,7 +401,6 @@ def test_execution_plan_validation_rejects_mismatched_transfer_regions() -> None
         TensorSlice,
         TensorSubSlice,
     )
-    from MAPS.pipeline import ExecutionPlan, Layer, LayerInput, LayerOutput, Stage
     from maps.planning.transitions import IntermediateTransition, Transfer
     from tests.noc_utils import rectangular_test_noc, rectangular_test_tiles
 
@@ -465,7 +472,7 @@ def test_execution_plan_validation_rejects_mismatched_transfer_regions() -> None
 
     report = validate_execution_plan(
         execution_plan,
-        PlannerConstraints(
+        PlanningConstraints(
             enforce_l1_capacity=False,
             enforce_l2_capacity=False,
         ),
@@ -487,7 +494,7 @@ def test_execution_plan_validation_rejects_mismatched_transfer_regions() -> None
                 ),
             ),
         ),
-        PlannerConstraints(
+        PlanningConstraints(
             enforce_l1_capacity=False,
             enforce_l2_capacity=False,
         ),
@@ -506,7 +513,7 @@ def test_execution_plan_validation_rejects_mismatched_transfer_regions() -> None
                 replace(transition, destination_stage_id=0),
             ),
         ),
-        PlannerConstraints(
+        PlanningConstraints(
             enforce_l1_capacity=False,
             enforce_l2_capacity=False,
         ),

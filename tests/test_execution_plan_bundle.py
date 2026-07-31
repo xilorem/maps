@@ -13,7 +13,7 @@ from MAPS.deployment import (
     validate_execution_plan_bundle_files,
     write_execution_plan_bundle,
 )
-from MAPS.pipeline import ExecutionPlan, Layer, LayerInput, Stage
+from maps.planning import ExecutionPlan, Layer, LayerInput, Stage
 from maps.operations.elementwise import UnaryElementwisePayload
 from maps.planning.transitions import InputDestination
 from tests.noc_utils import rectangular_test_noc, rectangular_test_tiles

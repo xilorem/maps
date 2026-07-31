@@ -5,12 +5,27 @@ import pytest
 from maps.hardware import FixedDeviceAssignment
 from maps.planning import (
     AllocationOptions,
+    ConstraintReport,
+    ConstraintViolation,
+    ExecutionContract,
     ExecutionPlan,
+    InitializerInput,
+    Layer,
+    LayerInput,
+    LayerOutput,
+    LocalInput,
     PlacementOptions,
+    PlanningConstraints,
     PlanningOptions,
+    Stage,
     StageFormationOptions,
+    TransitionSource,
     plan,
+    validate_execution_plan,
 )
+from maps.planning.construction import construct_execution_plan
+from maps.planning.memory import estimate_stage_l1_memory_for_tile
+from maps.planning.reporting import print_execution_plan_stage_cost
 from maps.planning.allocation import allocate
 from maps.planning.layouts import TensorLayout
 from maps.planning.placement import place
@@ -41,6 +56,25 @@ def test_planning_owns_transitions_placement_and_layout_contracts() -> None:
     assert place.__module__ == "maps.planning.placement"
     assert TensorLayout.__module__ == "maps.planning.layouts"
     assert Submesh.__module__ == "maps.planning.submesh"
+
+
+def test_planning_owns_execution_plan_construction_and_validation() -> None:
+    assert ExecutionContract.__module__ == "maps.planning.execution_plan"
+    assert ExecutionPlan.__module__ == "maps.planning.execution_plan"
+    assert Stage.__module__ == "maps.planning.execution_plan"
+    assert Layer.__module__ == "maps.planning.execution_plan"
+    assert LayerInput.__module__ == "maps.planning.execution_plan"
+    assert LayerOutput.__module__ == "maps.planning.execution_plan"
+    assert InitializerInput.__module__ == "maps.planning.execution_plan"
+    assert TransitionSource.__module__ == "maps.planning.execution_plan"
+    assert LocalInput.__module__ == "maps.planning.execution_plan"
+    assert construct_execution_plan.__module__ == "maps.planning.construction"
+    assert PlanningConstraints.__module__ == "maps.planning.validation"
+    assert ConstraintViolation.__module__ == "maps.planning.validation"
+    assert ConstraintReport.__module__ == "maps.planning.validation"
+    assert validate_execution_plan.__module__ == "maps.planning.validation"
+    assert estimate_stage_l1_memory_for_tile.__module__ == "maps.planning.memory"
+    assert print_execution_plan_stage_cost.__module__ == "maps.planning.reporting"
 
 
 @pytest.mark.parametrize(

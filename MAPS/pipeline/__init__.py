@@ -1,8 +1,8 @@
-"""Scheduled execution IR."""
+"""Legacy bridge to Planning-owned Execution Plan models."""
 
-from .execution import ExecutionContract
-from .execution_plan import ExecutionPlan
-from .layer import (
+from maps.planning.execution_plan import (
+    ExecutionContract,
+    ExecutionPlan,
     InitializerInput,
     Layer,
     LayerInput,
@@ -10,8 +10,8 @@ from .layer import (
     LayerOutput,
     LocalInput,
     TransitionSource,
+    Stage,
 )
-from .stage import Stage
 
 __all__ = [
     "ExecutionContract",

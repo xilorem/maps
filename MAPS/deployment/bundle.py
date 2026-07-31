@@ -10,9 +10,11 @@ from typing import Any
 
 from MAPS.core.constants import ConstantStore, validate_constants
 from MAPS.core.graph import Graph
-from MAPS.pipeline.execution_plan import ExecutionPlan
-from MAPS.planner.passes.execution_plan_validation import require_valid_execution_plan
-from MAPS.planner.validation.contracts import PlannerConstraints
+from maps.planning import (
+    ExecutionPlan,
+    PlanningConstraints,
+    require_valid_execution_plan,
+)
 from maps.planning.transitions.contracts import InputTransition, OutputTransition
 from MAPS.utils.execution_plan_json import execution_plan_json_payload
 from MAPS.transforms.rewrite import RewriteReport
@@ -123,7 +125,7 @@ def write_execution_plan_bundle(
     validate_constants(bundle.graph, bundle.constants)
     require_valid_execution_plan(
         bundle.execution_plan,
-        PlannerConstraints(),
+        PlanningConstraints(),
         error_prefix="deployment bundle has an invalid Execution Plan",
     )
     packed = pack_weights(bundle.execution_plan, bundle.constants)

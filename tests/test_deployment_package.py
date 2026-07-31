@@ -15,7 +15,7 @@ from MAPS.deployment import (
     write_deployment_package,
 )
 from MAPS.hw.chips import magia_mesh
-from MAPS.pipeline import ExecutionContract
+from maps.planning import ExecutionContract
 from MAPS.planner.contracts.options import PlannerOptions
 from maps.planning import StageFormationOptions
 from MAPS.planner.plan import build_execution_plan_bundle

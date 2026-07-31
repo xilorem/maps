@@ -10,9 +10,8 @@ from MAPS.importers.model import ImportedModel
 from maps.operations.elementwise import UnaryElementwisePayload
 from maps.operations.gemm import GemmPayload
 from MAPS.planner.contracts.options import PlannerOptions, SpatialMappingOptions
-from MAPS.planner.passes.execution_plan_validation import validate_execution_plan
+from maps.planning import PlanningConstraints, validate_execution_plan
 from MAPS.planner.plan import plan_graph, plan_model
-from MAPS.planner.validation.contracts import PlannerConstraints
 from MAPS.utils.execution_plan_json import execution_plan_json_payload
 
 
@@ -155,7 +154,7 @@ def test_execution_plan_validation_rejects_incapable_layer_device_name() -> None
     invalid_stage = replace(execution_plan.stages[0], layers=(invalid_layer,))
     invalid_plan = replace(execution_plan, stages=(invalid_stage,))
 
-    report = validate_execution_plan(invalid_plan, PlannerConstraints())
+    report = validate_execution_plan(invalid_plan, PlanningConstraints())
 
     assert not report.is_valid
     assert report.violations[0].kind == "layer_device_assignment_invalid"
@@ -174,7 +173,7 @@ def test_execution_plan_validation_rejects_missing_layer_device_name() -> None:
 
     report = validate_execution_plan(
         replace(execution_plan, stages=(stage,)),
-        PlannerConstraints(),
+        PlanningConstraints(),
     )
 
     assert not report.is_valid

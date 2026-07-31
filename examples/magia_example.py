@@ -11,14 +11,16 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from MAPS.deployment import write_execution_plan_bundle
 from maps.target.magia import build_mesh
-from MAPS.pipeline import ExecutionContract
+from maps.planning import (
+    ExecutionContract,
+    PlanningConstraints,
+    validate_execution_plan,
+)
 from MAPS.planner.contracts.options import (
     PlannerOptions,
     SpatialMappingOptions,
 )
 from maps.planning import AllocationOptions, StageFormationOptions
-from MAPS.planner.passes.execution_plan_validation import validate_execution_plan
-from MAPS.planner.validation.contracts import PlannerConstraints
 from MAPS.planner.plan import build_execution_plan_bundle
 from MAPS.utils.print_submeshes import print_submeshes
 
@@ -50,7 +52,7 @@ def main():
         ),
     )
     execution_plan = bundle.execution_plan
-    report = validate_execution_plan(execution_plan, PlannerConstraints())
+    report = validate_execution_plan(execution_plan, PlanningConstraints())
 
     print(f"Model: {execution_plan.name}")
     print(f"Mesh: {mesh.width}x{mesh.height}")

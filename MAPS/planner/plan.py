@@ -10,23 +10,23 @@ from MAPS.core.graph import Graph
 from MAPS.importers.onnx.importer import import_onnx_graph, import_onnx_model
 from MAPS.importers.model import ImportedModel
 from MAPS.importers.onnx.preprocess import InputShapes
-from MAPS.pipeline.execution import ExecutionContract
-from MAPS.pipeline.execution_plan import ExecutionPlan
+from maps.planning import (
+    ExecutionContract,
+    ExecutionPlan,
+    PlanningConstraints,
+    require_valid_execution_plan,
+    validate_execution_plan,
+)
+from maps.planning.construction import construct_execution_plan
 from MAPS.planner.contracts.options import (
     PlannerOptions,
     SpatialMappingOptions,
 )
 from maps.planning import AllocationOptions, StageFormationOptions
-from MAPS.planner.passes.execution_plan_lowering import lower_execution_plan
-from MAPS.planner.passes.execution_plan_validation import (
-    require_valid_execution_plan,
-    validate_execution_plan,
-)
 from maps.planning.placement import place
 from maps.planning.stage_formation import form_stages
 from maps.planning.allocation import allocate
-from MAPS.planner.reporting.execution_plan import print_execution_plan_stage_cost
-from MAPS.planner.validation.contracts import PlannerConstraints
+from maps.planning.reporting import print_execution_plan_stage_cost
 from maps.planning.transitions import build_virtual_transitions
 from MAPS.utils.execution_plan_json import write_execution_plan_json
 from MAPS.transforms import run_graph_rewrites
@@ -65,7 +65,7 @@ def plan_graph(
         options,
     )
 
-    execution_plan = lower_execution_plan(
+    execution_plan = construct_execution_plan(
         graph,
         mesh,
         stage_plans,
@@ -75,7 +75,7 @@ def plan_graph(
     )
     validation = validate_execution_plan(
         execution_plan,
-        PlannerConstraints(max_stage_nodes=options.stage_formation.max_stage_nodes),
+        PlanningConstraints(max_stage_nodes=options.stage_formation.max_stage_nodes),
     )
     if not validation.is_valid:
         details = "; ".join(
@@ -195,7 +195,7 @@ def plan_model(
         mesh,
         options,
     )
-    execution_plan = lower_execution_plan(
+    execution_plan = construct_execution_plan(
         rewritten.graph,
         mesh,
         stage_plans,
@@ -205,7 +205,7 @@ def plan_model(
     )
     require_valid_execution_plan(
         execution_plan,
-        PlannerConstraints(),
+        PlanningConstraints(),
         error_prefix="planner produced an invalid Execution Plan",
     )
     if options.print_execution_plan_cost:

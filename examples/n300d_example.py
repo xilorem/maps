@@ -10,8 +10,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from maps.target.n300d import build_mesh
-from MAPS.planner.passes.execution_plan_validation import validate_execution_plan
-from MAPS.planner.validation.contracts import PlannerConstraints
+from maps.planning import PlanningConstraints, validate_execution_plan
 from MAPS.planner.plan import build_execution_plan
 from MAPS.utils.execution_plan_json import write_execution_plan_json
 from MAPS.utils.print_submeshes import print_submeshes
@@ -31,7 +30,7 @@ def main():
         print_spatial_mapping=True,
         print_spatial_mapping_progress=True,
     )
-    report = validate_execution_plan(execution_plan, PlannerConstraints())
+    report = validate_execution_plan(execution_plan, PlanningConstraints())
 
     print(f"Model: {execution_plan.name}")
     print(f"Mesh: {mesh.width}x{mesh.height}")

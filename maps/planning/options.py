@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from MAPS.pipeline.execution import ExecutionContract
+from maps.planning.execution_plan import ExecutionContract
 
 
 @dataclass(frozen=True)

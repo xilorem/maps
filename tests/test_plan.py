@@ -4,16 +4,16 @@ from tempfile import TemporaryDirectory
 
 from MAPS.arch import L1Memory, L2Memory, Mesh
 from MAPS.core.graph import OpKind
-from MAPS.pipeline import (
+from maps.planning import (
     ExecutionPlan,
     InitializerInput,
     LocalInput,
+    PlanningConstraints,
     TransitionSource,
+    validate_execution_plan,
 )
 import MAPS.planner.plan as plan_module
-from MAPS.planner.passes.execution_plan_validation import validate_execution_plan
 from MAPS.planner.plan import build_execution_plan
-from MAPS.planner.validation.contracts import PlannerConstraints
 from maps.planning.transitions import (
     InputTransition,
     IntermediateTransition,
@@ -113,7 +113,7 @@ def test_build_execution_plan_returns_a_valid_execution_plan() -> None:
     )
     assert execution_plan.stages[1].layers[0].inputs[0].source.transition_id == 1
 
-    report = validate_execution_plan(execution_plan, PlannerConstraints())
+    report = validate_execution_plan(execution_plan, PlanningConstraints())
     assert report.is_valid, report.violations
 
 
@@ -169,7 +169,7 @@ def test_build_execution_plan_lowers_softmax_into_edge_communicating_stages() ->
 
     report = validate_execution_plan(
         execution_plan,
-        PlannerConstraints(max_stage_nodes=5),
+        PlanningConstraints(max_stage_nodes=5),
     )
     assert report.is_valid, report.violations
 
@@ -279,7 +279,7 @@ def test_build_execution_plan_disables_mapping_progress_by_default(monkeypatch) 
         seen["execution_plan"] = ExecutionPlan("built", mesh)
         return seen["execution_plan"]
 
-    monkeypatch.setattr(plan_module, "lower_execution_plan", fake_lower)
+    monkeypatch.setattr(plan_module, "construct_execution_plan", fake_lower)
     monkeypatch.setattr(
         plan_module,
         "print_execution_plan_stage_cost",
@@ -341,7 +341,7 @@ def test_build_execution_plan_can_enable_mapping_progress(monkeypatch) -> None:
         seen["execution_plan"] = ExecutionPlan("built", mesh)
         return seen["execution_plan"]
 
-    monkeypatch.setattr(plan_module, "lower_execution_plan", fake_lower)
+    monkeypatch.setattr(plan_module, "construct_execution_plan", fake_lower)
     monkeypatch.setattr(
         plan_module,
         "print_execution_plan_stage_cost",

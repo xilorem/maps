@@ -1,6 +1,6 @@
-"""Migration-only bridge to the existing scheduled execution IR."""
+"""Migration-only bridge to Planning-owned Execution Plan models."""
 
-from MAPS.pipeline import (
+from maps.planning.execution_plan import (
     ExecutionContract,
     ExecutionPlan,
     InitializerInput,

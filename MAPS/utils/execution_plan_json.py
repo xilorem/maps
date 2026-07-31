@@ -11,8 +11,12 @@ from typing import Any
 from MAPS.arch import Mesh
 from MAPS.core.dtype import TensorDType
 from maps.planning.submesh import Submesh
-from MAPS.pipeline.execution_plan import ExecutionPlan
-from MAPS.pipeline.layer import InitializerInput, LocalInput, TransitionSource
+from maps.planning import (
+    ExecutionPlan,
+    InitializerInput,
+    LocalInput,
+    TransitionSource,
+)
 from maps.operations.elementwise import (
     BinaryElementwisePayload,
     UnaryElementwisePayload,

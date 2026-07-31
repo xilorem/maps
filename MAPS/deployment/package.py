@@ -13,7 +13,7 @@ from typing import Any, Callable
 
 from MAPS.deployment.bundle import write_execution_plan_bundle
 from MAPS.hw.chips import magia_mesh
-from MAPS.pipeline import ExecutionContract
+from maps.planning import ExecutionContract
 from MAPS.planner.contracts.options import (
     PlannerOptions,
     SpatialMappingOptions,

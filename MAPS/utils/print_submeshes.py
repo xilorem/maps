@@ -6,7 +6,7 @@ from collections import defaultdict
 import re
 
 from MAPS.arch import EndpointKind
-from MAPS.pipeline.execution_plan import ExecutionPlan
+from maps.planning import ExecutionPlan
 
 
 def print_submeshes(execution_plan: ExecutionPlan) -> None:

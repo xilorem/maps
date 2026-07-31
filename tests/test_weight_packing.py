@@ -6,7 +6,7 @@ import pytest
 from MAPS.arch import L2Memory, Mesh
 from MAPS.core import Constant, ConstantStore, Tensor, TensorDType
 from MAPS.deployment.weights import pack_weights
-from MAPS.pipeline import ExecutionPlan
+from maps.planning import ExecutionPlan
 from tests.noc_utils import rectangular_test_noc, rectangular_test_tiles
 
 

@@ -8,7 +8,7 @@ from maps.planning.options import (
     AllocationOptions as _AllocationOptions,
     StageFormationOptions as _StageFormationOptions,
 )
-from MAPS.pipeline.execution import ExecutionContract
+from maps.planning.execution_plan import ExecutionContract
 
 
 @dataclass(frozen=True)

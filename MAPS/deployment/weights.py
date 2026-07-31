@@ -10,7 +10,7 @@ import numpy as np
 
 from MAPS.core.constants import Constant, ConstantStore
 from MAPS.core.dtype import TensorDType
-from MAPS.pipeline.execution_plan import ExecutionPlan
+from maps.planning import ExecutionPlan
 
 
 DEFAULT_WEIGHT_ALIGNMENT = 16

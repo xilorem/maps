@@ -2,14 +2,36 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from maps.graph import Graph
+from maps.hardware import Mesh
 
-if TYPE_CHECKING:
-    from maps.graph import Graph
-    from maps.hardware import Mesh
-    from MAPS.pipeline import ExecutionPlan
-
-    from .options import PlanningOptions
+from .construction import construct_execution_plan
+from .execution_plan import (
+    ExecutionContract,
+    ExecutionPlan,
+    InitializerInput,
+    Layer,
+    LayerInput,
+    LayerInputSource,
+    LayerOutput,
+    LocalInput,
+    Stage,
+    TransitionSource,
+)
+from .options import (
+    AllocationOptions,
+    PlacementOptions,
+    PlanningOptions,
+    StageFormationOptions,
+)
+from .reporting import print_execution_plan_stage_cost
+from .validation import (
+    ConstraintReport,
+    ConstraintViolation,
+    PlanningConstraints,
+    require_valid_execution_plan,
+    validate_execution_plan,
+)
 
 
 def plan(
@@ -24,22 +46,13 @@ def plan(
     filesystem work.
     """
 
-    from MAPS.planner.passes.execution_plan_lowering import lower_execution_plan
-    from MAPS.planner.passes.execution_plan_validation import (
-        require_valid_execution_plan,
-    )
     from maps.planning.placement import place
-    from MAPS.planner.reporting.execution_plan import print_execution_plan_stage_cost
-    from MAPS.planner.validation.contracts import PlannerConstraints
     from maps.planning.transitions import build_virtual_transitions
     from maps.planning.allocation import allocate
     from maps.planning.stage_formation import form_stages
 
-    from .options import PlanningOptions
-
     options = options or PlanningOptions()
 
-    # TODO(maps-repository-architecture 11): migrate Execution Plan ownership.
     stage_formation = form_stages(
         graph,
         options.stage_formation,
@@ -62,7 +75,7 @@ def plan(
         print_placement=options.placement.print_placement,
         print_costs=options.placement.print_costs,
     )
-    execution_plan = lower_execution_plan(
+    execution_plan = construct_execution_plan(
         graph,
         mesh,
         stage_plans,
@@ -72,7 +85,7 @@ def plan(
     )
     require_valid_execution_plan(
         execution_plan,
-        PlannerConstraints(
+        PlanningConstraints(
             max_stage_nodes=options.stage_formation.max_stage_nodes,
         ),
         error_prefix="planner produced an invalid Execution Plan",
@@ -89,30 +102,25 @@ def plan(
     return execution_plan
 
 
-def __getattr__(name: str):
-    """Load public Planning contracts without coupling internal phase imports."""
-
-    if name == "ExecutionPlan":
-        from MAPS.pipeline import ExecutionPlan
-
-        return ExecutionPlan
-    if name in {
-        "AllocationOptions",
-        "PlacementOptions",
-        "PlanningOptions",
-        "StageFormationOptions",
-    }:
-        from . import options
-
-        return getattr(options, name)
-    raise AttributeError(name)
-
-
 __all__ = [
     "AllocationOptions",
+    "ConstraintReport",
+    "ConstraintViolation",
+    "ExecutionContract",
     "ExecutionPlan",
+    "InitializerInput",
+    "Layer",
+    "LayerInput",
+    "LayerInputSource",
+    "LayerOutput",
+    "LocalInput",
     "PlacementOptions",
+    "PlanningConstraints",
     "PlanningOptions",
+    "Stage",
     "StageFormationOptions",
+    "TransitionSource",
     "plan",
+    "require_valid_execution_plan",
+    "validate_execution_plan",
 ]
