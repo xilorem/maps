@@ -5,8 +5,9 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
+from MAPS.arch import Device, Tile
+
 if TYPE_CHECKING:
-    from MAPS.arch import Device, Tile
     from MAPS.core.graph import Node
     from MAPS.core.layout import TensorLayout
     from MAPS.ops.common.tile_work import TileWork
@@ -40,3 +41,14 @@ class OpCostModel(ABC):
 
         del node, output_layouts
         return 0
+
+
+def require_tile_device(tile: Tile, assigned_device: Device) -> Device:
+    """Return an assigned Device only when it belongs to the costing Tile."""
+
+    if assigned_device not in tile.devices:
+        raise ValueError(
+            f"assigned device {assigned_device.name} is not present on tile "
+            f"{tile.tile_id}"
+        )
+    return assigned_device

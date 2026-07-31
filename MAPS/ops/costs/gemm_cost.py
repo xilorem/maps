@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 from MAPS.arch import Device, Tile
 from MAPS.ops.defs.gemm import GemmTileWork
-from MAPS.ops.common.cost import OpCostModel
+from MAPS.ops.common.cost import OpCostModel, require_tile_device
 
 
 @dataclass(frozen=True)
@@ -19,9 +19,4 @@ class GemmCostModel(OpCostModel):
         tile: Tile,
         assigned_device: Device,
     ) -> int:
-        if assigned_device not in tile.devices:
-            raise ValueError(
-                f"assigned device {assigned_device.name} is not present on tile "
-                f"{tile.tile_id}"
-            )
-        return assigned_device.cycles(tile_work)
+        return require_tile_device(tile, assigned_device).cycles(tile_work)
