@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import cast
 
-from maps.hardware import Mesh, WorkSignature
+from maps.hardware import Mesh, Tile, WorkSignature
 from maps.graph import Node
 from maps.graph import Tensor
 from maps.operations.contracts import OpPayload
@@ -185,7 +185,7 @@ def _node_cost(cost_model, tile_work, tile, device_name: str) -> int:
     )
 
 
-def assigned_device_name(node: Node, tiles: tuple) -> str:
+def assigned_device_name(node: Node, tiles: tuple[Tile, ...]) -> str:
     """Resolve one stable Device name for a Node across homogeneous Tiles."""
 
     signature = WorkSignature.from_node(node)

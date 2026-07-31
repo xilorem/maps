@@ -64,8 +64,6 @@ def _compact_l2_label(label: str) -> str:
 
 def _base36(value: int) -> str:
     digits = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-    if value < 0:
-        raise ValueError("base36 value must be >= 0")
     if value < 36:
         return digits[value]
     result = []

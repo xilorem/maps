@@ -19,6 +19,7 @@ from maps.graph import (
     TensorDType,
     decompose_graph,
     import_onnx_model,
+    run_graph_rewrites,
     validate_imported_model,
 )
 
@@ -111,3 +112,41 @@ def test_importing_logical_graph_does_not_load_hardware_or_planning() -> None:
     )
 
     assert result.returncode == 0, result.stderr
+
+
+def test_graph_rewrites_reject_generated_node_name_collisions(tmp_path: Path) -> None:
+    import onnx
+    from onnx import TensorProto, helper
+
+    x = helper.make_tensor_value_info("x", TensorProto.FLOAT, [2, 4])
+    intermediate = helper.make_tensor_value_info(
+        "intermediate", TensorProto.FLOAT, [2, 4]
+    )
+    output = helper.make_tensor_value_info("output", TensorProto.FLOAT, [2, 4])
+    source = helper.make_model(
+        helper.make_graph(
+            (
+                helper.make_node(
+                    "Softmax", ("x",), ("intermediate",), name="softmax"
+                ),
+                helper.make_node(
+                    "Relu",
+                    ("intermediate",),
+                    ("output",),
+                    name="softmax__exp",
+                ),
+            ),
+            "collision",
+            (x,),
+            (output,),
+            value_info=(intermediate,),
+        )
+    )
+    model_path = tmp_path / "collision.onnx"
+    onnx.save(source, model_path)
+
+    with pytest.raises(
+        ValueError,
+        match="generated node name collision: 'softmax__exp'",
+    ):
+        run_graph_rewrites(import_onnx_model(model_path))

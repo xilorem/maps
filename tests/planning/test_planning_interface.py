@@ -4,7 +4,9 @@ from pathlib import Path
 
 import pytest
 
+from maps.graph import Edge, Graph, Node, OpKind, Tensor
 from maps.hardware import FixedDeviceAssignment
+from maps.operations.elementwise import UnaryElementwisePayload
 from maps.planning import (
     AllocationOptions,
     ConstraintReport,
@@ -274,3 +276,74 @@ def test_unsupported_device_signature_has_actionable_planning_diagnostic() -> No
     assert "tile 0" in message
     assert "configured assignment=None" in message
     assert "considered devices: idma_read, idma_write, core, spatz, redmule" in message
+
+
+@pytest.mark.parametrize(
+    ("device_name", "message"),
+    (
+        (None, "has no retained Device name"),
+        ("redmule", "Device capability match is False"),
+    ),
+)
+def test_execution_plan_validation_rejects_invalid_retained_device_names(
+    device_name: str | None,
+    message: str,
+) -> None:
+    mesh = magia.build_mesh(width=1, height=1)
+    specialized = magia.specialize(
+        _gemm_model(),
+        mesh,
+        SpecializationOptions(enable_precision_lowering=False),
+    )
+    execution_plan = plan(
+        specialized.model.graph,
+        mesh,
+        PlanningOptions(
+            placement=PlacementOptions(print_placement=False),
+            print_execution_plan_cost=False,
+        ),
+    )
+    layer = replace(execution_plan.stages[0].layers[0], device_name=device_name)
+    stage = replace(execution_plan.stages[0], layers=(layer,))
+
+    report = validate_execution_plan(
+        replace(execution_plan, stages=(stage,)),
+        PlanningConstraints(),
+    )
+
+    assert not report.is_valid
+    assert report.violations[0].kind == "layer_device_assignment_invalid"
+    assert message in report.violations[0].message
+
+
+def test_planning_rejects_untyped_operation_inputs() -> None:
+    x = Tensor("x", 1, (4,), 4)
+    output = Tensor("output", 1, (4,), 4)
+    node = Node(
+        "relu",
+        OpKind.ELEMENTWISE,
+        inputs=(x,),
+        outputs=(output,),
+        payload=UnaryElementwisePayload("Relu", x, output),
+    )
+    graph = Graph(
+        "untyped",
+        tensors=(x, output),
+        nodes=(node,),
+        edges=(Edge(x, None, node), Edge(output, node, None)),
+        inputs=(x,),
+        outputs=(output,),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"node relu has untyped tensors: x, output",
+    ):
+        plan(
+            graph,
+            magia.build_mesh(width=1, height=1),
+            PlanningOptions(
+                placement=PlacementOptions(print_placement=False),
+                print_execution_plan_cost=False,
+            ),
+        )
