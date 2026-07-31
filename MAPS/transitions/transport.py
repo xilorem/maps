@@ -24,9 +24,9 @@ class TransferLeg:
 
     A leg is the atomic costed movement used to build a full transition cost.
     For example:
-    - one producer tile writing a fragment to L2
+    - one producer tile writing a SubSlice to L2
     - one L2 read into one consumer tile
-    - one direct L1-to-L1 fragment transfer between two tiles
+    - one direct L1-to-L1 SubSlice transfer between two tiles
     """
 
     kind: TransferKind
