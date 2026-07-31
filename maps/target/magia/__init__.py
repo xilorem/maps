@@ -1,0 +1,46 @@
+"""MAGIA target: mesh, concrete devices, and specialization."""
+
+from .devices import (
+    CORE_DEVICE,
+    DEVICE_ASSIGNMENT,
+    IDMA_READ_DEVICE,
+    IDMA_WRITE_DEVICE,
+    REDMULE_DEVICE,
+    SPATZ_DEVICE,
+    TILE_DEVICES,
+)
+from .mesh import (
+    L1_BANDWIDTH_BYTES,
+    L1_DATA_BYTES,
+    L1_USABLE_BYTES,
+    L2_BANDWIDTH_BYTES,
+    MESH_HEIGHT,
+    MESH_WIDTH,
+    NOC_CHANNEL_WIDTH_BYTES,
+    NOC_HOP_LATENCY_CYCLES,
+    NOC_WIDE_CHANNEL_WIDTH_BYTES,
+    build_mesh,
+)
+from .specialization import PRECISION_LOWERING_RECIPES, specialize
+
+__all__ = [
+    "CORE_DEVICE",
+    "DEVICE_ASSIGNMENT",
+    "IDMA_READ_DEVICE",
+    "IDMA_WRITE_DEVICE",
+    "L1_BANDWIDTH_BYTES",
+    "L1_DATA_BYTES",
+    "L1_USABLE_BYTES",
+    "L2_BANDWIDTH_BYTES",
+    "MESH_HEIGHT",
+    "MESH_WIDTH",
+    "NOC_CHANNEL_WIDTH_BYTES",
+    "NOC_HOP_LATENCY_CYCLES",
+    "NOC_WIDE_CHANNEL_WIDTH_BYTES",
+    "PRECISION_LOWERING_RECIPES",
+    "REDMULE_DEVICE",
+    "SPATZ_DEVICE",
+    "TILE_DEVICES",
+    "build_mesh",
+    "specialize",
+]

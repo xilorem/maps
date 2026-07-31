@@ -10,7 +10,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from MAPS.deployment import write_execution_plan_bundle
-from MAPS.hw.chips import magia_mesh
+from maps.target.magia import build_mesh
 from MAPS.pipeline import ExecutionContract
 from MAPS.planner.contracts.options import (
     PlannerOptions,
@@ -27,7 +27,7 @@ DEFAULT_MODEL_PATH = PROJECT_ROOT / "examples" / "simple_three_stage.onnx"
 
 
 def main():
-    mesh = magia_mesh(width=4, height=4)
+    mesh = build_mesh(width=4, height=4)
     output_path = (
         PROJECT_ROOT / "generated" / "magia_example.execution-plan.json"
     )

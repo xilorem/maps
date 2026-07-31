@@ -9,7 +9,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from MAPS.hw.chips import wormhole_n300d_mesh
+from maps.target.n300d import build_mesh
 from MAPS.planner.passes.execution_plan_validation import validate_execution_plan
 from MAPS.planner.validation.contracts import PlannerConstraints
 from MAPS.planner.plan import build_execution_plan
@@ -20,7 +20,7 @@ DEFAULT_MODEL_PATH = PROJECT_ROOT / "examples" / "simple_three_stage.onnx"
 
 
 def main():
-    mesh = wormhole_n300d_mesh()
+    mesh = build_mesh()
     output_path = (
         PROJECT_ROOT / "generated" / "n300d_example.execution-plan.json"
     )

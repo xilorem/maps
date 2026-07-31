@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from enum import Enum, auto
 from math import ceil
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Mapping, cast
+from typing import TYPE_CHECKING, Any, Mapping, cast
 
 if TYPE_CHECKING:
     from maps.graph import Node, TensorDType
@@ -113,7 +113,7 @@ class Device:
 
     name: str
     kind: DeviceKind
-    throughput: dict[WorkKind, int]
+    throughput: dict[WorkKind, float]
     startup_cycles: int = 0
     capabilities: frozenset[WorkSignature] = frozenset()
 
@@ -138,7 +138,7 @@ class Device:
 
         return signature in self.capabilities
 
-    def cycles(self, work: object) -> int:
+    def cycles(self, work: Any) -> int:
         raise NotImplementedError
 
     def _throughput_cycles(self, work_kind: WorkKind, amount: int) -> int:
@@ -161,7 +161,7 @@ class ScalarDevice(Device):
         if self.kind is not DeviceKind.SCALAR:
             raise ValueError("ScalarDevice must use DeviceKind.SCALAR")
 
-    def cycles(self, work: object) -> int:
+    def cycles(self, work: Any) -> int:
         work_kind = work.work_kind
         amount = work.operation_count()
         return self._throughput_cycles(work_kind, amount)
@@ -182,7 +182,7 @@ class DMADevice(Device):
         if self.burst_bytes is not None and self.burst_bytes <= 0:
             raise ValueError("DMA burst_bytes must be > 0 when specified")
 
-    def cycles(self, work: object) -> int:
+    def cycles(self, work: Any) -> int:
         raise ValueError("DMA device cannot perform compute operations")
 
 
@@ -202,7 +202,7 @@ class SystolicDevice(Device):
         if self.array_width <= 0 or self.array_height <= 0:
             raise ValueError("systolic array dimensions must be > 0")
 
-    def cycles(self, work: object) -> int:
+    def cycles(self, work: Any) -> int:
         batch_volume, m_size, n_size, k_size = work.dimensions()
         m_blocks = ceil(m_size / self.array_height)
         n_blocks = ceil(n_size / self.array_width)
@@ -235,7 +235,7 @@ class MatrixDevice(Device):
         if self.math_fidelity <= 0:
             raise ValueError("MatrixDevice math_fidelity must be > 0")
 
-    def cycles(self, work: object) -> int:
+    def cycles(self, work: Any) -> int:
         batch_volume, m_size, n_size, k_size = work.dimensions()
         m_blocks = ceil(m_size / self.srcA_height)
         n_blocks = ceil(n_size / self.srcB_width)
@@ -257,7 +257,7 @@ class VectorDevice(Device):
         if self.vector_length <= 0:
             raise ValueError("vector_length must be > 0")
 
-    def cycles(self, work: object) -> int:
+    def cycles(self, work: Any) -> int:
         work_kind = work.work_kind
         amount = work.operation_count()
 
