@@ -7,7 +7,10 @@ from MAPS.core.graph import Node
 def node_requires_fixed_device_assignment(node: Node) -> bool:
     """Return whether this migration stage plans the Node through Tile policy."""
 
-    return getattr(node.payload, "work_kind", None) is WorkKind.GEMM
+    return getattr(node.payload, "work_kind", None) in {
+        WorkKind.GEMM,
+        WorkKind.CAST,
+    }
 
 
 __all__ = ["node_requires_fixed_device_assignment"]

@@ -9,6 +9,7 @@ from .common import (
     TileWork,
 )
 from .defs.collective import AllReducePayload
+from .defs.cast import CastPayload, CastTileWork
 from .defs.conv import ConvPayload
 from .defs.direct_conv import Conv2DPayload, Conv2DTileWork
 from .defs.depthwise_conv import DepthwiseConvPayload, DepthwiseConvTileWork
@@ -32,6 +33,8 @@ from .defs.split import SplitPayload, StaticSlicePayload, StaticSliceTileWork
 __all__ = [
     "AllReducePayload",
     "BinaryElementwisePayload",
+    "CastPayload",
+    "CastTileWork",
     "CompositeOpPayload",
     "LayoutRelation",
     "ConvPayload",

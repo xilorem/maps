@@ -38,6 +38,8 @@ _KERNEL_PROFILES = {
     WorkKind.REDUCE_MAX: _KernelProfile(compute_passes=1, reduction=True),
 }
 
+_CAST_PROFILE = _KernelProfile(compute_passes=1)
+
 _BINARY_WORK_KINDS = frozenset({WorkKind.ADD, WorkKind.SUB, WorkKind.DIV})
 
 
@@ -85,7 +87,11 @@ class SpatzDevice(VectorDevice):
 
     def cycles(self, work: object) -> int:
         work_kind = work.work_kind
-        profile = _KERNEL_PROFILES.get(work_kind)
+        profile = (
+            _CAST_PROFILE
+            if work_kind is WorkKind.CAST
+            else _KERNEL_PROFILES.get(work_kind)
+        )
         if profile is None:
             raise ValueError(f"device {self.name} does not support {work_kind.name} work")
 
@@ -149,6 +155,9 @@ class SpatzDevice(VectorDevice):
 SPATZ_DEVICE = SpatzDevice(
     name="spatz",
     kind=DeviceKind.VECTOR,
-    throughput={work_kind: 1 for work_kind in _KERNEL_PROFILES},
+    throughput={
+        work_kind: 1
+        for work_kind in (*_KERNEL_PROFILES, WorkKind.CAST)
+    },
     capabilities=_spatz_capabilities(),
 )

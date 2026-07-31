@@ -1,6 +1,7 @@
 """Operation definitions."""
 
 from .collective import AllReducePayload, CollectiveTileWork
+from .cast import CastPayload, CastTileWork
 from .conv import ConvPayload
 from .direct_conv import Conv2DPayload, Conv2DTileWork
 from .depthwise_conv import DepthwiseConvPayload, DepthwiseConvTileWork
@@ -25,6 +26,8 @@ from .split import SplitPayload, StaticSlicePayload, StaticSliceTileWork
 __all__ = [
     "AllReducePayload",
     "BinaryElementwisePayload",
+    "CastPayload",
+    "CastTileWork",
     "CollectiveTileWork",
     "ConvPayload",
     "DepthwiseConvPayload",

@@ -100,4 +100,9 @@ MAGIA_DEVICE_ASSIGNMENT = FixedDeviceAssignment(
         signature: MAGIA_CORE_DEVICE.name
         for signature in MAGIA_CORE_DEVICE.capabilities
     }
+    | {
+        signature: MAGIA_SPATZ_DEVICE.name
+        for signature in MAGIA_SPATZ_DEVICE.capabilities
+        if signature.work_kind is WorkKind.CAST
+    }
 )
