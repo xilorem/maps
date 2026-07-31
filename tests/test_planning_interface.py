@@ -17,7 +17,12 @@ from maps.planning.placement import place
 from maps.planning.submesh import Submesh
 from maps.planning.stage_formation import form_stages
 from maps.planning.stages import StagePlan
-from maps.planning.transitions import build_virtual_transitions
+from maps.planning.transitions import (
+    InputTransition,
+    IntermediateTransition,
+    OutputTransition,
+    build_virtual_transitions,
+)
 from maps.target import SpecializationOptions, magia, n300d
 
 from tests.test_precision_lowering import _gemm_model
@@ -39,20 +44,66 @@ def test_planning_owns_transitions_placement_and_layout_contracts() -> None:
 
 
 @pytest.mark.parametrize(
-    ("target", "specialization_options", "expected_device"),
+    (
+        "target",
+        "specialization_options",
+        "expected_device",
+        "expected_stage_placements",
+        "expected_transition_summary",
+    ),
     (
         (
             magia,
             SpecializationOptions(enable_precision_lowering=True),
             "redmule",
+            (
+                ((16,), ((0, 16),)),
+                ((24, 32), ((0, 24), (1, 32))),
+            ),
+            (
+                ("input", 0, 0, 0, ((16, ((0, 2), (0, 3))),)),
+                (
+                    "intermediate",
+                    3,
+                    0,
+                    0,
+                    1,
+                    0,
+                    (
+                        (16, 24, ((0, 2), (0, 3)), ((0, 2), (0, 3))),
+                        (16, 32, ((0, 2), (0, 3)), ((0, 2), (0, 3))),
+                    ),
+                ),
+                (
+                    "output",
+                    2,
+                    1,
+                    0,
+                    (
+                        (24, ((0, 2), (0, 2))),
+                        (32, ((0, 2), (2, 2))),
+                    ),
+                ),
+            ),
         ),
-        (n300d, SpecializationOptions(), "tensix_matrix"),
+        (
+            n300d,
+            SpecializationOptions(),
+            "tensix_matrix",
+            (((27,), ((0, 27),)),),
+            (
+                ("input", 0, 0, 0, ((27, ((0, 2), (0, 3))),)),
+                ("output", 2, 0, 0, ((27, ((0, 2), (0, 4))),)),
+            ),
+        ),
     ),
 )
 def test_specialized_target_graphs_plan_through_one_public_interface(
     target,
     specialization_options: SpecializationOptions,
     expected_device: str,
+    expected_stage_placements: tuple,
+    expected_transition_summary: tuple,
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -68,7 +119,7 @@ def test_specialized_target_graphs_plan_through_one_public_interface(
         specialized.model.graph,
         mesh,
         PlanningOptions(
-            placement=PlacementOptions(print_mapping=False),
+            placement=PlacementOptions(print_placement=False),
             print_execution_plan_cost=False,
         ),
     )
@@ -81,7 +132,65 @@ def test_specialized_target_graphs_plan_through_one_public_interface(
         for stage in execution_plan.stages
         for layer in stage.layers
     }
+    assert tuple(
+        (
+            tuple(sorted(stage.submesh.tile_ids)),
+            tuple(sorted(stage.virtual_to_physical.items())),
+        )
+        for stage in execution_plan.stages
+    ) == expected_stage_placements
+    assert tuple(
+        _physical_transition_summary(transition)
+        for transition in execution_plan.transitions
+    ) == expected_transition_summary
     assert tuple(tmp_path.iterdir()) == ()
+
+
+def _slice_dims(tensor_slice) -> tuple[tuple[int, int], ...]:
+    return tuple((dimension.start, dimension.length) for dimension in tensor_slice.dims)
+
+
+def _physical_transition_summary(transition) -> tuple:
+    if isinstance(transition, InputTransition):
+        return (
+            "input",
+            transition.tensor_id,
+            transition.destination_stage_id,
+            transition.destination_input_index,
+            tuple(
+                (destination.tile_id, _slice_dims(destination.tensor_slice))
+                for destination in transition.destinations
+            ),
+        )
+    if isinstance(transition, IntermediateTransition):
+        return (
+            "intermediate",
+            transition.tensor_id,
+            transition.source_stage_id,
+            transition.source_output_index,
+            transition.destination_stage_id,
+            transition.destination_input_index,
+            tuple(
+                (
+                    transfer.source_tile_id,
+                    transfer.destination_tile_id,
+                    _slice_dims(transfer.source_subslice),
+                    _slice_dims(transfer.destination_subslice),
+                )
+                for transfer in transition.transfers
+            ),
+        )
+    assert isinstance(transition, OutputTransition)
+    return (
+        "output",
+        transition.tensor_id,
+        transition.source_stage_id,
+        transition.source_output_index,
+        tuple(
+            (source.tile_id, _slice_dims(source.tensor_slice))
+            for source in transition.sources
+        ),
+    )
 
 
 def test_unsupported_device_signature_has_actionable_planning_diagnostic() -> None:
@@ -101,7 +210,7 @@ def test_unsupported_device_signature_has_actionable_planning_diagnostic() -> No
             magia.specialize(_gemm_model(), mesh).model.graph,
             unsupported_mesh,
             PlanningOptions(
-                placement=PlacementOptions(print_mapping=False),
+                placement=PlacementOptions(print_placement=False),
                 print_execution_plan_cost=False,
             ),
         )

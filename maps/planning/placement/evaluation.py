@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from maps.hardware import Mesh
 from maps.planning.layouts import tensor_slice_num_bytes
 from maps.planning.stages import StagePlacement, StagePlan
-from maps.planning.placement.models import MappingEvaluation, StageIOBreakdown, TileIOScore
+from maps.planning.placement.models import PlacementEvaluation, StageIOBreakdown, TileIOScore
 from maps.planning.transitions import (
     VirtualInputTransition,
     VirtualIntermediateTransition,
@@ -38,8 +38,8 @@ class _L2Transfer:
     rows: int = 1
 
 
-class MappingEvaluator:
-    """Compile logical transfers once and score complete or locally changed mappings."""
+class PlacementEvaluator:
+    """Compile logical transfers once and score complete or locally changed Placements."""
 
     def __init__(
         self,
@@ -60,9 +60,9 @@ class MappingEvaluator:
     def evaluate(
         self,
         placements: dict[int, StagePlacement],
-        previous: MappingEvaluation | None = None,
+        previous: PlacementEvaluation | None = None,
         moved_stage_ids: frozenset[int] = frozenset(),
-    ) -> MappingEvaluation:
+    ) -> PlacementEvaluation:
         """Return the exact score, reusing unaffected stage scores when possible."""
 
         if previous is None:
@@ -84,7 +84,7 @@ class MappingEvaluator:
                 for tile_id, score in previous.tile_scores.items()
                 if score.stage_id not in score_stage_ids
             )
-        return _mapping_evaluation(placements, tile_scores)
+        return _placement_evaluation(placements, tile_scores)
 
     def _score_stages(
         self,
@@ -161,13 +161,13 @@ class MappingEvaluator:
         }
 
 
-def evaluate_mapping(
+def evaluate_placement(
     mesh: Mesh,
     stage_plans: dict[int, StagePlan],
     placements: dict[int, StagePlacement],
     virtual_transitions: tuple[VirtualTransition, ...],
-) -> MappingEvaluation:
-    """Compute the exact physical IO objective for a complete mapping.
+) -> PlacementEvaluation:
+    """Compute the exact physical IO objective for a complete Placement.
 
     Contract:
         Every stage must have a disjoint physical placement and a complete
@@ -185,7 +185,7 @@ def evaluate_mapping(
         objective used by local repair.
     """
 
-    return MappingEvaluator(
+    return PlacementEvaluator(
         mesh,
         stage_plans,
         virtual_transitions,
@@ -273,10 +273,10 @@ def _compile_transfers(
     )
 
 
-def _mapping_evaluation(
+def _placement_evaluation(
     placements: dict[int, StagePlacement],
     tile_scores: dict[int, TileIOScore],
-) -> MappingEvaluation:
+) -> PlacementEvaluation:
     objective = tile_score_objective(tile_scores)
     worst_tile_id = max(
         tile_scores,
@@ -284,7 +284,7 @@ def _mapping_evaluation(
         default=None,
     )
     stage_breakdowns = _stage_breakdowns(placements, tile_scores)
-    return MappingEvaluation(
+    return PlacementEvaluation(
         placements=placements,
         tile_scores=tile_scores,
         stage_breakdowns=stage_breakdowns,
@@ -297,7 +297,7 @@ def tile_score_objective(
     tile_scores: dict[int, TileIOScore],
     k: int = 5,
 ) -> tuple[int, int, int, int]:
-    """Return deterministic max-first aggregate mapping objectives."""
+    """Return deterministic max-first aggregate Placement objectives."""
 
     scores = sorted(
         (score.score for score in tile_scores.values()),

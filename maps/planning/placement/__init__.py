@@ -8,7 +8,7 @@ from maps.planning.placement.diagnostics import (
     print_placement_grid,
     print_placement_details,
 )
-from maps.planning.placement.evaluation import MappingEvaluator
+from maps.planning.placement.evaluation import PlacementEvaluator
 from maps.planning.placement.ownership import assign_stage_ownerships, stage_order
 from maps.planning.placement.regions import build_initial_stage_placements
 from maps.planning.placement.repair import improve_placement
@@ -21,7 +21,7 @@ def place(
     stage_plans: dict[int, StagePlan],
     virtual_transitions: tuple[VirtualTransition, ...],
     show_progress: bool = False,
-    print_mapping: bool = True,
+    print_placement: bool = True,
     print_costs: bool = False,
 ) -> dict[int, StagePlacement]:
     """Place virtual Stage Plans onto connected physical mesh regions.
@@ -69,7 +69,7 @@ def place(
         show_progress,
     )
     placements = assign_stage_ownerships(mesh, stage_plans, placements, traffic)
-    evaluator = MappingEvaluator(
+    evaluator = PlacementEvaluator(
         mesh,
         stage_plans,
         virtual_transitions,
@@ -78,7 +78,7 @@ def place(
     _debug(
         show_progress,
         "[placement] "
-        f"phase=initial_mapping objective={evaluation.objective} "
+        f"phase=initial_placement objective={evaluation.objective} "
         f"worst_tile={evaluation.worst_tile_id}",
     )
     placements = improve_placement(
@@ -100,13 +100,13 @@ def place(
             virtual_transitions,
             label="ownership_aware",
         )
-    elif print_mapping:
+    elif print_placement:
         print_placement_grid(mesh, placements)
     return placements
 
 
 def _debug(enabled: bool, message: str) -> None:
-    """Print one high-level mapping trace line when enabled."""
+    """Print one high-level Placement trace line when enabled."""
 
     if enabled:
         print(message)

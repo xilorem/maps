@@ -5,7 +5,7 @@ from MAPS.core.tensor import Tensor
 from maps.operations.gemm import GemmPayload
 from maps.planning.stages import StagePlacement, StagePlan, virtual_submesh
 from maps.planning.placement import place
-from maps.planning.placement.evaluation import MappingEvaluator, evaluate_mapping
+from maps.planning.placement.evaluation import PlacementEvaluator, evaluate_placement
 from maps.planning.placement.ownership import assign_stage_ownerships
 import maps.planning.placement.repair as placement_repair
 import maps.planning.placement.topology as placement_topology
@@ -93,7 +93,7 @@ def test_build_virtual_traffic_tracks_inter_stage_bytes() -> None:
     assert sum(traffic.output_weights[0].values()) > 0
 
 
-def test_place_returns_connected_adjacent_mapping() -> None:
+def test_place_returns_connected_adjacent_placements() -> None:
     mesh = _test_mesh(4, 2)
     producer = _gemm_node("producer")
     consumer = _gemm_node("consumer", x=producer.outputs[0])
@@ -115,17 +115,17 @@ def test_place_returns_connected_adjacent_mapping() -> None:
         1: _single_node_stage_plan(mesh, 1, consumer, {0, 1}),
     }
 
-    mapping = place(
+    placements = place(
         mesh=mesh,
         stage_plans=stage_plans,
         virtual_transitions=build_virtual_transitions(graph, stage_plans),
-        print_mapping=False,
+        print_placement=False,
         show_progress=False,
     )
 
-    assert set(mapping) == {0, 1}
+    assert set(placements) == {0, 1}
     all_tile_ids = set()
-    for stage_id, placement in mapping.items():
+    for stage_id, placement in placements.items():
         assert placement.physical_submesh.num_tiles == stage_plans[stage_id].tile_count
         assert len(placement.virtual_to_physical) == stage_plans[stage_id].tile_count
         assert len(set(placement.virtual_to_physical.values())) == stage_plans[stage_id].tile_count
@@ -134,12 +134,12 @@ def test_place_returns_connected_adjacent_mapping() -> None:
     assert len(all_tile_ids) == 4
     assert _share_boundary(
         mesh,
-        set(mapping[0].physical_submesh.tile_ids),
-        set(mapping[1].physical_submesh.tile_ids),
+        set(placements[0].physical_submesh.tile_ids),
+        set(placements[1].physical_submesh.tile_ids),
     )
 
 
-def test_mapping_charges_l1_communication_to_the_producer_tile() -> None:
+def test_placement_charges_l1_communication_to_the_producer_tile() -> None:
     mesh = _test_mesh(2, 1)
     producer = _gemm_node("producer")
     consumer = _gemm_node("consumer", x=producer.outputs[0])
@@ -170,7 +170,7 @@ def test_mapping_charges_l1_communication_to_the_producer_tile() -> None:
         for stage_id, plan in stage_plans.items()
     }
 
-    evaluation = evaluate_mapping(
+    evaluation = evaluate_placement(
         mesh=mesh,
         stage_plans=stage_plans,
         placements=placements,
@@ -273,7 +273,7 @@ def test_incremental_evaluation_rescores_moved_stages_and_predecessors() -> None
         for stage_id, plan in stage_plans.items()
     }
     virtual_transitions = build_virtual_transitions(graph, stage_plans)
-    evaluator = MappingEvaluator(mesh, stage_plans, virtual_transitions)
+    evaluator = PlacementEvaluator(mesh, stage_plans, virtual_transitions)
     initial = evaluator.evaluate(placements)
 
     trial = dict(placements)
@@ -294,7 +294,7 @@ def test_incremental_evaluation_rescores_moved_stages_and_predecessors() -> None
         previous=initial,
         moved_stage_ids=frozenset({1, 2}),
     )
-    complete = evaluate_mapping(
+    complete = evaluate_placement(
         mesh,
         stage_plans,
         trial,
@@ -306,7 +306,7 @@ def test_incremental_evaluation_rescores_moved_stages_and_predecessors() -> None
     assert incremental.tile_scores[0] is not initial.tile_scores[0]
 
 
-def test_exact_mapping_ignores_initializers_absent_from_virtual_transitions() -> None:
+def test_exact_placement_ignores_initializers_absent_from_virtual_transitions() -> None:
     mesh = _test_mesh(1, 1)
     node = _gemm_node("only")
     graph = Graph(
@@ -329,7 +329,7 @@ def test_exact_mapping_ignores_initializers_absent_from_virtual_transitions() ->
     )
     virtual_transitions = build_virtual_transitions(graph, stage_plans)
 
-    evaluation = evaluate_mapping(
+    evaluation = evaluate_placement(
         mesh,
         stage_plans,
         {0: placement},
@@ -340,7 +340,7 @@ def test_exact_mapping_ignores_initializers_absent_from_virtual_transitions() ->
     assert evaluation.tile_scores[0].score == 0
 
 
-def test_exact_mapping_charges_runtime_input_reads_and_graph_output_writes() -> None:
+def test_exact_placement_charges_runtime_input_reads_and_graph_output_writes() -> None:
     mesh = _test_mesh(1, 1)
     node = _gemm_node("only")
     graph = Graph(
@@ -363,7 +363,7 @@ def test_exact_mapping_charges_runtime_input_reads_and_graph_output_writes() -> 
         virtual_to_physical={0: 0},
     )
 
-    evaluation = evaluate_mapping(
+    evaluation = evaluate_placement(
         mesh,
         stage_plans,
         {0: placement},
@@ -404,7 +404,7 @@ def test_incremental_evaluation_reuses_source_of_empty_transition() -> None:
         destination_stage_id=1,
         destination_input_index=0,
     )
-    evaluator = MappingEvaluator(mesh, stage_plans, (empty_transition,))
+    evaluator = PlacementEvaluator(mesh, stage_plans, (empty_transition,))
     initial = evaluator.evaluate(placements)
     trial = dict(placements)
     for stage_id, tile_id in ((1, 2), (2, 1)):

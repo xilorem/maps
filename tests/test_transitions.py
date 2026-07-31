@@ -445,10 +445,24 @@ def test_binding_changes_only_tile_endpoints_and_preserves_positions() -> None:
     )
     input_transition = transitions[0]
     assert isinstance(input_transition, InputTransition)
+    virtual_input = virtual_transitions[0]
+    assert isinstance(virtual_input, VirtualInputTransition)
+    assert (
+        input_transition.tensor_id,
+        input_transition.destination_stage_id,
+        input_transition.destination_input_index,
+    ) == (
+        virtual_input.tensor_id,
+        virtual_input.destination_stage_id,
+        virtual_input.destination_input_index,
+    )
     assert tuple(
         destination.tile_id
         for destination in input_transition.destinations
     ) == (3, 2)
+    assert tuple(
+        destination.tensor_slice for destination in input_transition.destinations
+    ) == tuple(destination.tensor_slice for destination in virtual_input.destinations)
     intermediate = transitions[1]
     assert isinstance(intermediate, IntermediateTransition)
     virtual_intermediate = virtual_transitions[1]
@@ -467,4 +481,18 @@ def test_binding_changes_only_tile_endpoints_and_preserves_positions() -> None:
     assert intermediate.tensor_id == virtual_intermediate.tensor_id
     output = transitions[2]
     assert isinstance(output, OutputTransition)
+    virtual_output = virtual_transitions[2]
+    assert isinstance(virtual_output, VirtualOutputTransition)
+    assert (
+        output.tensor_id,
+        output.source_stage_id,
+        output.source_output_index,
+    ) == (
+        virtual_output.tensor_id,
+        virtual_output.source_stage_id,
+        virtual_output.source_output_index,
+    )
     assert tuple(source.tile_id for source in output.sources) == (1, 0)
+    assert tuple(source.tensor_slice for source in output.sources) == tuple(
+        source.tensor_slice for source in virtual_output.sources
+    )

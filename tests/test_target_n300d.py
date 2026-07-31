@@ -106,7 +106,7 @@ def test_n300d_specialization_is_deterministic_and_plans_tensix_work() -> None:
         first.model.graph,
         n300d.build_mesh(),
         PlanningOptions(
-            placement=PlacementOptions(print_mapping=False),
+            placement=PlacementOptions(print_placement=False),
             print_execution_plan_cost=False,
         ),
     )

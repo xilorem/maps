@@ -59,7 +59,7 @@ def plan(
         stage_plans,
         virtual_transitions,
         show_progress=options.placement.print_progress,
-        print_mapping=options.placement.print_mapping,
+        print_placement=options.placement.print_placement,
         print_costs=options.placement.print_costs,
     )
     execution_plan = lower_execution_plan(

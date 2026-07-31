@@ -5,7 +5,7 @@ from __future__ import annotations
 from maps.graph import Node
 from maps.hardware import Mesh
 from maps.planning.stages import StagePlacement, StagePlan
-from maps.planning.placement.evaluation import evaluate_mapping
+from maps.planning.placement.evaluation import evaluate_placement
 from maps.planning.placement.topology import owner_by_tile_id
 from maps.planning.transitions import VirtualTransition
 
@@ -15,11 +15,11 @@ def print_placement_details(
     stage_plans: dict[int, StagePlan],
     placements: dict[int, StagePlacement],
     virtual_transitions: tuple[VirtualTransition, ...],
-    label: str = "mapping",
+    label: str = "placement",
 ) -> None:
     """Print physical regions, ownership maps, and exact IO bottlenecks."""
 
-    evaluation = evaluate_mapping(
+    evaluation = evaluate_placement(
         mesh,
         stage_plans,
         placements,

@@ -118,7 +118,7 @@ def _plan_decisions(
         stage_plans,
         virtual_transitions,
         show_progress=options.spatial_mapping.print_progress,
-        print_mapping=options.spatial_mapping.print_mapping,
+        print_placement=options.spatial_mapping.print_mapping,
         print_costs=options.spatial_mapping.print_costs,
     )
 

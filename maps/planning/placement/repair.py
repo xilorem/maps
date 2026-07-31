@@ -6,9 +6,9 @@ from collections import deque
 
 from maps.hardware import Mesh
 from maps.planning.stages import StagePlacement, StagePlan
-from maps.planning.placement.evaluation import MappingEvaluator
+from maps.planning.placement.evaluation import PlacementEvaluator
 from maps.planning.placement.models import (
-    MappingEvaluation,
+    PlacementEvaluation,
     RepairCandidate,
     TileIOScore,
     VirtualTraffic,
@@ -32,9 +32,9 @@ def improve_placement(
     placements: dict[int, StagePlacement],
     traffic: VirtualTraffic,
     virtual_transitions: tuple[VirtualTransition, ...],
-    initial_evaluation: MappingEvaluation,
+    initial_evaluation: PlacementEvaluation,
     debug: bool,
-    evaluator: MappingEvaluator | None = None,
+    evaluator: PlacementEvaluator | None = None,
     max_iters: int = 32,
     max_repair_regions: int = 5,
 ) -> dict[int, StagePlacement]:
@@ -47,7 +47,7 @@ def improve_placement(
     """
 
     if evaluator is None:
-        evaluator = MappingEvaluator(mesh, stage_plans, virtual_transitions)
+        evaluator = PlacementEvaluator(mesh, stage_plans, virtual_transitions)
     current_placements = placements
     current_evaluation = initial_evaluation
     tabu: deque[frozenset[int]] = deque(maxlen=10)
@@ -72,7 +72,7 @@ def improve_placement(
             f"repair_candidates={[(sorted(c.stages), c.reason) for c in candidates[:max_repair_regions]]}",
         )
 
-        best_trial: MappingEvaluation | None = None
+        best_trial: PlacementEvaluation | None = None
         best_placements: dict[int, StagePlacement] | None = None
         best_candidate: RepairCandidate | None = None
         for candidate in candidates[:max_repair_regions]:
@@ -240,7 +240,7 @@ def choose_repair_regions(
     mesh: Mesh,
     placements: dict[int, StagePlacement],
     traffic: VirtualTraffic,
-    evaluation: MappingEvaluation,
+    evaluation: PlacementEvaluation,
     worst_tile: TileIOScore,
 ) -> list[RepairCandidate]:
     """Rank local repairs using bottleneck blame and physical blockers."""

@@ -61,7 +61,7 @@ class StageIOBreakdown:
 
 
 @dataclass(frozen=True)
-class MappingEvaluation:
+class PlacementEvaluation:
     """Exact score for a complete ownership-aware Placement."""
 
     placements: dict[int, StagePlacement]

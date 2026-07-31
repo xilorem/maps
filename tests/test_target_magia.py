@@ -109,7 +109,7 @@ def test_magia_specializes_convolution_deterministically_and_plans_it() -> None:
         first.model.graph,
         magia.build_mesh(width=1, height=1),
         PlanningOptions(
-            placement=PlacementOptions(print_mapping=False),
+            placement=PlacementOptions(print_placement=False),
             print_execution_plan_cost=False,
         ),
     )

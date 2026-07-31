@@ -32,7 +32,7 @@ class PlacementOptions:
     """Control physical placement diagnostics."""
 
     print_progress: bool = False
-    print_mapping: bool = True
+    print_placement: bool = True
     print_costs: bool = False
 
 
