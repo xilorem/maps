@@ -14,7 +14,7 @@ from MAPS.deployment import (
     write_execution_plan_bundle,
 )
 from MAPS.pipeline import ExecutionPlan, Layer, LayerInput, Stage
-from MAPS.ops.defs.elementwise import UnaryElementwisePayload
+from maps.operations.elementwise import UnaryElementwisePayload
 from MAPS.transitions import InputDestination
 from tests.noc_utils import rectangular_test_noc, rectangular_test_tiles
 

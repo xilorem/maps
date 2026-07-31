@@ -7,10 +7,10 @@ from MAPS.core.graph import Node, OpKind
 from MAPS.core.layout import TensorLayout, tile_tensor_slice
 from MAPS.core.submesh import Submesh
 from MAPS.core.tensor import Tensor
-from MAPS.ops.common.cost import OpCostModel
-from MAPS.ops.common.layout_relation import LayoutRelation
-from MAPS.ops.common.payload import OpPayload, sharded_layout
-from MAPS.ops.defs.elementwise import ElementwiseTileWork, UnaryElementwisePayload
+from maps.operations import OpCostModel
+from maps.operations import LayoutRelation
+from maps.operations import OpPayload, sharded_layout
+from maps.operations.elementwise import ElementwiseTileWork, UnaryElementwisePayload
 from MAPS.planner.workload.candidates import StageCandidateAnalyzer
 from tests.noc_utils import rectangular_test_noc, rectangular_test_tiles
 

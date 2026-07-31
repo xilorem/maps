@@ -4,8 +4,8 @@ from MAPS.hw.devices.spatz import SPATZ_DEVICE
 from MAPS.core.dtype import TensorDType
 from MAPS.core.submesh import Submesh
 from MAPS.core.tensor import Tensor
-from MAPS.ops.costs.reduction_cost import ReductionCostModel
-from MAPS.ops.defs.reduction import ReductionPayload
+from maps.operations.reduction import ReductionCostModel
+from maps.operations.reduction import ReductionPayload
 
 
 def _make_reduce_sum_op() -> ReductionPayload:

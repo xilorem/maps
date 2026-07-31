@@ -1,11 +1,11 @@
-"""GroupNormalization semantic op and collective decomposition."""
+"""Group-normalization semantics, decomposition, Tile Work, and costing."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-from MAPS.arch import Tile, WorkKind
-from MAPS.core.graph import Node, OpKind
+from maps.hardware import Tile, WorkKind
+from maps.graph import Node, OpKind, Tensor
 from MAPS.core.layout import (
     LayoutAxis,
     LayoutAxisMode,
@@ -16,8 +16,7 @@ from MAPS.core.layout import (
     tile_tensor_slice,
 )
 from MAPS.core.submesh import Submesh
-from MAPS.core.tensor import Tensor
-from maps.operations import (
+from .contracts import (
     CompositeOpPayload,
     LayoutRelation,
     OpCostModel,
@@ -25,10 +24,8 @@ from maps.operations import (
     TileWork,
     sharded_layout,
 )
-from MAPS.ops.defs.collective import AllReducePayload
-from maps.operations.elementwise import BinaryElementwisePayload
-from MAPS.ops.registry import register_op
-from MAPS.ops.spec import OpSpec
+from .collective import AllReducePayload
+from .elementwise import BinaryElementwisePayload, ElementwiseCostModel
 
 
 def _replicated_layout(
@@ -90,8 +87,6 @@ class GroupReducePayload(OpPayload):
 
     @property
     def cost_model(self) -> OpCostModel:
-        from maps.operations.elementwise import ElementwiseCostModel
-
         return ElementwiseCostModel(work_kind=self.work_kind)
 
     def output_layouts(
@@ -205,8 +200,6 @@ class GroupNormalizeFromMomentsPayload(OpPayload):
 
     @property
     def cost_model(self) -> OpCostModel:
-        from maps.operations.elementwise import ElementwiseCostModel
-
         return ElementwiseCostModel(work_kind=self.work_kind)
 
     def output_layouts(
@@ -398,43 +391,3 @@ def decompose_group_normalization_node(
         (squared, sum_local, sumsq_local, sum_x, sum_global, sumsq_x, sumsq_global),
         nodes,
     )
-
-
-def lower_group_normalization_node(
-    node_name: str,
-    inputs: tuple[Tensor, ...],
-    outputs: tuple[Tensor, ...],
-    attributes: dict[str, object],
-) -> tuple[OpKind, GroupNormalizationPayload]:
-    if len(inputs) != 3 or len(outputs) != 1:
-        raise ValueError(
-            f"GroupNormalization node '{node_name}' must have 3 inputs and 1 output"
-        )
-    if "num_groups" not in attributes:
-        raise ValueError("GroupNormalization num_groups attribute is required")
-    return (
-        OpKind.CUSTOM,
-        GroupNormalizationPayload(
-            x=inputs[0],
-            scale=inputs[1],
-            bias=inputs[2],
-            output=outputs[0],
-            num_groups=int(attributes["num_groups"]),
-            epsilon=float(attributes.get("epsilon", 1e-5)),
-            stash_type=int(attributes.get("stash_type", 1)),
-        ),
-    )
-
-
-register_op(
-    OpSpec(
-        name="group_normalization",
-        onnx_names=("GroupNormalization",),
-        lower_onnx=lower_group_normalization_node,
-        work_kinds=(
-            WorkKind.MUL,
-            WorkKind.GROUP_REDUCE,
-            WorkKind.GROUP_NORMALIZE,
-        ),
-    )
-)

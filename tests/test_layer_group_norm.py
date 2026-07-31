@@ -3,8 +3,8 @@ from MAPS.core.layout import TensorRange
 from MAPS.core.submesh import Submesh
 from MAPS.core.tensor import Tensor
 from MAPS.hw.chips import magia_mesh
-from MAPS.ops.defs.collective import AllReducePayload
-from MAPS.ops.defs.group_norm import (
+from maps.operations.collective import AllReducePayload
+from maps.operations.normalization import (
     GroupNormalizationPayload,
     GroupNormalizeFromMomentsPayload,
     GroupReducePayload,

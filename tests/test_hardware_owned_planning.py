@@ -7,8 +7,8 @@ from MAPS.core import ConstantStore, Graph, Node, OpKind, Tensor, TensorDType
 from MAPS.core.graph import Edge
 from MAPS.hw.chips import magia_mesh
 from MAPS.importers.model import ImportedModel
-from MAPS.ops.defs.elementwise import UnaryElementwisePayload
-from MAPS.ops.defs.gemm import GemmPayload
+from maps.operations.elementwise import UnaryElementwisePayload
+from maps.operations.gemm import GemmPayload
 from MAPS.planner.contracts.options import PlannerOptions, SpatialMappingOptions
 from MAPS.planner.passes.execution_plan_validation import validate_execution_plan
 from MAPS.planner.plan import plan_graph, plan_model

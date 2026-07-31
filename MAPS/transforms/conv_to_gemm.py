@@ -12,12 +12,12 @@ from MAPS.core.dtype import TensorDType
 from MAPS.core.graph import Graph, Node, OpKind
 from MAPS.core.tensor import Tensor
 from MAPS.importers.model import ImportedModel
-from MAPS.ops.defs.conv_transforms import (
+from maps.operations.convolution_transforms import (
     ChannelShardedGemmPayload,
     Im2ColPayload,
     OutputReformatPayload,
 )
-from MAPS.ops.defs.direct_conv import Conv2DPayload
+from maps.operations.convolution import Conv2DPayload
 
 from .effects import RewriteEffect, RewriteTransformResult
 from .graph_utils import (

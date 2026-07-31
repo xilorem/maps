@@ -2,7 +2,7 @@ from MAPS.arch import L2Memory, Mesh
 from MAPS.core.graph import Edge, Graph, Node, OpKind
 from MAPS.core.submesh import Submesh
 from MAPS.core.tensor import Tensor
-from MAPS.ops.defs.gemm import GemmPayload
+from maps.operations.gemm import GemmPayload
 from MAPS.planner.contracts.stages import StagePlacement, StagePlan, virtual_submesh
 from MAPS.planner.passes.spatial_mapping import map_spatially
 from MAPS.planner.spatial.evaluation import MappingEvaluator, evaluate_mapping

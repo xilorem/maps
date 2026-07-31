@@ -6,7 +6,7 @@ from MAPS.core.graph import Edge, Graph, Node, OpKind
 from MAPS.core.submesh import Submesh
 from MAPS.core.tensor import Tensor
 from MAPS.hw.chips import magia_mesh
-from MAPS.ops.defs.gemm import GemmPayload
+from maps.operations.gemm import GemmPayload
 from MAPS.pipeline import InitializerInput, LocalInput, TransitionSource
 from MAPS.planner.contracts.stages import StagePlacement, StagePlan
 from MAPS.planner.passes.execution_plan_lowering import lower_execution_plan

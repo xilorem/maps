@@ -3,7 +3,7 @@ from MAPS.core.layout import TensorRange
 from MAPS.core.submesh import Submesh
 from MAPS.core.tensor import Tensor
 from MAPS.hw.chips import magia_mesh
-from MAPS.ops.defs.rearrange import ReshapePayload, TransposePayload
+from maps.operations.rearrangement import ReshapePayload, TransposePayload
 
 
 def test_reshape_preserves_rectangular_channel_ownership() -> None:

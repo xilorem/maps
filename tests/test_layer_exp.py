@@ -5,8 +5,8 @@ from MAPS.core.dtype import TensorDType
 from MAPS.core.layout import LayoutAxis, LayoutAxisMode, TensorLayout
 from MAPS.core.submesh import Submesh
 from MAPS.core.tensor import Tensor
-from MAPS.ops.costs.elementwise_cost import ElementwiseCostModel
-from MAPS.ops.defs.elementwise import (
+from maps.operations.elementwise import ElementwiseCostModel
+from maps.operations.elementwise import (
     BINARY_ELEMENTWISE_OPS,
     UNARY_ELEMENTWISE_OPS,
     BinaryElementwisePayload,

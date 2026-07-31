@@ -2,16 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from MAPS.arch import Tile, WorkKind
-from MAPS.core.graph import OpKind
+from MAPS.arch import Tile
 from MAPS.core.layout import LayoutAxis, LayoutAxisMode, TensorLayout, TensorRange, TensorSlice, TensorSliceRef, tile_tensor_slice
 from MAPS.core.submesh import Submesh
 from MAPS.core.tensor import Tensor
-from MAPS.ops.common.payload import OpPayload
-from MAPS.ops.common.tile_work import TileWork
-from MAPS.ops.costs.gemm_cost import GemmCostModel
-from MAPS.ops.registry import register_op
-from MAPS.ops.spec import OpSpec
+from maps.operations import OpPayload
+from maps.operations import TileWork
+from maps.operations.gemm import GemmCostModel
 
 @dataclass(frozen=True)
 class TutorialPayload(OpPayload):
@@ -119,31 +116,3 @@ class TutorialTileWork(TileWork):
         return (
             TensorSliceRef(tensor=self.output, tensor_slice=self.output_slice),
         )
-
-
-def lower_tutorial_node(
-    node_name: str,
-    inputs: tuple[Tensor, ...],
-    outputs: tuple[Tensor, ...],
-    attributes: dict[str, object],
-) -> tuple[OpKind, object]:
-    del node_name, attributes
-    return (
-        OpKind.CUSTOM,
-        TutorialPayload(
-            input_1=inputs[0],
-            input_2=inputs[1],
-            output=outputs[0],
-        ),
-    )
-
-
-register_op(
-    OpSpec(
-        name="tutorial",
-        onnx_names=("Tutorial",),
-        lower_onnx=lower_tutorial_node,
-        payload_type=TutorialPayload,
-        work_kinds=(WorkKind.GEMM,),
-    )
-)

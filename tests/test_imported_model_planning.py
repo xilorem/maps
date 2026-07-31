@@ -6,8 +6,8 @@ from MAPS.arch import L1Memory, L2Memory, Mesh
 from maps.graph import ConstantStore, Graph, ImportedModel, Node, OpKind, Tensor
 from MAPS.deployment import write_execution_plan_bundle
 from maps.graph import import_onnx_model
-from MAPS.ops.defs.elementwise import UnaryElementwisePayload
-from MAPS.ops.defs.softmax import SoftmaxPayload
+from maps.operations.elementwise import UnaryElementwisePayload
+from maps.operations.softmax import SoftmaxPayload
 from MAPS.planner.contracts.options import PlannerOptions, SpatialMappingOptions
 from MAPS.planner.plan import plan_model
 from tests.noc_utils import rectangular_test_noc, rectangular_test_tiles

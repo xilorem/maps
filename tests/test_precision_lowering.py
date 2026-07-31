@@ -10,9 +10,9 @@ from MAPS.core.graph import Edge
 from MAPS.deployment import write_execution_plan_bundle
 from MAPS.hw.chips import magia_mesh, magia_planner_options
 from MAPS.importers.model import ImportedModel
-from MAPS.ops.defs.cast import CastPayload
-from MAPS.ops.defs.elementwise import UnaryElementwisePayload
-from MAPS.ops.defs.gemm import GemmPayload
+from maps.operations.cast import CastPayload
+from maps.operations.elementwise import UnaryElementwisePayload
+from maps.operations.gemm import GemmPayload
 from MAPS.planner.contracts.options import PlannerOptions, SpatialMappingOptions
 from MAPS.planner.plan import plan_model
 

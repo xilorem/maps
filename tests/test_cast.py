@@ -12,7 +12,7 @@ from MAPS.core import (
 )
 from MAPS.core.graph import Edge
 from MAPS.hw.chips import magia_mesh
-from MAPS.ops.defs.cast import CastPayload
+from maps.operations.cast import CastPayload
 from MAPS.planner.contracts.options import PlannerOptions, SpatialMappingOptions
 from MAPS.planner.plan import plan_graph
 from MAPS.utils.execution_plan_json import execution_plan_json_payload

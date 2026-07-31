@@ -26,6 +26,49 @@ from maps.operations.elementwise import (
     UnaryElementwisePayload,
 )
 from maps.operations.gemm import GemmCostModel, GemmPayload, GemmTileWork
+from maps.operations.collective import (
+    AllReduceCostModel,
+    AllReducePayload,
+    CollectiveTileWork,
+)
+from maps.operations.convolution import (
+    Conv2DCostModel,
+    Conv2DPayload,
+    Conv2DTileWork,
+    ConvPayload,
+)
+from maps.operations.convolution_transforms import (
+    ConvTransformCostModel,
+    Im2ColPayload,
+    OutputReformatPayload,
+    TransformTileWork,
+    WeightPackPayload,
+)
+from maps.operations.depthwise_convolution import (
+    DepthwiseConvPayload,
+    DepthwiseConvTileWork,
+)
+from maps.operations.normalization import (
+    GroupNormalizationPayload,
+    GroupNormalizeFromMomentsPayload,
+    GroupReducePayload,
+    GroupReduceTileWork,
+)
+from maps.operations.rearrangement import (
+    RearrangeTileWork,
+    ReshapePayload,
+    TransposePayload,
+)
+from maps.operations.reduction import (
+    GlobalAveragePoolPayload,
+    ReduceSumPayload,
+    ReductionCostModel,
+    ReductionPayload,
+    ReductionTileWork,
+    ScalarMultiplyPayload,
+)
+from maps.operations.softmax import SoftmaxPayload
+from maps.operations.split import SplitPayload, StaticSlicePayload, StaticSliceTileWork
 from MAPS.core.submesh import Submesh
 from MAPS.hw.chips import magia_mesh
 from MAPS.planner.contracts.options import PlannerOptions, SpatialMappingOptions
@@ -63,23 +106,95 @@ def test_elementwise_family_colocates_operations_tile_work_and_cost() -> None:
     assert ElementwiseCostModel.__module__ == "maps.operations.elementwise"
 
 
+@pytest.mark.parametrize(
+    ("family_module", "members"),
+    (
+        (
+            "maps.operations.collective",
+            (AllReducePayload, CollectiveTileWork, AllReduceCostModel),
+        ),
+        (
+            "maps.operations.convolution",
+            (ConvPayload, Conv2DPayload, Conv2DTileWork, Conv2DCostModel),
+        ),
+        (
+            "maps.operations.convolution_transforms",
+            (
+                Im2ColPayload,
+                WeightPackPayload,
+                OutputReformatPayload,
+                TransformTileWork,
+                ConvTransformCostModel,
+            ),
+        ),
+        (
+            "maps.operations.depthwise_convolution",
+            (DepthwiseConvPayload, DepthwiseConvTileWork),
+        ),
+        (
+            "maps.operations.normalization",
+            (
+                GroupNormalizationPayload,
+                GroupNormalizeFromMomentsPayload,
+                GroupReducePayload,
+                GroupReduceTileWork,
+            ),
+        ),
+        (
+            "maps.operations.rearrangement",
+            (ReshapePayload, TransposePayload, RearrangeTileWork),
+        ),
+        (
+            "maps.operations.reduction",
+            (
+                ReductionPayload,
+                ReductionTileWork,
+                ReductionCostModel,
+                ReduceSumPayload,
+                GlobalAveragePoolPayload,
+                ScalarMultiplyPayload,
+            ),
+        ),
+        ("maps.operations.softmax", (SoftmaxPayload,)),
+        (
+            "maps.operations.split",
+            (SplitPayload, StaticSlicePayload, StaticSliceTileWork),
+        ),
+    ),
+)
+def test_remaining_operation_families_are_vertically_owned(
+    family_module: str,
+    members: tuple[type[object], ...],
+) -> None:
+    assert all(member.__module__ == family_module for member in members)
+
+
 def test_onnx_adapter_explicitly_maps_migrated_operation_families() -> None:
     assert set(ONNX_OPERATION_CONVERTERS) == {
         "Abs",
         "Add",
         "Cast",
+        "Conv",
         "Div",
         "Exp",
+        "Flatten",
         "Gemm",
+        "GlobalAveragePool",
+        "GroupNormalization",
         "Log",
         "MatMul",
         "Mul",
         "Neg",
         "Pow",
         "Relu",
+        "ReduceSum",
+        "Reshape",
         "Sigmoid",
+        "Softmax",
+        "Split",
         "Sqrt",
         "Sub",
+        "Transpose",
     }
 
 

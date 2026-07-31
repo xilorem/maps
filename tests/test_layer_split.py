@@ -7,7 +7,7 @@ from MAPS.core.submesh import Submesh
 from MAPS.core.tensor import Tensor
 from MAPS.hw.chips import magia_mesh
 from MAPS.hw.chips.magia import MAGIA_CORE_DEVICE
-from MAPS.ops.defs.split import SplitPayload, StaticSlicePayload
+from maps.operations.split import SplitPayload, StaticSlicePayload
 
 
 def test_static_slice_maps_sharded_output_to_offset_input_region() -> None:

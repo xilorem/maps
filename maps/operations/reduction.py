@@ -1,13 +1,12 @@
-"""Reduction op payloads."""
+"""Reduction semantics, decomposition, Tile Work, and costing."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from math import prod
 
-from MAPS.arch import WorkKind
-from MAPS.core.dtype import TensorDType
-from MAPS.core.graph import Node, OpKind
+from maps.hardware import Device, Tile, WorkKind
+from maps.graph import Node, OpKind, Tensor
 from MAPS.core.layout import (
     LayoutAxis,
     LayoutAxisMode,
@@ -17,19 +16,17 @@ from MAPS.core.layout import (
     tile_tensor_slice,
 )
 from MAPS.core.submesh import Submesh
-from MAPS.core.tensor import Tensor
-from maps.operations import (
+from .contracts import (
     CompositeOpPayload,
     LayoutRelation,
     OpCostModel,
     OpPayload,
     TileWork,
+    require_tile_device,
     sharded_layout,
 )
-from MAPS.ops.defs.collective import AllReducePayload
-from maps.operations.elementwise import ElementwiseTileWork
-from MAPS.ops.registry import register_op
-from MAPS.ops.spec import LoweredOperation, OpSpec, STATIC_INPUT_VALUES
+from .collective import AllReducePayload
+from .elementwise import ElementwiseCostModel, ElementwiseTileWork
 
 
 REDUCTION_WORK_KINDS: dict[str, WorkKind] = {
@@ -85,8 +82,6 @@ class ReductionPayload(OpPayload):
 
     @property
     def cost_model(self) -> OpCostModel:
-        from MAPS.ops.costs.reduction_cost import ReductionCostModel
-
         return ReductionCostModel(work_kind=self.work_kind)
 
     def output_layouts(
@@ -177,8 +172,6 @@ class ScalarMultiplyPayload(OpPayload):
 
     @property
     def cost_model(self) -> OpCostModel:
-        from maps.operations.elementwise import ElementwiseCostModel
-
         return ElementwiseCostModel(work_kind=self.work_kind)
 
     def output_layouts(
@@ -206,7 +199,7 @@ class ScalarMultiplyPayload(OpPayload):
 
 @dataclass(frozen=True)
 class ReduceSumPayload(CompositeOpPayload):
-    """Static single-axis ONNX ReduceSum with retained dimensions."""
+    """Static single-axis ReduceSum with retained dimensions."""
 
     x: Tensor
     output: Tensor
@@ -264,7 +257,7 @@ class ReduceSumPayload(CompositeOpPayload):
 
 @dataclass(frozen=True)
 class GlobalAveragePoolPayload(CompositeOpPayload):
-    """ONNX global average pooling over all NCHW spatial dimensions."""
+    """Global average pooling over all NCHW spatial dimensions."""
 
     x: Tensor
     output: Tensor
@@ -412,114 +405,20 @@ def _allreduce_node(
     )
 
 
-def _infer_single_reduced_axis(node_name: str, x: Tensor, output: Tensor) -> int:
-    if x.rank != output.rank:
-        raise NotImplementedError(
-            f"ReduceSum node '{node_name}' requires keepdims=1"
-        )
-    candidates = tuple(
-        axis
-        for axis, (input_dim, output_dim) in enumerate(zip(x.dims, output.dims))
-        if input_dim != output_dim and output_dim == 1
-    )
-    if len(candidates) != 1:
-        raise NotImplementedError(
-            f"ReduceSum node '{node_name}' must reduce exactly one statically "
-            "identifiable axis"
-        )
-    return candidates[0]
+@dataclass(frozen=True)
+class ReductionCostModel(OpCostModel):
+    """Tile-local reduction cycle model backed by tile devices."""
 
+    work_kind: WorkKind
 
-def lower_reduce_sum_node(
-    node_name: str,
-    inputs: tuple[Tensor, ...],
-    outputs: tuple[Tensor, ...],
-    attributes: dict[str, object],
-) -> LoweredOperation:
-    if len(inputs) not in (1, 2) or len(outputs) != 1:
-        raise ValueError(f"ReduceSum node '{node_name}' must have 1 or 2 inputs and 1 output")
-    unknown_attributes = set(attributes) - {
-        "axes",
-        "keepdims",
-        "noop_with_empty_axes",
-        STATIC_INPUT_VALUES,
-    }
-    if unknown_attributes:
-        attribute = sorted(unknown_attributes)[0]
-        raise NotImplementedError(f"ReduceSum attribute '{attribute}' is not implemented")
-    if int(attributes.get("keepdims", 1)) != 1:
-        raise NotImplementedError(f"ReduceSum node '{node_name}' requires keepdims=1")
-    if int(attributes.get("noop_with_empty_axes", 0)) != 0:
-        raise NotImplementedError("ReduceSum noop_with_empty_axes is not implemented")
-    if len(inputs) == 2:
-        axes = inputs[1]
-        if (
-            not axes.is_initializer
-            or axes.dtype is not TensorDType.INT64
-            or axes.rank != 1
-            or axes.dims != (1,)
-        ):
-            raise NotImplementedError(
-                f"ReduceSum node '{node_name}' requires one static INT64 axis"
-            )
-        static_inputs = attributes.get(STATIC_INPUT_VALUES, {})
-        declared_axes = tuple(static_inputs.get(axes.name, ()))
-        if len(declared_axes) != 1:
-            raise NotImplementedError(
-                f"ReduceSum node '{node_name}' requires one static INT64 axis"
-            )
-    elif "axes" not in attributes or len(tuple(attributes["axes"])) != 1:
-        raise NotImplementedError(
-            f"ReduceSum node '{node_name}' requires one static axis"
-        )
-    else:
-        declared_axes = tuple(attributes["axes"])
+    def __post_init__(self) -> None:
+        if self.work_kind not in (WorkKind.REDUCE_SUM, WorkKind.REDUCE_MAX):
+            raise ValueError("ReductionCostModel work_kind must be REDUCE_SUM or REDUCE_MAX")
 
-    axis = _infer_single_reduced_axis(node_name, inputs[0], outputs[0])
-    declared_axis = int(declared_axes[0])
-    if declared_axis < 0:
-        declared_axis += inputs[0].rank
-    if declared_axis != axis:
-        raise ValueError(f"ReduceSum node '{node_name}' axes do not match output shape")
-    return LoweredOperation(
-        kind=OpKind.CUSTOM,
-        payload=ReduceSumPayload(inputs[0], outputs[0], axis),
-        inputs=(inputs[0],),
-        outputs=outputs,
-    )
-
-
-def lower_global_average_pool_node(
-    node_name: str,
-    inputs: tuple[Tensor, ...],
-    outputs: tuple[Tensor, ...],
-    attributes: dict[str, object],
-) -> tuple[OpKind, GlobalAveragePoolPayload]:
-    if len(inputs) != 1 or len(outputs) != 1:
-        raise ValueError(
-            f"GlobalAveragePool node '{node_name}' must have 1 input and 1 output"
-        )
-    if attributes:
-        attribute = sorted(attributes)[0]
-        raise NotImplementedError(
-            f"GlobalAveragePool attribute '{attribute}' is not implemented"
-        )
-    return OpKind.CUSTOM, GlobalAveragePoolPayload(inputs[0], outputs[0])
-
-
-register_op(
-    OpSpec(
-        name="reduce_sum",
-        onnx_names=("ReduceSum",),
-        lower_onnx=lower_reduce_sum_node,
-        work_kinds=(WorkKind.REDUCE_SUM,),
-    )
-)
-register_op(
-    OpSpec(
-        name="global_average_pool",
-        onnx_names=("GlobalAveragePool",),
-        lower_onnx=lower_global_average_pool_node,
-        work_kinds=(WorkKind.REDUCE_SUM, WorkKind.MUL),
-    )
-)
+    def cost(
+        self,
+        tile_work: TileWork,
+        tile: Tile,
+        assigned_device: Device,
+    ) -> int:
+        return require_tile_device(tile, assigned_device).cycles(tile_work)

@@ -1,10 +1,10 @@
-"""Direct tile-local NCHW Conv2D operation."""
+"""Convolution semantics, decomposition, Tile Work, and costing."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-from MAPS.arch import Tile, WorkKind
+from maps.hardware import Device, Tile, WorkKind
 from MAPS.core.layout import (
     LayoutAxis,
     LayoutAxisMode,
@@ -15,10 +15,9 @@ from MAPS.core.layout import (
     tile_tensor_slice,
 )
 from MAPS.core.submesh import Submesh
-from MAPS.core.tensor import Tensor
-from MAPS.ops.common.cost import OpCostModel
-from MAPS.ops.common.payload import OpPayload
-from MAPS.ops.common.tile_work import TileWork
+from maps.graph import Node, OpKind, Tensor
+from .contracts import CompositeOpPayload, OpCostModel, OpPayload, TileWork, require_tile_device
+from .depthwise_convolution import DepthwiseConvPayload
 
 
 def _full_range(length: int) -> TensorRange:
@@ -133,8 +132,6 @@ class Conv2DPayload(OpPayload):
 
     @property
     def cost_model(self) -> OpCostModel:
-        from MAPS.ops.costs.conv2d_cost import Conv2DCostModel
-
         return Conv2DCostModel()
 
     def output_layouts(
@@ -235,3 +232,176 @@ class Conv2DPayload(OpPayload):
             dilations=self.dilations,
             local_padding=local_padding,
         )
+
+
+@dataclass(frozen=True)
+class Conv2DCostModel(OpCostModel):
+    """Compute-only Conv2D model backed by explicitly advertised devices.
+
+    This provisional model accounts for MAC throughput only. Patch-address
+    generation, packing, and boundary overhead are intentionally not modeled.
+    """
+
+    def cost(
+        self,
+        tile_work: TileWork,
+        tile: Tile,
+        assigned_device: Device,
+    ) -> int:
+        return require_tile_device(tile, assigned_device).cycles(tile_work)
+
+
+@dataclass(frozen=True)
+class ConvPayload(CompositeOpPayload):
+    """NCHW convolution lowered to a canonical primitive.
+
+    The planner-side convention is:
+    - ``x`` has shape ``[N, C, H, W]``
+    - ``w`` has shape ``[OC, C / group, KH, KW]``
+    - optional ``b`` has shape ``[OC]``
+    - ``output`` has shape ``[N, OC, OH, OW]``
+    """
+
+    x: Tensor
+    w: Tensor
+    b: Tensor | None
+    output: Tensor
+    strides: tuple[int, int] = (1, 1)
+    pads: tuple[int, int, int, int] = (0, 0, 0, 0)
+    dilations: tuple[int, int] = (1, 1)
+    group: int = 1
+
+    def __post_init__(self) -> None:
+        if len(self.strides) != 2:
+            raise ValueError("Conv strides must have length 2")
+        if len(self.pads) != 4:
+            raise ValueError("Conv pads must have length 4")
+        if len(self.dilations) != 2:
+            raise ValueError("Conv dilations must have length 2")
+        if any(value <= 0 for value in self.strides):
+            raise ValueError("Conv strides must be > 0")
+        if any(value < 0 for value in self.pads):
+            raise ValueError("Conv pads must be >= 0")
+        if any(value <= 0 for value in self.dilations):
+            raise ValueError("Conv dilations must be > 0")
+        if self.group <= 0:
+            raise ValueError("Conv group must be > 0")
+        self.validate_shapes()
+
+    def validate_shapes(self) -> None:
+        if self.x.rank != 4:
+            raise ValueError("Conv X tensor must be NCHW rank 4")
+        if self.w.rank != 4:
+            raise ValueError("Conv W tensor must be OIHW rank 4")
+        if self.output.rank != 4:
+            raise ValueError("Conv output tensor must be NCHW rank 4")
+        if self.x.elem_bytes != self.w.elem_bytes or self.x.elem_bytes != self.output.elem_bytes:
+            raise ValueError("Conv tensors must agree on element size")
+        if self.b is not None:
+            if self.b.rank != 1:
+                raise ValueError("Conv bias tensor must be rank 1")
+            if self.b.elem_bytes != self.output.elem_bytes:
+                raise ValueError("Conv bias element size must match output tensor")
+
+        batch, in_channels, input_h, input_w = self.x.dims
+        out_channels, weight_channels, kernel_h, kernel_w = self.w.dims
+        out_batch, out_channels_actual, output_h, output_w = self.output.dims
+        if batch != out_batch:
+            raise ValueError("Conv input and output batch dimensions must match")
+        if in_channels % self.group:
+            raise ValueError("Conv input channels must be divisible by group")
+        if out_channels % self.group:
+            raise ValueError("Conv output channels must be divisible by group")
+        if weight_channels != in_channels // self.group:
+            raise ValueError("Conv weight channels must equal input channels per group")
+        if out_channels != out_channels_actual:
+            raise ValueError("Conv weight output channels must match output channels")
+        if self.b is not None and self.b.dims != (out_channels,):
+            raise ValueError("Conv bias shape must match output channels")
+
+        stride_h, stride_w = self.strides
+        pad_top, pad_left, pad_bottom, pad_right = self.pads
+        dilation_h, dilation_w = self.dilations
+        expected_h = (
+            input_h
+            + pad_top
+            + pad_bottom
+            - dilation_h * (kernel_h - 1)
+            - 1
+        ) // stride_h + 1
+        expected_w = (
+            input_w
+            + pad_left
+            + pad_right
+            - dilation_w * (kernel_w - 1)
+            - 1
+        ) // stride_w + 1
+        if (output_h, output_w) != (expected_h, expected_w):
+            raise ValueError("Conv output spatial dimensions do not match parameters")
+
+    def decompose(self, node: Node) -> tuple[tuple[Tensor, ...], tuple[Node, ...]]:
+        return decompose_conv_node(node)
+
+
+def decompose_conv_node(node: Node) -> tuple[tuple[Tensor, ...], tuple[Node, ...]]:
+    """Lower one NCHW Conv to direct dense or specialized depthwise work."""
+
+    if not isinstance(node.payload, ConvPayload):
+        raise TypeError("decompose_conv_node expects a Node with ConvPayload payload")
+
+    op = node.payload
+    if op.group != 1 and op.group == op.x.dims[1]:
+        attributes = dict(node.attributes)
+        attributes["stage_group_id"] = f"{node.name}::depthwise_conv"
+        attributes["conv_step"] = "depthwise_conv"
+        return (
+            (),
+            (
+                Node(
+                    name=f"{node.name}__depthwise",
+                    kind=OpKind.CONV,
+                    inputs=tuple(
+                        tensor
+                        for tensor in (op.x, op.w, op.b)
+                        if tensor is not None
+                    ),
+                    outputs=(op.output,),
+                    payload=DepthwiseConvPayload(
+                        x=op.x,
+                        w=op.w,
+                        b=op.b,
+                        output=op.output,
+                        strides=op.strides,
+                        pads=op.pads,
+                        dilations=op.dilations,
+                    ),
+                    attributes=attributes,
+                ),
+            ),
+        )
+    if op.group != 1:
+        raise NotImplementedError(
+            f"Conv group={op.group} is not depthwise; general grouped Conv "
+            "is not implemented"
+        )
+
+    attributes = dict(node.attributes)
+    attributes.pop("stage_group_id", None)
+    return (), (
+        Node(
+            name=node.name,
+            kind=OpKind.CONV,
+            inputs=tuple(tensor for tensor in (op.x, op.w, op.b) if tensor is not None),
+            outputs=(op.output,),
+            payload=Conv2DPayload(
+                x=op.x,
+                w=op.w,
+                b=op.b,
+                output=op.output,
+                strides=op.strides,
+                pads=op.pads,
+                dilations=op.dilations,
+            ),
+            attributes=attributes,
+        ),
+    )

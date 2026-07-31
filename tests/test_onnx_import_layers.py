@@ -1,34 +1,30 @@
 """Tests for ONNX lowering into the shared graph IR."""
 
-from dataclasses import dataclass
-
 import pytest
 
 from MAPS.arch import WorkKind
 from maps.graph import OpKind, TensorDType, decompose_graph
 from maps.graph.onnx.graph_parser import parse_graph
+from maps.graph.onnx.operations import ONNX_OPERATION_CONVERTERS
 from maps.graph.onnx.tensor_parser import onnx_dtype_elem_bytes
 from maps.graph.onnx.utils import build_tensor_producer_table
-from MAPS.ops import SoftmaxPayload
-from MAPS.ops.defs.collective import AllReducePayload
-from MAPS.ops.defs.conv import ConvPayload
-from MAPS.ops.defs.direct_conv import Conv2DPayload
-from MAPS.ops.defs.depthwise_conv import DepthwiseConvPayload
-from MAPS.ops.defs.elementwise import BinaryElementwisePayload, UnaryElementwisePayload
-from MAPS.ops.defs.gemm import GemmPayload
+from maps.operations import SoftmaxPayload
+from maps.operations.collective import AllReducePayload
+from maps.operations.convolution import ConvPayload
+from maps.operations.convolution import Conv2DPayload
+from maps.operations.depthwise_convolution import DepthwiseConvPayload
+from maps.operations.elementwise import BinaryElementwisePayload, UnaryElementwisePayload
+from maps.operations.gemm import GemmPayload
 from maps.operations.cast import CastPayload
-from MAPS.ops.defs.group_norm import GroupNormalizationPayload
-from MAPS.ops.registry import get_onnx_lowerer, register_op, registered_ops
-from MAPS.ops.defs.reduction import (
+from maps.operations.normalization import GroupNormalizationPayload
+from maps.operations.reduction import (
     GlobalAveragePoolPayload,
     ReduceSumPayload,
     ReductionPayload,
     ScalarMultiplyPayload,
 )
-from MAPS.ops.defs.rearrange import ReshapePayload, TransposePayload
-from MAPS.ops.defs.split import SplitPayload, StaticSlicePayload
-from MAPS.ops.spec import OpSpec
-from MAPS.ops.common import OperationPayload
+from maps.operations.rearrangement import ReshapePayload, TransposePayload
+from maps.operations.split import SplitPayload, StaticSlicePayload
 
 
 def _make_tiny_matmul_graph():
@@ -845,71 +841,35 @@ def test_onnx_split_rejects_invalid_static_initializer_metadata() -> None:
         parse_graph(graph)
 
 
-def test_op_registry_reports_supported_onnx_ops() -> None:
-    assert get_onnx_lowerer("MatMul") is not None
-    assert get_onnx_lowerer("Gemm") is not None
-    assert get_onnx_lowerer("Conv") is not None
-    assert get_onnx_lowerer("Exp") is not None
-    assert get_onnx_lowerer("Log") is not None
-    assert get_onnx_lowerer("Softmax") is not None
-    assert get_onnx_lowerer("Split") is not None
-    assert get_onnx_lowerer("ReduceSum") is not None
-    assert get_onnx_lowerer("Relu") is not None
-    assert get_onnx_lowerer("GlobalAveragePool") is not None
-    assert get_onnx_lowerer("Flatten") is not None
-    assert {spec.name for spec in registered_ops()} >= {
-        "conv",
-        "softmax",
-        "split",
-        "reduce_sum",
-        "global_average_pool",
-        "flatten",
+def test_explicit_onnx_mapping_reports_supported_ops() -> None:
+    assert set(ONNX_OPERATION_CONVERTERS) >= {
+        "MatMul",
+        "Gemm",
+        "Conv",
+        "Exp",
+        "Log",
+        "Softmax",
+        "Split",
+        "ReduceSum",
+        "Relu",
+        "GlobalAveragePool",
+        "Flatten",
     }
 
 
-@dataclass(frozen=True)
-class _FakePayload(OperationPayload):
-    x: object
-    output: object
-
-
-def _lower_fake_identity(
-    node_name: str,
-    inputs: tuple[object, ...],
-    outputs: tuple[object, ...],
-    attributes: dict[str, object],
-) -> tuple[OpKind, _FakePayload]:
-    del node_name, attributes
-    if len(inputs) != 1 or len(outputs) != 1:
-        raise ValueError("FakeIdentityTestOp expects exactly one input and one output")
-    return OpKind.CUSTOM, _FakePayload(x=inputs[0], output=outputs[0])
-
-
-def test_parse_graph_uses_registry_for_new_test_op() -> None:
+def test_parse_graph_rejects_unmapped_external_operation() -> None:
     try:
         from onnx import TensorProto, helper
     except ImportError:
         return
-
-    register_op(
-        OpSpec(
-            name="fake_identity_test",
-            onnx_names=("FakeIdentityTestOp",),
-            lower_onnx=_lower_fake_identity,
-        )
-    )
 
     x = helper.make_tensor_value_info("x", TensorProto.FLOAT, [4, 8])
     y = helper.make_tensor_value_info("y", TensorProto.FLOAT, [4, 8])
     node = helper.make_node("FakeIdentityTestOp", inputs=["x"], outputs=["y"], name="fake_0")
     graph = helper.make_graph([node], "tiny_fake_identity", [x], [y])
 
-    lowered_graph = parse_graph(graph)
-
-    assert len(lowered_graph.nodes) == 1
-    assert lowered_graph.nodes[0].name == "fake_0"
-    assert lowered_graph.nodes[0].kind is OpKind.CUSTOM
-    assert isinstance(lowered_graph.nodes[0].payload, _FakePayload)
+    with pytest.raises(NotImplementedError, match="FakeIdentityTestOp"):
+        parse_graph(graph)
 
 
 def test_build_tensor_producer_table_tracks_outputs() -> None:

@@ -1,12 +1,11 @@
-"""Static reshape and semantic transpose operations."""
+"""Rearrangement semantics, Tile Work, and costing."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from math import prod
 
-from MAPS.arch import Tile, WorkKind
-from MAPS.core.graph import OpKind
+from maps.hardware import Tile, WorkKind
 from MAPS.core.layout import (
     LayoutAxis,
     LayoutAxisMode,
@@ -17,13 +16,8 @@ from MAPS.core.layout import (
     tile_tensor_slice,
 )
 from MAPS.core.submesh import Submesh
-from MAPS.core.tensor import Tensor
-from MAPS.ops.common.cost import OpCostModel
-from MAPS.ops.common.payload import OpPayload, sharded_layout
-from MAPS.ops.common.layout_relation import LayoutRelation
-from MAPS.ops.common.tile_work import TileWork
-from MAPS.ops.registry import register_op
-from MAPS.ops.spec import LoweredOperation, OpSpec
+from maps.graph import Tensor
+from .contracts import LayoutRelation, OpCostModel, OpPayload, TileWork, sharded_layout
 
 
 def _full_slice(tensor: Tensor) -> TensorSlice:
@@ -58,7 +52,7 @@ class _RearrangePayload(OpPayload):
 
     @property
     def cost_model(self) -> OpCostModel:
-        from maps.operations.elementwise import ElementwiseCostModel
+        from .elementwise import ElementwiseCostModel
 
         return ElementwiseCostModel(work_kind=self.work_kind)
 
@@ -218,94 +212,3 @@ class TransposePayload(_RearrangePayload):
             output_slice=output_slice,
             work_kind=self.work_kind,
         )
-
-def lower_reshape_node(
-    node_name: str,
-    inputs: tuple[Tensor, ...],
-    outputs: tuple[Tensor, ...],
-    attributes: dict[str, object],
-) -> LoweredOperation:
-    if len(inputs) != 2 or len(outputs) != 1:
-        raise ValueError(f"Reshape node '{node_name}' must have 2 inputs and 1 output")
-    if not inputs[1].is_initializer:
-        raise NotImplementedError(
-            f"Reshape node '{node_name}' requires a static shape initializer"
-        )
-    if int(attributes.get("allowzero", 0)) != 0:
-        raise NotImplementedError("Reshape allowzero is not implemented")
-    payload = ReshapePayload(x=inputs[0], output=outputs[0])
-    return LoweredOperation(
-        kind=OpKind.TRANSFORM,
-        payload=payload,
-        inputs=(inputs[0],),
-        outputs=outputs,
-    )
-
-
-def lower_transpose_node(
-    node_name: str,
-    inputs: tuple[Tensor, ...],
-    outputs: tuple[Tensor, ...],
-    attributes: dict[str, object],
-) -> tuple[OpKind, TransposePayload]:
-    if len(inputs) != 1 or len(outputs) != 1:
-        raise ValueError(f"Transpose node '{node_name}' must have 1 input and 1 output")
-    permutation = tuple(attributes.get("perm", tuple(reversed(range(inputs[0].rank)))))
-    return (
-        OpKind.TRANSFORM,
-        TransposePayload(inputs[0], outputs[0], permutation),
-    )
-
-
-def lower_flatten_node(
-    node_name: str,
-    inputs: tuple[Tensor, ...],
-    outputs: tuple[Tensor, ...],
-    attributes: dict[str, object],
-) -> tuple[OpKind, ReshapePayload]:
-    if len(inputs) != 1 or len(outputs) != 1:
-        raise ValueError(f"Flatten node '{node_name}' must have 1 input and 1 output")
-    unknown_attributes = set(attributes) - {"axis"}
-    if unknown_attributes:
-        attribute = sorted(unknown_attributes)[0]
-        raise NotImplementedError(f"Flatten attribute '{attribute}' is not implemented")
-
-    x = inputs[0]
-    axis = int(attributes.get("axis", 1))
-    if axis < 0:
-        axis += x.rank
-    if axis < 0 or axis > x.rank:
-        raise ValueError(f"Flatten node '{node_name}' axis must be in [0, input rank]")
-
-    expected_dims = (prod(x.dims[:axis]), prod(x.dims[axis:]))
-    if outputs[0].dims != expected_dims:
-        raise ValueError(
-            f"Flatten node '{node_name}' output shape must be {expected_dims}"
-        )
-    return OpKind.TRANSFORM, ReshapePayload(x=x, output=outputs[0])
-
-
-register_op(
-    OpSpec(
-        name="reshape",
-        onnx_names=("Reshape",),
-        lower_onnx=lower_reshape_node,
-        work_kinds=(WorkKind.RESHAPE,),
-    )
-)
-register_op(
-    OpSpec(
-        name="flatten",
-        onnx_names=("Flatten",),
-        lower_onnx=lower_flatten_node,
-        work_kinds=(WorkKind.RESHAPE,),
-    )
-)
-register_op(
-    OpSpec(
-        name="transpose",
-        onnx_names=("Transpose",),
-        lower_onnx=lower_transpose_node,
-        work_kinds=(WorkKind.TRANSPOSE,),
-    )
-)

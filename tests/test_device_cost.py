@@ -7,8 +7,8 @@ from MAPS.hw.chips.magia import MAGIA_CORE_DEVICE, MAGIA_REDMULE_DEVICE
 from MAPS.core.layout import TensorRange, TensorSlice
 from MAPS.core.dtype import TensorDType
 from MAPS.core.tensor import Tensor
-from MAPS.ops.costs.elementwise_cost import ElementwiseCostModel
-from MAPS.ops.costs.gemm_cost import GemmCostModel
+from maps.operations.elementwise import ElementwiseCostModel
+from maps.operations.gemm import GemmCostModel
 from MAPS.hw.devices.generic import GENERIC_SCALAR_DEVICE
 from MAPS.hw.devices.redmule import REDMULE_ARRAY_HEIGHT, REDMULE_ARRAY_WIDTH
 from MAPS.hw.devices.spatz import (
@@ -26,9 +26,9 @@ from MAPS.hw.devices.spatz import (
     SpatzDevice,
 )
 from MAPS.hw.devices.tensix_tile import TENSIX_MATRIX_DEVICE
-from MAPS.ops.defs.gemm import GemmTileWork
-from MAPS.ops.defs.elementwise import ElementwiseTileWork
-from MAPS.ops.defs.reduction import ReductionTileWork
+from maps.operations.gemm import GemmTileWork
+from maps.operations.elementwise import ElementwiseTileWork
+from maps.operations.reduction import ReductionTileWork
 
 
 def _tile_work(m_size: int = 4, n_size: int = 8, k_size: int = 16) -> GemmTileWork:

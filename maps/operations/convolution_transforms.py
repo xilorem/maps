@@ -1,10 +1,10 @@
-"""Planner payloads used by the explicit Conv-to-GEMM decomposition."""
+"""Convolution-transform semantics, Tile Work, and costing."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from MAPS.arch import Tile, WorkKind
+from maps.hardware import Device, Tile, WorkKind
 from MAPS.core.layout import (
     LayoutAxis,
     LayoutAxisMode,
@@ -13,12 +13,13 @@ from MAPS.core.layout import (
     TensorSlice,
     TensorSliceRef,
     tile_tensor_slice,
+    tensor_slice_num_bytes,
 )
 from MAPS.core.submesh import Submesh
-from MAPS.core.tensor import Tensor
-from maps.operations import OpCostModel, OpPayload, TileWork
-from maps.operations.elementwise import BinaryElementwisePayload
-from maps.operations.gemm import GemmPayload
+from maps.graph import Tensor
+from .contracts import OpCostModel, OpPayload, TileWork
+from .elementwise import BinaryElementwisePayload
+from .gemm import GemmPayload
 
 
 CONV_TRANSFORM_WORK_KINDS: dict[str, WorkKind] = {
@@ -99,14 +100,14 @@ class TransformTileWork(TileWork):
 
 
 class _TransformPayload(OpPayload):
+    op_name: str
+
     @property
     def work_kind(self) -> WorkKind:
         return CONV_TRANSFORM_WORK_KINDS[self.op_name]
 
     @property
     def cost_model(self) -> OpCostModel:
-        from MAPS.ops.costs.conv_transform_cost import ConvTransformCostModel
-
         return ConvTransformCostModel()
 
 
@@ -287,3 +288,30 @@ class OutputReformatPayload(_TransformPayload):
             input_tile_slices=(input_slice,),
             work_kind=self.work_kind,
         )
+
+
+class ConvTransformCostModel(OpCostModel):
+    """Estimate scalar-core transform cycles from visible L1 traffic."""
+
+    diagnostic_label = (
+        "provisional Conv-to-GEMM transform estimate pending measured "
+        "bytes-read/bytes-written/core-L1 models"
+    )
+
+    def cost(
+        self,
+        tile_work: TileWork,
+        tile: Tile,
+        assigned_device: Device,
+    ) -> int:
+        del assigned_device
+        bytes_read = sum(
+            tensor_slice_num_bytes(ref.tensor, ref.tensor_slice)
+            for ref in tile_work.input_slices
+        )
+        bytes_written = sum(
+            tensor_slice_num_bytes(ref.tensor, ref.tensor_slice)
+            for ref in tile_work.output_slices
+        )
+        total_bytes = bytes_read + bytes_written
+        return (total_bytes + tile.memory.bandwidth - 1) // tile.memory.bandwidth

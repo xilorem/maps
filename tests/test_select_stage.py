@@ -1,6 +1,6 @@
 from MAPS.core.graph import Graph, Node, OpKind
 from MAPS.core.tensor import Tensor
-from MAPS.ops.defs.elementwise import BinaryElementwisePayload, UnaryElementwisePayload
+from maps.operations.elementwise import BinaryElementwisePayload, UnaryElementwisePayload
 from MAPS.planner.contracts.options import StageSelectionOptions
 from MAPS.planner.passes.stage_selection import form_stages
 

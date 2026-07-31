@@ -1,17 +1,13 @@
-from dataclasses import dataclass
-
 import pytest
 
 from MAPS.arch import WorkKind
-from MAPS.core.graph import OpKind
 from MAPS.core.layout import TensorRange, TensorSlice
 from MAPS.core.tensor import Tensor
-from MAPS.ops.common import CompositeOpPayload, OperationPayload
-from MAPS.ops.defs.conv import ConvPayload
-from MAPS.ops.defs.elementwise import BinaryElementwisePayload, UnaryElementwisePayload
-from MAPS.ops.defs.gemm import GemmPayload, lower_gemm_node, lower_matmul_node
-from MAPS.ops.registry import get_op, register_op
-from MAPS.ops.spec import OpSpec
+from maps.operations import CompositeOpPayload
+from maps.operations.convolution import ConvPayload
+from maps.operations.elementwise import BinaryElementwisePayload, UnaryElementwisePayload
+from maps.operations.gemm import GemmPayload
+from maps.graph.onnx.operations import convert_gemm, convert_matmul
 
 
 def _tensor(name: str, dims: tuple[int, ...]) -> Tensor:
@@ -74,14 +70,14 @@ def test_onnx_gemm_rejects_unrepresented_attributes(attribute: str, value: objec
     outputs = (_tensor("output", (4, 8)),)
 
     with pytest.raises(NotImplementedError, match=attribute):
-        lower_gemm_node("gemm", inputs, outputs, {attribute: value})
+        convert_gemm("gemm", inputs, outputs, {attribute: value})
 
 
 def test_onnx_gemm_represents_transposed_weight_storage() -> None:
     inputs = (_tensor("x", (4, 6)), _tensor("w", (8, 6)))
     outputs = (_tensor("output", (4, 8)),)
 
-    _, payload = lower_gemm_node("gemm", inputs, outputs, {"transB": 1})
+    _, payload = convert_gemm("gemm", inputs, outputs, {"transB": 1})
 
     assert payload.transpose_w
     output_slice = TensorSlice(
@@ -99,7 +95,7 @@ def test_onnx_matmul_rejects_batch_broadcasting_explicitly() -> None:
     outputs = (_tensor("output", (2, 4, 8)),)
 
     with pytest.raises(NotImplementedError, match="broadcasted batch dimensions"):
-        lower_matmul_node("matmul", inputs, outputs, {})
+        convert_matmul("matmul", inputs, outputs, {})
 
 
 def test_conv_is_only_a_composite_contract() -> None:
@@ -113,28 +109,3 @@ def test_conv_is_only_a_composite_contract() -> None:
     assert isinstance(payload, CompositeOpPayload)
     assert not hasattr(payload, "cost_model")
     assert not hasattr(payload, "build_tile_work")
-
-
-@dataclass(frozen=True)
-class _RegistryPayload(OperationPayload):
-    pass
-
-
-def _lower_registry_payload(node_name, inputs, outputs, attributes):
-    del node_name, inputs, outputs, attributes
-    return OpKind.CUSTOM, _RegistryPayload()
-
-
-def test_registry_rejects_collisions_without_partial_registration() -> None:
-    # Explicit Graph converters reserve their external names from the registry.
-    with pytest.raises(ValueError, match="duplicate ONNX op mapping"):
-        register_op(
-            OpSpec(
-                name="atomic_registration_test",
-                onnx_names=("MatMul",),
-                lower_onnx=_lower_registry_payload,
-            )
-        )
-
-    with pytest.raises(ValueError, match="unknown op spec"):
-        get_op("atomic_registration_test")

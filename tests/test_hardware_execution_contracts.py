@@ -12,7 +12,7 @@ from maps.hardware import (
     WorkSignature,
 )
 from maps.graph import Node, OpKind, Tensor, TensorDType
-from MAPS.ops.defs.gemm import GemmPayload
+from maps.operations.gemm import GemmPayload
 from MAPS.hw.devices.redmule import REDMULE_DEVICE
 from MAPS.hw.devices.spatz import SPATZ_DEVICE
 

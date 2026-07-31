@@ -6,7 +6,7 @@ from tempfile import TemporaryDirectory
 import pytest
 
 from maps.graph import Graph, import_onnx_graph, prepare_onnx_model
-from MAPS.ops.defs.gemm import GemmPayload
+from maps.operations.gemm import GemmPayload
 
 
 def test_load_onnx_model_requires_existing_path() -> None:

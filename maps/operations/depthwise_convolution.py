@@ -1,10 +1,10 @@
-"""Tile-local depthwise convolution operation."""
+"""Depthwise convolution semantics, Tile Work, and costing."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-from MAPS.arch import Tile, WorkKind
+from maps.hardware import Tile, WorkKind
 from MAPS.core.layout import (
     LayoutAxis,
     LayoutAxisMode,
@@ -15,10 +15,8 @@ from MAPS.core.layout import (
     tile_tensor_slice,
 )
 from MAPS.core.submesh import Submesh
-from MAPS.core.tensor import Tensor
-from MAPS.ops.common.cost import OpCostModel
-from MAPS.ops.common.payload import OpPayload
-from MAPS.ops.common.tile_work import TileWork
+from maps.graph import Tensor
+from .contracts import OpCostModel, OpPayload, TileWork
 
 
 def _full_range(length: int) -> TensorRange:
@@ -83,7 +81,7 @@ class DepthwiseConvPayload(OpPayload):
 
     @property
     def cost_model(self) -> OpCostModel:
-        from maps.operations.elementwise import ElementwiseCostModel
+        from .elementwise import ElementwiseCostModel
 
         return ElementwiseCostModel(work_kind=self.work_kind)
 
@@ -195,5 +193,5 @@ class DepthwiseConvPayload(OpPayload):
             weight_slice=weight_slice,
             bias_slice=bias_slice,
             output_slice=output_slice,
-            kernel_shape=self.w.dims[2:],
+            kernel_shape=(self.w.dims[2], self.w.dims[3]),
         )

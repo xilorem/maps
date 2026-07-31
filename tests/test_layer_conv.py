@@ -5,8 +5,8 @@ from MAPS.hw.devices.generic import GENERIC_SCALAR_DEVICE
 from MAPS.core.layout import TensorRange
 from MAPS.core.submesh import Submesh
 from MAPS.core.tensor import Tensor
-from MAPS.ops.defs.direct_conv import Conv2DPayload
-from MAPS.ops.defs.depthwise_conv import DepthwiseConvPayload
+from maps.operations.convolution import Conv2DPayload
+from maps.operations.depthwise_convolution import DepthwiseConvPayload
 
 
 def test_direct_conv_shards_output_channels_and_height_with_clamped_halo() -> None:

@@ -1,12 +1,11 @@
-"""Static split canonicalization and rectangular slice execution."""
+"""Split semantics, deterministic decomposition, Tile Work, and costing."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-from MAPS.arch import Tile, WorkKind
-from MAPS.core.dtype import TensorDType
-from MAPS.core.graph import Node, OpKind
+from maps.hardware import Tile, WorkKind
+from maps.graph import Node, OpKind, Tensor
 from MAPS.core.layout import (
     TensorLayout,
     TensorRange,
@@ -15,12 +14,7 @@ from MAPS.core.layout import (
     tile_tensor_slice,
 )
 from MAPS.core.submesh import Submesh
-from MAPS.core.tensor import Tensor
-from MAPS.ops.common.cost import OpCostModel
-from MAPS.ops.common.payload import CompositeOpPayload, OpPayload, sharded_layout
-from MAPS.ops.common.tile_work import TileWork
-from MAPS.ops.registry import register_op
-from MAPS.ops.spec import LoweredOperation, OpSpec, STATIC_INPUT_VALUES
+from .contracts import CompositeOpPayload, OpCostModel, OpPayload, TileWork, sharded_layout
 
 
 @dataclass(frozen=True)
@@ -77,7 +71,7 @@ class StaticSlicePayload(OpPayload):
 
     @property
     def cost_model(self) -> OpCostModel:
-        from maps.operations.elementwise import ElementwiseCostModel
+        from .elementwise import ElementwiseCostModel
 
         return ElementwiseCostModel(work_kind=self.work_kind)
 
@@ -119,7 +113,7 @@ class StaticSlicePayload(OpPayload):
 
 @dataclass(frozen=True)
 class SplitPayload(CompositeOpPayload):
-    """Static multi-output split normalized independently of ONNX syntax."""
+    """Static multi-output split with normalized axis and sizes."""
 
     x: Tensor
     outputs: tuple[Tensor, ...]
@@ -175,99 +169,3 @@ class SplitPayload(CompositeOpPayload):
             )
             split_offset += size
         return (), tuple(nodes)
-
-
-def _normalized_axis(node_name: str, x: Tensor, attributes: dict[str, object]) -> int:
-    axis = int(attributes.get("axis", 0))
-    if axis < 0:
-        axis += x.rank
-    if axis < 0 or axis >= x.rank:
-        raise ValueError(f"Split node '{node_name}' axis must be within input rank")
-    return axis
-
-
-def _num_output_sizes(node_name: str, dimension: int, num_outputs: int) -> tuple[int, ...]:
-    if num_outputs <= 0:
-        raise ValueError(f"Split node '{node_name}' num_outputs must be positive")
-    chunk_size = (dimension + num_outputs - 1) // num_outputs
-    sizes = (chunk_size,) * (num_outputs - 1) + (
-        dimension - chunk_size * (num_outputs - 1),
-    )
-    if any(size <= 0 for size in sizes):
-        raise ValueError(f"Split node '{node_name}' produces a zero-sized output")
-    return sizes
-
-
-def lower_split_node(
-    node_name: str,
-    inputs: tuple[Tensor, ...],
-    outputs: tuple[Tensor, ...],
-    attributes: dict[str, object],
-) -> LoweredOperation:
-    """Normalize the supported static ONNX Split forms."""
-
-    if len(inputs) not in (1, 2):
-        raise ValueError(f"Split node '{node_name}' must have 1 or 2 inputs")
-    if not outputs:
-        raise ValueError(f"Split node '{node_name}' must have at least one output")
-
-    unknown_attributes = set(attributes) - {
-        "axis",
-        "num_outputs",
-        STATIC_INPUT_VALUES,
-    }
-    if unknown_attributes:
-        attribute = sorted(unknown_attributes)[0]
-        raise NotImplementedError(f"Split attribute '{attribute}' is not implemented")
-
-    x = inputs[0]
-    axis = _normalized_axis(node_name, x, attributes)
-    has_split_input = len(inputs) == 2
-    has_num_outputs = "num_outputs" in attributes
-    if has_split_input == has_num_outputs:
-        raise ValueError(
-            f"Split node '{node_name}' must provide exactly one of "
-            "a split initializer or num_outputs"
-        )
-
-    if has_split_input:
-        split = inputs[1]
-        if not split.is_initializer:
-            raise NotImplementedError(
-                f"Split node '{node_name}' requires a static split initializer"
-            )
-        if (
-            split.dtype is not TensorDType.INT64
-            or split.rank != 1
-            or split.dims != (len(outputs),)
-        ):
-            raise ValueError(
-                f"Split node '{node_name}' split initializer must be a rank-one "
-                "INT64 tensor with one value per output"
-            )
-        sizes = tuple(output.dims[axis] for output in outputs)
-    else:
-        num_outputs = int(attributes["num_outputs"])
-        if num_outputs != len(outputs):
-            raise ValueError(
-                f"Split node '{node_name}' num_outputs must match output count"
-            )
-        sizes = _num_output_sizes(node_name, x.dims[axis], num_outputs)
-
-    payload = SplitPayload(x=x, outputs=outputs, axis=axis, sizes=sizes)
-    return LoweredOperation(
-        kind=OpKind.TRANSFORM,
-        payload=payload,
-        inputs=(x,),
-        outputs=outputs,
-    )
-
-
-register_op(
-    OpSpec(
-        name="split",
-        onnx_names=("Split",),
-        lower_onnx=lower_split_node,
-        work_kinds=(WorkKind.SLICE,),
-    )
-)

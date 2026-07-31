@@ -1,18 +1,15 @@
-"""Softmax high-level op plus decomposition into primitive MAPS ops."""
+"""Softmax semantics and deterministic primitive decomposition."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-from MAPS.arch import WorkKind
-from MAPS.core.graph import Node, OpKind
-from MAPS.core.tensor import Tensor
-from MAPS.ops.common.payload import CompositeOpPayload
-from MAPS.ops.defs.collective import AllReducePayload
-from maps.operations.elementwise import BinaryElementwisePayload, UnaryElementwisePayload
-from MAPS.ops.defs.reduction import ReductionPayload
-from MAPS.ops.registry import register_op
-from MAPS.ops.spec import OpSpec
+from maps.hardware import WorkKind
+from maps.graph import Node, OpKind, Tensor
+from .contracts import CompositeOpPayload
+from .collective import AllReducePayload
+from .elementwise import BinaryElementwisePayload, UnaryElementwisePayload
+from .reduction import ReductionPayload
 
 
 @dataclass(frozen=True)
@@ -36,27 +33,6 @@ class SoftmaxPayload(CompositeOpPayload):
 
     def decompose(self, node: Node) -> tuple[tuple[Tensor, ...], tuple[Node, ...]]:
         return decompose_softmax_node(node)
-
-
-def lower_softmax_onnx(
-    node_name: str,
-    inputs: tuple[Tensor, ...],
-    outputs: tuple[Tensor, ...],
-    attributes: dict[str, object],
-) -> tuple[OpKind, SoftmaxPayload]:
-    """Lower one ONNX Softmax node into one high-level MAPS softmax op."""
-
-    if len(inputs) != 1:
-        raise ValueError(f"Softmax node '{node_name}' must have exactly 1 input")
-    if len(outputs) != 1:
-        raise ValueError(f"Softmax node '{node_name}' must have exactly 1 output")
-
-    x = inputs[0]
-    output = outputs[0]
-    axis = int(attributes.get("axis", -1))
-    if axis < 0:
-        axis += x.rank
-    return OpKind.CUSTOM, SoftmaxPayload(x=x, output=output, axis=axis)
 
 
 def decompose_softmax_node(node: Node) -> tuple[tuple[Tensor, ...], tuple[Node, ...]]:
@@ -244,19 +220,3 @@ def _collective_axis_for_softmax(tensor: Tensor, axis: int) -> str | None:
     if tensor.rank >= 2 and axis == tensor.rank - 2:
         return "y"
     return None
-
-
-register_op(
-    OpSpec(
-        name="softmax",
-        onnx_names=("Softmax",),
-        lower_onnx=lower_softmax_onnx,
-        work_kinds=(
-            WorkKind.REDUCE_MAX,
-            WorkKind.EXP,
-            WorkKind.REDUCE_SUM,
-            WorkKind.SUB,
-            WorkKind.DIV,
-        ),
-    )
-)

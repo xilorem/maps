@@ -8,10 +8,10 @@ from MAPS.core.layout import TensorLayout
 from MAPS.core.submesh import Submesh
 from MAPS.core.dtype import TensorDType
 from MAPS.core.tensor import Tensor
-from MAPS.ops.common.cost import OpCostModel
-from MAPS.ops.common.tile_work import TileWork
-from MAPS.ops.defs.gemm import GemmPayload
-from MAPS.ops.defs.elementwise import ElementwiseTileWork, UnaryElementwisePayload
+from maps.operations import OpCostModel
+from maps.operations import TileWork
+from maps.operations.gemm import GemmPayload
+from maps.operations.elementwise import ElementwiseTileWork, UnaryElementwisePayload
 from MAPS.planner.passes.stage_selection import form_stages
 from MAPS.planner.passes.workload_balancing import balance_workload
 from MAPS.planner.workload import allocation as allocation_module
