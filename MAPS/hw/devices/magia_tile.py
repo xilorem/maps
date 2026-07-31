@@ -85,9 +85,19 @@ MAGIA_CORE_DEVICE = ScalarDevice(
                 output_dtypes=(TensorDType.FLOAT16,),
             ),
             WorkSignature(
+                work_kind=WorkKind.IM2COL,
+                input_dtypes=(TensorDType.FLOAT32,),
+                output_dtypes=(TensorDType.FLOAT32,),
+            ),
+            WorkSignature(
                 work_kind=WorkKind.OUTPUT_REFORMAT,
                 input_dtypes=(TensorDType.FLOAT16,),
                 output_dtypes=(TensorDType.FLOAT16,),
+            ),
+            WorkSignature(
+                work_kind=WorkKind.OUTPUT_REFORMAT,
+                input_dtypes=(TensorDType.FLOAT32,),
+                output_dtypes=(TensorDType.FLOAT32,),
             ),
         }
     ),

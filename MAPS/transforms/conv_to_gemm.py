@@ -27,8 +27,8 @@ from .graph_utils import (
 )
 
 
-def lower_fp16_convolutions(model: ImportedModel) -> RewriteTransformResult:
-    """Pack immutable OIHW filters and expose FP16 Conv execution explicitly."""
+def lower_convolutions(model: ImportedModel) -> RewriteTransformResult:
+    """Pack immutable OIHW filters and expose dense Conv execution explicitly."""
 
     tensors = {tensor.name: tensor for tensor in model.graph.tensors}
     initializers = {tensor.name: tensor for tensor in model.graph.initializers}
@@ -47,7 +47,7 @@ def lower_fp16_convolutions(model: ImportedModel) -> RewriteTransformResult:
     }
 
     for node in model.graph.nodes:
-        if not _is_fp16_dense_conv(node):
+        if not _is_supported_dense_conv(node):
             lowered_nodes.append(node)
             continue
 
@@ -62,7 +62,7 @@ def lower_fp16_convolutions(model: ImportedModel) -> RewriteTransformResult:
         packed_weight = packed_weights.get(op.w.name)
         if packed_weight is None:
             replace_initializer = all(
-                _is_fp16_dense_conv(consumer)
+                _is_supported_dense_conv(consumer)
                 and consumer.payload.w.name == op.w.name
                 for consumer in consumers[op.w.name]
             )
@@ -217,11 +217,17 @@ def lower_fp16_convolutions(model: ImportedModel) -> RewriteTransformResult:
     )
 
 
-def _is_fp16_dense_conv(node: Node) -> bool:
-    return isinstance(node.payload, Conv2DPayload) and all(
-        tensor.dtype is TensorDType.FLOAT16
-        for tensor in node.inputs + node.outputs
-    )
+lower_fp16_convolutions = lower_convolutions
+
+
+def _is_supported_dense_conv(node: Node) -> bool:
+    if not isinstance(node.payload, Conv2DPayload):
+        return False
+    dtypes = {tensor.dtype for tensor in node.inputs + node.outputs}
+    return len(dtypes) == 1 and dtypes.pop() in {
+        TensorDType.FLOAT16,
+        TensorDType.FLOAT32,
+    }
 
 
 def _generated_name(
@@ -240,7 +246,11 @@ def _pack_weight(
 ) -> tuple[Tensor, Constant]:
     output_channels, input_channels, kernel_h, kernel_w = weight.dims
     packed_shape = (input_channels * kernel_h * kernel_w, output_channels)
-    values = np.frombuffer(constant.data, dtype="<f2").reshape(weight.dims)
+    numpy_dtype = {
+        TensorDType.FLOAT16: np.dtype("<f2"),
+        TensorDType.FLOAT32: np.dtype("<f4"),
+    }[weight.dtype]
+    values = np.frombuffer(constant.data, dtype=numpy_dtype).reshape(weight.dims)
     packed = values.transpose(1, 2, 3, 0).reshape(packed_shape)
     return (
         replace(weight, name=packed_name, rank=2, dims=packed_shape),

@@ -10,7 +10,7 @@ from MAPS.core.constants import validate_constants
 from MAPS.importers.model import ImportedModel
 
 from .decompose import decompose_graph_with_sources
-from .conv_to_gemm import lower_fp16_convolutions
+from .conv_to_gemm import lower_convolutions
 from .effects import RewriteEffect, RewriteTransformResult
 from .precision import precision_lower_model
 
@@ -125,7 +125,7 @@ def run_graph_rewrites(
         mesh is not None
         and GraphRewriteKind.CONV_TO_GEMM in mesh.required_graph_rewrites
     ):
-        result = GraphRewrite("conv_to_gemm", lower_fp16_convolutions).apply(
+        result = GraphRewrite("conv_to_gemm", lower_convolutions).apply(
             rewritten
         )
         rewritten = result.model

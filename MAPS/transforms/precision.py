@@ -149,6 +149,7 @@ def precision_lower_model(
                 inputs=(tensor,),
                 outputs=(cast_tensor,),
                 payload=CastPayload(x=tensor, output=cast_tensor),
+                attributes=_stage_group_attributes(node),
             )
             reserve_generated_node_name(cast_node.name, node_names)
             add_generated_tensor(cast_tensor, tensors)
@@ -206,6 +207,7 @@ def precision_lower_model(
                 inputs=(target_output,),
                 outputs=(output,),
                 payload=CastPayload(x=target_output, output=output),
+                attributes=_stage_group_attributes(node),
             )
             reserve_generated_node_name(restore_node.name, node_names)
             replacement_nodes.append(restore_node)
@@ -239,6 +241,12 @@ def precision_lower_model(
         model=ImportedModel(graph=graph, constants=constants),
         effects=tuple(effects),
     )
+
+
+def _stage_group_attributes(node: Node) -> dict[str, object]:
+    if "stage_group_id" not in node.attributes:
+        return {}
+    return {"stage_group_id": node.attributes["stage_group_id"]}
 
 
 def _require_assignment(
