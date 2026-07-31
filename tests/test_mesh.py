@@ -1,6 +1,6 @@
 import pytest
 
-from MAPS.arch import EndpointKind, L1Memory, L2Memory, Mesh, NoC, NoCChannel, NoCEndpoint, NoCLink, NoCNode
+from maps.hardware import EndpointKind, L1Memory, L2Memory, Mesh, NoC, NoCChannel, NoCEndpoint, NoCLink, NoCNode
 from tests.noc_utils import rectangular_test_noc, rectangular_test_tiles
 
 

@@ -1,4 +1,4 @@
-from MAPS.arch import Device, EndpointKind, FixedDeviceAssignment, L1Memory, NoC, NoCChannel, NoCEndpoint, NoCLink, NoCNode, Tile
+from maps.hardware import Device, EndpointKind, FixedDeviceAssignment, L1Memory, NoC, NoCChannel, NoCEndpoint, NoCLink, NoCNode, Tile
 from MAPS.hw.devices.generic import (
     GENERIC_DEVICE_ASSIGNMENT,
     GENERIC_SCALAR_DEVICE,

@@ -5,12 +5,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Callable
 
-from MAPS.arch import GraphRewriteKind, Mesh, WorkSignature
+from MAPS.arch import Mesh, WorkSignature
 from MAPS.core.constants import validate_constants
 from MAPS.importers.model import ImportedModel
 
-from .decompose import decompose_graph_with_sources
 from .conv_to_gemm import lower_convolutions
+from .contracts import GraphRewriteKind, TargetSpecializationPolicy
+from .decompose import decompose_graph_with_sources
 from .effects import RewriteEffect, RewriteTransformResult
 from .precision import precision_lower_model
 
@@ -116,14 +117,23 @@ def run_graph_rewrites(
     validate_constants(model.graph, model.constants)
     rewritten = model
     events = []
+    specialization = (
+        mesh if isinstance(mesh, TargetSpecializationPolicy) else None
+    )
+    precision_recipes = (
+        ()
+        if specialization is None
+        else specialization.precision_lowering_recipes
+    )
     for graph_rewrite in CANONICAL_GRAPH_REWRITES:
         result = graph_rewrite.apply(rewritten)
         rewritten = result.model
         events.extend(result.events)
 
     if (
-        mesh is not None
-        and GraphRewriteKind.CONV_TO_GEMM in mesh.required_graph_rewrites
+        specialization is not None
+        and GraphRewriteKind.CONV_TO_GEMM
+        in specialization.required_graph_rewrites
     ):
         result = GraphRewrite("conv_to_gemm", lower_convolutions).apply(
             rewritten
@@ -136,7 +146,11 @@ def run_graph_rewrites(
             raise ValueError("Precision Lowering requires a Mesh")
         result = GraphRewrite(
             "precision_lowering",
-            lambda current: precision_lower_model(current, mesh),
+            lambda current: precision_lower_model(
+                current,
+                mesh,
+                precision_recipes,
+            ),
         ).apply(rewritten)
         rewritten = result.model
         events.extend(result.events)

@@ -1,6 +1,6 @@
 import pytest
 
-from MAPS.arch import (
+from maps.hardware import (
     EndpointKind,
     NoC,
     NoCChannel,

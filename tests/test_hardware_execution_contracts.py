@@ -2,25 +2,19 @@ from dataclasses import FrozenInstanceError
 
 import pytest
 
-from MAPS.arch import (
+from maps.hardware import (
     DeviceKind,
     FixedDeviceAssignment,
     L1Memory,
-    L2Memory,
-    Mesh,
-    PrecisionLoweringRecipe,
     ScalarDevice,
     Tile,
     WorkKind,
     WorkSignature,
 )
-from MAPS.core.dtype import TensorDType
-from MAPS.core.graph import Node, OpKind
-from MAPS.core.tensor import Tensor
+from maps.graph import Node, OpKind, Tensor, TensorDType
 from MAPS.ops.defs.gemm import GemmPayload
 from MAPS.hw.devices.redmule import REDMULE_DEVICE
 from MAPS.hw.devices.spatz import SPATZ_DEVICE
-from tests.noc_utils import rectangular_test_noc
 
 
 def _tensor(
@@ -256,59 +250,4 @@ def test_tile_rejects_assignment_to_incapable_device() -> None:
         _tile(
             (_capable_core("core", fp16_relu),),
             FixedDeviceAssignment({fp32_relu: "core"}),
-        )
-
-
-def test_mesh_retains_unique_precision_lowering_recipes() -> None:
-    source = _signature(
-        WorkKind.GEMM,
-        (TensorDType.FLOAT32, TensorDType.FLOAT32),
-        (TensorDType.FLOAT32,),
-    )
-    target = _signature(
-        WorkKind.GEMM,
-        (TensorDType.FLOAT16, TensorDType.FLOAT16),
-        (TensorDType.FLOAT16,),
-    )
-    recipe = PrecisionLoweringRecipe(
-        source_signature=source,
-        target_signature=target,
-        device_name="redmule",
-    )
-    tile = _tile((_capable_core("core", source),))
-
-    mesh = Mesh(
-        width=1,
-        height=1,
-        l2_memory=L2Memory(size=4096, bandwidth=1),
-        noc=rectangular_test_noc(1, 1),
-        tiles=(tile,),
-        precision_lowering_recipes=(recipe,),
-    )
-
-    assert mesh.precision_lowering_recipes == (recipe,)
-
-
-def test_mesh_rejects_duplicate_precision_recipe_sources() -> None:
-    source = _signature(
-        WorkKind.GEMM,
-        (TensorDType.FLOAT32, TensorDType.FLOAT32),
-        (TensorDType.FLOAT32,),
-    )
-    target = _signature(
-        WorkKind.GEMM,
-        (TensorDType.FLOAT16, TensorDType.FLOAT16),
-        (TensorDType.FLOAT16,),
-    )
-    recipe = PrecisionLoweringRecipe(source, target, "redmule")
-    tile = _tile((_capable_core("core", source),))
-
-    with pytest.raises(ValueError, match="duplicate precision lowering recipe"):
-        Mesh(
-            width=1,
-            height=1,
-            l2_memory=L2Memory(size=4096, bandwidth=1),
-            noc=rectangular_test_noc(1, 1),
-            tiles=(tile,),
-            precision_lowering_recipes=(recipe, recipe),
         )

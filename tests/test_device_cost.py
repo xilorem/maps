@@ -1,6 +1,6 @@
 import pytest
 
-from MAPS.arch import Device, DeviceKind, L1Memory, MatrixDevice, ScalarDevice, SystolicDevice, Tile, VectorDevice, WorkKind, WorkSignature
+from maps.hardware import Device, DeviceKind, L1Memory, MatrixDevice, ScalarDevice, SystolicDevice, Tile, VectorDevice, WorkKind, WorkSignature
 from MAPS.hw.chips import magia_mesh
 from MAPS.hw.chips.n300d import wormhole_n300d_mesh
 from MAPS.hw.chips.magia import MAGIA_CORE_DEVICE, MAGIA_REDMULE_DEVICE

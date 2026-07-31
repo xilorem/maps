@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from MAPS.arch import (
     EndpointKind,
-    GraphRewriteKind,
     L1Memory,
     L2Memory,
     Mesh,
@@ -30,6 +31,7 @@ from MAPS.hw.devices import (
 )
 from MAPS.utils.print_mesh import print_mesh
 from MAPS.planner.contracts.options import GraphRewriteOptions, PlannerOptions
+from MAPS.transforms.contracts import GraphRewriteKind, PrecisionLoweringRecipe
 
 MAGIA_MESH_WIDTH = 8
 MAGIA_MESH_HEIGHT = 8
@@ -46,6 +48,22 @@ MAGIA_L2_BANDWIDTH_BYTES = 32
 MAGIA_NOC_CHANNEL_WIDTH_BYTES = 4
 MAGIA_NOC_WIDE_CHANNEL_WIDTH_BYTES = 4
 MAGIA_NOC_HOP_LATENCY_CYCLES = 2
+
+
+@dataclass(frozen=True)
+class MagiaMesh(Mesh):
+    """MAGIA hardware together with its temporary specialization policy."""
+
+    precision_lowering_recipes: tuple[PrecisionLoweringRecipe, ...] = ()
+    required_graph_rewrites: tuple[GraphRewriteKind, ...] = ()
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        sources = [
+            recipe.source_signature for recipe in self.precision_lowering_recipes
+        ]
+        if len(set(sources)) != len(sources):
+            raise ValueError("duplicate precision lowering recipe source signature")
 
 def _magia_noc_node_id(x: int, y: int, width: int) -> int:
     return y * width + x
@@ -164,8 +182,8 @@ def _magia_noc(width: int, height: int) -> NoC:
 def magia_mesh(
     width: int = MAGIA_MESH_WIDTH,
     height: int = MAGIA_MESH_HEIGHT,
-) -> Mesh:
-    return Mesh(
+) -> MagiaMesh:
+    return MagiaMesh(
         width=width,
         height=height,
         l2_memory=L2Memory(size=MAGIA_L2_SIZE_BYTES, bandwidth=MAGIA_L2_BANDWIDTH_BYTES),

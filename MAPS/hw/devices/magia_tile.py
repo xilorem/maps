@@ -7,11 +7,11 @@ from MAPS.arch import (
     DMAJob,
     DeviceKind,
     FixedDeviceAssignment,
-    PrecisionLoweringRecipe,
     ScalarDevice,
     WorkKind,
     WorkSignature,
 )
+from MAPS.transforms.contracts import PrecisionLoweringRecipe
 from MAPS.core.dtype import TensorDType
 from MAPS.hw.devices.redmule import REDMULE_DEVICE
 from MAPS.hw.devices.spatz import SPATZ_DEVICE

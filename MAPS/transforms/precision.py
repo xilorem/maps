@@ -15,6 +15,7 @@ from MAPS.importers.model import ImportedModel
 from MAPS.ops.defs.cast import CastPayload
 from MAPS.ops.defs.gemm import GemmPayload
 
+from .contracts import PrecisionLoweringRecipe
 from .effects import RewriteEffect, RewriteTransformResult
 from .graph_utils import (
     add_generated_tensor,
@@ -26,12 +27,13 @@ from .graph_utils import (
 def precision_lower_model(
     model: ImportedModel,
     mesh: Mesh,
+    recipes: tuple[PrecisionLoweringRecipe, ...] = (),
 ) -> RewriteTransformResult:
-    """Apply every matching Mesh recipe without cost-based selection."""
+    """Apply every matching target recipe without cost-based selection."""
 
-    recipes = {
+    recipe_by_signature = {
         recipe.source_signature: recipe
-        for recipe in mesh.precision_lowering_recipes
+        for recipe in recipes
     }
     tensors = {tensor.name: tensor for tensor in model.graph.tensors}
     constants = model.constants
@@ -48,7 +50,7 @@ def precision_lower_model(
 
     for node in model.graph.nodes:
         source_signature = WorkSignature.from_node(node)
-        recipe = recipes.get(source_signature)
+        recipe = recipe_by_signature.get(source_signature)
         if recipe is not None and (
             len(recipe.target_signature.input_dtypes) != len(node.inputs)
             or len(recipe.target_signature.output_dtypes) != len(node.outputs)

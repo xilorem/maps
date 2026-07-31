@@ -1,6 +1,6 @@
 from dataclasses import replace
 
-from MAPS.arch import (
+from maps.hardware import (
     EndpointKind,
     L1Memory,
     L2Memory,

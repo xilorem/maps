@@ -1,12 +1,11 @@
-"""Hardware topology and tile metadata."""
-
-from maps.hardware.device import FixedDeviceAssignment
+"""Reusable physical hardware and tile-execution contracts."""
 
 from .device import (
     DMADevice,
     DMAJob,
     Device,
     DeviceKind,
+    FixedDeviceAssignment,
     MatrixDevice,
     ScalarDevice,
     SystolicDevice,
@@ -28,6 +27,7 @@ from .noc import (
     TrafficKind,
     TrafficPolicy,
 )
+from .reporting import print_mesh
 from .tile import Tile
 
 __all__ = [
@@ -56,4 +56,5 @@ __all__ = [
     "VectorDevice",
     "WorkKind",
     "WorkSignature",
+    "print_mesh",
 ]
