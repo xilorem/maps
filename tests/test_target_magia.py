@@ -1,10 +1,19 @@
 from MAPS.planner.contracts.options import PlannerOptions, SpatialMappingOptions
-from MAPS.planner.plan import plan_graph
 from maps.graph import TensorDType
-from maps.hardware import DeviceKind, Mesh, RoutingPolicy, WorkKind, WorkSignature
+from maps.hardware import (
+    DMAJob,
+    DeviceKind,
+    EndpointKind,
+    Mesh,
+    RoutingPolicy,
+    TrafficKind,
+    WorkKind,
+    WorkSignature,
+)
 from maps.operations.convolution_transforms import Im2ColPayload, OutputReformatPayload
 from maps.operations.cast import CastPayload
 from maps.operations.gemm import GemmPayload
+from maps.planner.plan import plan_graph
 from maps.target import magia
 from maps.target import SpecializationOptions
 
@@ -17,7 +26,27 @@ def test_magia_builds_a_plain_mesh_with_target_owned_devices() -> None:
 
     assert type(mesh) is Mesh
     assert mesh.shape == (2, 1)
+    assert mesh.l2_memory.size == magia.L2_SIZE_BYTES
+    assert mesh.l2_memory.bandwidth == magia.L2_BANDWIDTH_BYTES
+    assert all(tile.memory.size == magia.L1_USABLE_BYTES for tile in mesh.tiles)
+    assert all(
+        tile.memory.bandwidth == magia.L1_BANDWIDTH_BYTES for tile in mesh.tiles
+    )
     assert mesh.noc.routing_policy is RoutingPolicy.XY
+    assert mesh.noc.traffic_policy is not None
+    assert len(mesh.noc.nodes) == 2
+    assert len(mesh.noc.links) == 1
+    assert len(mesh.noc.endpoints_of_kind(EndpointKind.L1)) == 2
+    assert len(mesh.noc.endpoints_of_kind(EndpointKind.L2)) == 1
+    assert tuple(channel.tag for channel in mesh.noc.links[0].channels) == (
+        "req",
+        "rsp",
+        "wide",
+    )
+    assert mesh.noc.traffic_policy.allowed_channel_ids(TrafficKind.READ_REQ) == (0,)
+    assert mesh.noc.traffic_policy.allowed_channel_ids(TrafficKind.WRITE_REQ) == (2,)
+    assert mesh.noc.traffic_policy.allowed_channel_ids(TrafficKind.READ_RSP) == (2,)
+    assert mesh.noc.traffic_policy.allowed_channel_ids(TrafficKind.WRITE_RSP) == (1,)
     assert not hasattr(mesh, "precision_lowering_recipes")
     assert not hasattr(mesh, "required_graph_rewrites")
 
@@ -32,6 +61,30 @@ def test_magia_builds_a_plain_mesh_with_target_owned_devices() -> None:
     assert devices["core"] is magia.CORE_DEVICE
     assert devices["spatz"] is magia.SPATZ_DEVICE
     assert devices["redmule"] is magia.REDMULE_DEVICE
+    assert magia.IDMA_READ_DEVICE.job is DMAJob.READJOB
+    assert magia.IDMA_WRITE_DEVICE.job is DMAJob.WRITEJOB
+    assert mesh.tiles[0].assigned_device(
+        WorkSignature(
+            WorkKind.GEMM,
+            (TensorDType.FLOAT16, TensorDType.FLOAT16),
+            (TensorDType.FLOAT16,),
+        )
+    ) is magia.REDMULE_DEVICE
+    assert mesh.tiles[0].assigned_device(
+        WorkSignature(
+            WorkKind.RELU,
+            (TensorDType.FLOAT32,),
+            (TensorDType.FLOAT32,),
+        )
+    ) is magia.SPATZ_DEVICE
+
+    configurable = magia.build_mesh(width=4, height=3)
+    assert configurable.shape == (4, 3)
+    assert len(configurable.noc.links) == 17
+    assert tuple(
+        endpoint.node_id
+        for endpoint in configurable.noc.endpoints_of_kind(EndpointKind.L2)
+    ) == (0, 4, 8)
 
 
 def test_magia_specializes_convolution_deterministically_and_plans_it() -> None:

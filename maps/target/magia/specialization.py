@@ -2,20 +2,20 @@
 
 from __future__ import annotations
 
-from MAPS.transforms.conv_to_gemm import lower_convolutions
-from MAPS.transforms.contracts import PrecisionLoweringRecipe
-from MAPS.transforms.effects import RewriteEffect
-from MAPS.transforms.precision import precision_lower_model
 from maps.graph import ImportedModel, TensorDType
 from maps.hardware import Mesh, WorkKind, WorkSignature
 from maps.target.contracts import (
+    PrecisionLoweringRecipe,
     RewriteEvent,
     RewriteReport,
     SpecializationOptions,
     SpecializationResult,
 )
 
+from .convolution import lower_convolutions
 from .devices import REDMULE_DEVICE
+from .effects import RewriteEffect
+from .precision import precision_lower_model
 
 
 PRECISION_LOWERING_RECIPES = tuple(

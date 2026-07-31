@@ -117,8 +117,10 @@ def build_mesh(width: int = MESH_WIDTH, height: int = MESH_HEIGHT) -> Mesh:
 __all__ = [
     "L1_BANDWIDTH_BYTES",
     "L1_DATA_BYTES",
+    "L1_SIZE_BYTES",
     "L1_USABLE_BYTES",
     "L2_BANDWIDTH_BYTES",
+    "L2_SIZE_BYTES",
     "MESH_HEIGHT",
     "MESH_WIDTH",
     "NOC_CHANNEL_WIDTH_BYTES",

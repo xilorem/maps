@@ -94,6 +94,21 @@ class WorkSignature:
         )
 
 
+def same_dtype_signatures(
+    work_kinds: tuple[WorkKind, ...],
+    input_counts: tuple[int, ...],
+    dtypes: tuple[TensorDType, ...],
+) -> frozenset[WorkSignature]:
+    """Build exact signatures whose operands share one TensorDType."""
+
+    return frozenset(
+        WorkSignature(work_kind, (dtype,) * input_count, (dtype,))
+        for work_kind in work_kinds
+        for input_count in input_counts
+        for dtype in dtypes
+    )
+
+
 @dataclass(frozen=True)
 class FixedDeviceAssignment:
     """Stable Device names selected for exact Work Signatures."""

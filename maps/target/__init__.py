@@ -2,6 +2,7 @@
 
 from . import magia, n300d
 from .contracts import (
+    PrecisionLoweringRecipe,
     RewriteEvent,
     RewriteReport,
     SpecializationOptions,
@@ -9,6 +10,7 @@ from .contracts import (
 )
 
 __all__ = [
+    "PrecisionLoweringRecipe",
     "RewriteEvent",
     "RewriteReport",
     "SpecializationOptions",

@@ -16,6 +16,19 @@ class SpecializationOptions:
 
 
 @dataclass(frozen=True)
+class PrecisionLoweringRecipe:
+    """One target-approved typed operation precision conversion."""
+
+    source_signature: WorkSignature
+    target_signature: WorkSignature
+    device_name: str
+
+    def __post_init__(self) -> None:
+        if not self.device_name:
+            raise ValueError("precision lowering device name must not be empty")
+
+
+@dataclass(frozen=True)
 class RewriteEvent:
     """One source Node changed during Target Specialization."""
 
@@ -42,6 +55,7 @@ class SpecializationResult:
 
 
 __all__ = [
+    "PrecisionLoweringRecipe",
     "RewriteEvent",
     "RewriteReport",
     "SpecializationOptions",

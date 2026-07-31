@@ -11,6 +11,7 @@ from maps.hardware import (
     VectorDevice,
     WorkKind,
     WorkSignature,
+    same_dtype_signatures,
 )
 
 _LOCAL_WORK = (
@@ -58,26 +59,18 @@ _BINARY_WORK = (
 _FLOAT_DTYPES = (TensorDType.FLOAT16, TensorDType.FLOAT32)
 
 
-def _same_dtype_signatures(
-    work_kinds: tuple[WorkKind, ...],
-    input_counts: tuple[int, ...],
-) -> frozenset[WorkSignature]:
-    return frozenset(
-        WorkSignature(work_kind, (dtype,) * input_count, (dtype,))
-        for work_kind in work_kinds
-        for input_count in input_counts
-        for dtype in _FLOAT_DTYPES
-    )
-
-
 _LOCAL_CAPABILITIES = (
-    _same_dtype_signatures(_UNARY_WORK, (1,))
-    | _same_dtype_signatures(_BINARY_WORK, (2,))
-    | _same_dtype_signatures((WorkKind.MUL,), (1,))
-    | _same_dtype_signatures((WorkKind.DEPTHWISE_CONV,), (2, 3))
-    | _same_dtype_signatures((WorkKind.GROUP_NORMALIZE,), (5,))
+    same_dtype_signatures(_UNARY_WORK, (1,), _FLOAT_DTYPES)
+    | same_dtype_signatures(_BINARY_WORK, (2,), _FLOAT_DTYPES)
+    | same_dtype_signatures((WorkKind.MUL,), (1,), _FLOAT_DTYPES)
+    | same_dtype_signatures((WorkKind.DEPTHWISE_CONV,), (2, 3), _FLOAT_DTYPES)
+    | same_dtype_signatures((WorkKind.GROUP_NORMALIZE,), (5,), _FLOAT_DTYPES)
 )
-_GEMM_CAPABILITIES = _same_dtype_signatures((WorkKind.GEMM,), (2, 3))
+_GEMM_CAPABILITIES = same_dtype_signatures(
+    (WorkKind.GEMM,),
+    (2, 3),
+    _FLOAT_DTYPES,
+)
 
 READ_CORE = DMADevice(
     name="tensix_read_core",

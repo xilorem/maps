@@ -11,8 +11,10 @@ from .devices import (
 )
 from .mesh import (
     L1_BANDWIDTH_BYTES,
+    L1_SIZE_BYTES,
     L1_USABLE_BYTES,
     L2_BANDWIDTH_BYTES,
+    L2_SIZE_BYTES,
     L2_ENDPOINT_COORDS,
     MESH_HEIGHT,
     MESH_WIDTH,
@@ -29,8 +31,10 @@ from .specialization import specialize
 __all__ = [
     "DEVICE_ASSIGNMENT",
     "L1_BANDWIDTH_BYTES",
+    "L1_SIZE_BYTES",
     "L1_USABLE_BYTES",
     "L2_BANDWIDTH_BYTES",
+    "L2_SIZE_BYTES",
     "L2_ENDPOINT_COORDS",
     "MATRIX_DEVICE",
     "MESH_HEIGHT",

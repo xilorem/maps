@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum, auto
 from math import ceil
 from typing import Any
 
@@ -17,6 +18,7 @@ from maps.hardware import (
     VectorDevice,
     WorkKind,
     WorkSignature,
+    same_dtype_signatures,
 )
 
 L1_CORE_TRANSFER_LATENCY = 4
@@ -61,25 +63,12 @@ _BINARY_CORE_WORK = (
 )
 
 
-def _same_dtype_signatures(
-    work_kinds: tuple[WorkKind, ...],
-    input_counts: tuple[int, ...],
-    dtypes: tuple[TensorDType, ...],
-) -> frozenset[WorkSignature]:
-    return frozenset(
-        WorkSignature(work_kind, (dtype,) * input_count, (dtype,))
-        for work_kind in work_kinds
-        for input_count in input_counts
-        for dtype in dtypes
-    )
-
-
 _CORE_CAPABILITIES = (
-    _same_dtype_signatures(_UNARY_CORE_WORK, (1,), _FLOAT_DTYPES)
-    | _same_dtype_signatures(_BINARY_CORE_WORK, (2,), _FLOAT_DTYPES)
-    | _same_dtype_signatures((WorkKind.MUL,), (1,), _FLOAT_DTYPES)
-    | _same_dtype_signatures((WorkKind.DEPTHWISE_CONV,), (2, 3), _FLOAT_DTYPES)
-    | _same_dtype_signatures((WorkKind.GROUP_NORMALIZE,), (5,), _FLOAT_DTYPES)
+    same_dtype_signatures(_UNARY_CORE_WORK, (1,), _FLOAT_DTYPES)
+    | same_dtype_signatures(_BINARY_CORE_WORK, (2,), _FLOAT_DTYPES)
+    | same_dtype_signatures((WorkKind.MUL,), (1,), _FLOAT_DTYPES)
+    | same_dtype_signatures((WorkKind.DEPTHWISE_CONV,), (2, 3), _FLOAT_DTYPES)
+    | same_dtype_signatures((WorkKind.GROUP_NORMALIZE,), (5,), _FLOAT_DTYPES)
     | frozenset(
         WorkSignature(
             WorkKind.GEMM,
@@ -157,6 +146,11 @@ class _KernelProfile:
     compute_passes: int
     lmul: int = 8
     reduction: bool = False
+
+
+class _MemoryAction(Enum):
+    LOAD = auto()
+    STORE = auto()
 
 
 _KERNEL_PROFILES = {
@@ -237,10 +231,14 @@ class SpatzDevice(VectorDevice):
         self,
         work: Any,
         profile: _KernelProfile,
-    ) -> tuple[tuple[str, int], ...]:
+    ) -> tuple[tuple[_MemoryAction, int], ...]:
         max_instruction_bytes = (self.vlen_bits // 8) * profile.lmul
-        streams = tuple(("load", ref.num_bytes) for ref in work.input_slices)
-        streams += tuple(("store", ref.num_bytes) for ref in work.output_slices)
+        streams = tuple(
+            (_MemoryAction.LOAD, ref.num_bytes) for ref in work.input_slices
+        )
+        streams += tuple(
+            (_MemoryAction.STORE, ref.num_bytes) for ref in work.output_slices
+        )
         strip_mined_streams = []
         for direction, num_bytes in streams:
             remaining = num_bytes
@@ -258,10 +256,14 @@ class SpatzDevice(VectorDevice):
                     actions.append(stream[instruction_index])
         return tuple(actions)
 
-    def _switch_cycles(self, previous: str, current: str) -> int:
+    def _switch_cycles(
+        self,
+        previous: _MemoryAction,
+        current: _MemoryAction,
+    ) -> int:
         if previous == current:
             return self.vlsu_switch_same
-        if previous == "store":
+        if previous is _MemoryAction.STORE:
             return self.vlsu_switch_store_to_load
         return self.vlsu_switch_load_to_store
 

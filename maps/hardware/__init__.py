@@ -12,6 +12,7 @@ from .device import (
     VectorDevice,
     WorkKind,
     WorkSignature,
+    same_dtype_signatures,
 )
 from .memory import L1Memory, L2Memory
 from .mesh import Mesh
@@ -56,5 +57,6 @@ __all__ = [
     "VectorDevice",
     "WorkKind",
     "WorkSignature",
+    "same_dtype_signatures",
     "print_mesh",
 ]
