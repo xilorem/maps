@@ -48,6 +48,7 @@ def _single_node_stage_plan(mesh: Mesh, stage_id: int, node: Node, tile_ids: set
         logical_shape=(len(tile_ids), 1),
         nodes=(node,),
         node_output_layouts=(output_layouts,),
+        device_names=("core",),
     )
 
 
@@ -223,6 +224,7 @@ def test_repair_region_skips_an_infeasible_growth_attempt(monkeypatch) -> None:
                 logical_shape=(1, 1),
                 nodes=(),
                 node_output_layouts=(),
+                device_names=(),
             )
         },
         current_placements={0: placement},

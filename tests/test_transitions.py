@@ -95,6 +95,7 @@ def _plan(
         logical_shape=(layouts[0][0].submesh.num_tiles, 1),
         nodes=nodes,
         node_output_layouts=layouts,
+        device_names=("core",) * len(nodes),
     )
 
 

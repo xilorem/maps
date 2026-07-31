@@ -19,9 +19,13 @@ class ConvTransformCostModel(OpCostModel):
         self,
         tile_work: TransformTileWork,
         tile: Tile,
-        assigned_device: Device | None = None,
+        assigned_device: Device,
     ) -> int:
-        del assigned_device
+        if assigned_device not in tile.devices:
+            raise ValueError(
+                f"assigned device {assigned_device.name} is not present on tile "
+                f"{tile.tile_id}"
+            )
         bytes_read = sum(
             ref.tensor.slice_num_bytes(ref.tensor_slice)
             for ref in tile_work.input_slices

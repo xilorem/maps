@@ -1,4 +1,5 @@
 from MAPS.hw.chips import magia_mesh
+from MAPS.core.dtype import TensorDType
 from MAPS.core.graph import Node, OpKind
 from MAPS.core.submesh import Submesh
 from MAPS.core.tensor import Tensor
@@ -7,8 +8,12 @@ from MAPS.ops.defs.collective import AllReducePayload
 
 
 def _make_allreduce_sum_node() -> Node:
-    x = Tensor(name="x", rank=2, dims=(4, 1), elem_bytes=2)
-    out = Tensor(name="out", rank=2, dims=(4, 1), elem_bytes=2)
+    x = Tensor(
+        name="x", rank=2, dims=(4, 1), elem_bytes=2, dtype=TensorDType.FLOAT16
+    )
+    out = Tensor(
+        name="out", rank=2, dims=(4, 1), elem_bytes=2, dtype=TensorDType.FLOAT16
+    )
     op = AllReducePayload(
         op_name="AllReduceSum",
         x=x,

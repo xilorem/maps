@@ -14,7 +14,6 @@ REDMULE_DEVICE = SystolicDevice(
     kind=DeviceKind.SYSTOLIC,
     throughput={
         WorkKind.GEMM: REDMULE_ARRAY_WIDTH * REDMULE_ARRAY_HEIGHT,
-        WorkKind.CONV2D: REDMULE_ARRAY_WIDTH * REDMULE_ARRAY_HEIGHT,
     },
     capabilities=frozenset(
         {

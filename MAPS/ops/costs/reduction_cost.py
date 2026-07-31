@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from MAPS.arch import Tile, WorkKind
+from MAPS.arch import Device, Tile, WorkKind
 from MAPS.ops.defs.reduction import ReductionTileWork
 from MAPS.ops.common.cost import OpCostModel
 
@@ -23,10 +23,11 @@ class ReductionCostModel(OpCostModel):
         self,
         tile_work: ReductionTileWork,
         tile: Tile,
-        assigned_device: object | None = None,
+        assigned_device: Device,
     ) -> int:
-        del assigned_device
-        devices = tuple(device for device in tile.devices if device.supports(self.work_kind))
-        if not devices:
-            raise ValueError(f"tile {tile.tile_id} has no device for {self.work_kind.name} work")
-        return min(device.cycles(tile_work) for device in devices)
+        if assigned_device not in tile.devices:
+            raise ValueError(
+                f"assigned device {assigned_device.name} is not present on tile "
+                f"{tile.tile_id}"
+            )
+        return assigned_device.cycles(tile_work)

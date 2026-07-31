@@ -124,7 +124,7 @@ def worst_tile_compute_workload(
     stage_nodes: tuple[Node, ...],
     node_output_layouts: tuple[tuple, ...],
     submesh,
-    device_names: tuple[str | None, ...] = (),
+    device_names: tuple[str, ...],
 ) -> int:
     """Return the greatest accumulated compute cost on any stage tile."""
 
@@ -135,7 +135,7 @@ def worst_tile_compute_workload(
                     node,
                     output_layouts,
                     tile,
-                    device_names[node_index] if device_names else None,
+                    device_names[node_index],
                 )
                 for node_index, (node, output_layouts) in enumerate(
                     zip(stage_nodes, node_output_layouts)
@@ -151,16 +151,16 @@ def _node_compute_workload(
     node: Node,
     output_layouts: tuple,
     tile,
-    device_name: str | None,
+    device_name: str,
 ) -> int:
     """Estimate compute cost for one node on one virtual tile."""
 
     tile_work = node.payload.build_tile_work(output_layouts=output_layouts, tile=tile)
     cost_model = node.payload.cost_model
-    compute_cost = (
-        cost_model.cost(tile_work, tile)
-        if device_name is None
-        else cost_model.cost(tile_work, tile, tile.device_by_name(device_name))
+    compute_cost = cost_model.cost(
+        tile_work,
+        tile,
+        tile.device_by_name(device_name),
     )
     return int(compute_cost) + int(
         cost_model.placement_cost(node=node, output_layouts=output_layouts)

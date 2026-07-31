@@ -192,8 +192,13 @@ class _PlateauCostModel(OpCostModel):
         self._unsharded_cycles = unsharded_cycles
         self._sharded_cycles = sharded_cycles
 
-    def cost(self, tile_work: TileWork, tile: Tile) -> int:
-        del tile
+    def cost(
+        self,
+        tile_work: TileWork,
+        tile: Tile,
+        assigned_device,
+    ) -> int:
+        del tile, assigned_device
         if tile_work.output_slices[0].tensor_slice.num_elements == 8:
             return self._unsharded_cycles
         return self._sharded_cycles
@@ -225,8 +230,17 @@ def _plateau_node(
     unsharded_cycles: int,
     sharded_cycles: int,
 ) -> tuple[Node, Tensor]:
-    input_tensor = Tensor(f"{name}_input", 1, (8,), 2, is_initializer=True)
-    output = Tensor(f"{name}_output", 1, (8,), 2)
+    input_tensor = Tensor(
+        f"{name}_input",
+        1,
+        (8,),
+        2,
+        is_initializer=True,
+        dtype=TensorDType.FLOAT16,
+    )
+    output = Tensor(
+        f"{name}_output", 1, (8,), 2, dtype=TensorDType.FLOAT16
+    )
     return (
         Node(
             name,
@@ -251,8 +265,10 @@ def test_balance_workload_reuses_candidates_across_growth_probes(
     capsys,
 ) -> None:
     _CountingUnaryPayload.build_calls = 0
-    input_tensor = Tensor("input", 1, (8,), 2, is_initializer=True)
-    output = Tensor("output", 1, (8,), 2)
+    input_tensor = Tensor(
+        "input", 1, (8,), 2, is_initializer=True, dtype=TensorDType.FLOAT16
+    )
+    output = Tensor("output", 1, (8,), 2, dtype=TensorDType.FLOAT16)
     node = Node(
         "stage",
         OpKind.ELEMENTWISE,
@@ -377,9 +393,11 @@ def test_balance_workload_accepts_explicit_stage_selection() -> None:
 
 
 def _elementwise_chain() -> tuple[Graph, Node, Node]:
-    input_tensor = Tensor("input", 1, (8,), 2)
-    intermediate = Tensor("intermediate", 1, (8,), 2)
-    output = Tensor("output", 1, (8,), 2)
+    input_tensor = Tensor("input", 1, (8,), 2, dtype=TensorDType.FLOAT16)
+    intermediate = Tensor(
+        "intermediate", 1, (8,), 2, dtype=TensorDType.FLOAT16
+    )
+    output = Tensor("output", 1, (8,), 2, dtype=TensorDType.FLOAT16)
     first = Node(
         "first",
         OpKind.ELEMENTWISE,
@@ -712,9 +730,13 @@ def test_l1_occupancy_token_buffers_runtime_tensors_but_not_initializers() -> No
 
 
 def test_permanent_l1_allocation_reproduces_tile_245_overflow() -> None:
-    x = Tensor("x", 1, (71_552,), 2)
-    intermediate = Tensor("intermediate", 1, (71_552,), 2)
-    output = Tensor("output", 1, (71_552,), 2)
+    x = Tensor("x", 1, (71_552,), 2, dtype=TensorDType.FLOAT16)
+    intermediate = Tensor(
+        "intermediate", 1, (71_552,), 2, dtype=TensorDType.FLOAT16
+    )
+    output = Tensor(
+        "output", 1, (71_552,), 2, dtype=TensorDType.FLOAT16
+    )
     nodes = (
         Node(
             "first",

@@ -1,5 +1,7 @@
-from MAPS.arch import WorkKind
+from MAPS.arch import L1Memory, Tile, WorkKind
 from MAPS.hw.chips import magia_mesh
+from MAPS.hw.chips.magia import MAGIA_CORE_DEVICE
+from MAPS.hw.devices.generic import GENERIC_SCALAR_DEVICE
 from MAPS.core.layout import TensorRange
 from MAPS.core.submesh import Submesh
 from MAPS.core.tensor import Tensor
@@ -46,7 +48,14 @@ def test_direct_conv_shards_output_channels_and_height_with_clamped_halo() -> No
     assert work.strides == (2, 2)
     assert work.dilations == (2, 1)
     assert work.operation_count() == 648
-    assert op.cost_model.cost(work, submesh.tiles[3]) == 4
+    generic_tile = Tile(
+        tile_id=0,
+        x=0,
+        y=0,
+        memory=L1Memory(size=4096, bandwidth=1),
+        devices=(GENERIC_SCALAR_DEVICE,),
+    )
+    assert op.cost_model.cost(work, generic_tile, GENERIC_SCALAR_DEVICE) == 648
 
 
 def test_depthwise_conv_shards_matching_input_weight_and_bias_channels() -> None:
@@ -70,4 +79,8 @@ def test_depthwise_conv_shards_matching_input_weight_and_bias_channels() -> None
     assert tile_work.bias_slice is not None
     assert tile_work.bias_slice.dims[0] == TensorRange(start=2, length=2)
     assert tile_work.operation_count() == 162
-    assert op.cost_model.cost(tile_work, submesh.tiles[1]) == 162
+    assert op.cost_model.cost(
+        tile_work,
+        submesh.tiles[1],
+        MAGIA_CORE_DEVICE,
+    ) == 162

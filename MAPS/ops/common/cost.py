@@ -26,7 +26,7 @@ class OpCostModel(ABC):
         self,
         tile_work: "TileWork",
         tile: "Tile",
-        assigned_device: "Device | None" = None,
+        assigned_device: "Device",
     ) -> int:
         """Return non-negative cycles spent on one tile's local work."""
 

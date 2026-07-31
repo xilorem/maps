@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from typing import ClassVar
 
 from MAPS.arch import L1Memory, L2Memory, Mesh, WorkKind
+from MAPS.core.dtype import TensorDType
 from MAPS.core.graph import Node, OpKind
 from MAPS.core.layout import TensorLayout, tile_tensor_slice
 from MAPS.core.submesh import Submesh
@@ -29,8 +30,10 @@ def _mesh(tile_count: int, l1_size: int = 4096) -> Mesh:
 
 
 def _unary_node(name: str, length: int = 8) -> Node:
-    x = Tensor(f"{name}_input", 1, (length,), 2)
-    output = Tensor(f"{name}_output", 1, (length,), 2)
+    x = Tensor(f"{name}_input", 1, (length,), 2, dtype=TensorDType.FLOAT16)
+    output = Tensor(
+        f"{name}_output", 1, (length,), 2, dtype=TensorDType.FLOAT16
+    )
     return Node(
         name,
         OpKind.ELEMENTWISE,
@@ -45,8 +48,8 @@ class _FixedCostModel(OpCostModel):
     tile_cycles: tuple[int, ...]
     placement_cycles: int
 
-    def cost(self, tile_work, tile) -> int:
-        del tile_work
+    def cost(self, tile_work, tile, assigned_device) -> int:
+        del tile_work, assigned_device
         return self.tile_cycles[tile.tile_id]
 
     def placement_cost(self, *, node, output_layouts) -> int:
@@ -60,6 +63,7 @@ class _FixedCostPayload(OpPayload):
     output: Tensor
     tile_cycles: tuple[int, ...]
     placement_cycles: int
+    work_kind: WorkKind = WorkKind.RELU
 
     @property
     def layout_relations(self) -> tuple[LayoutRelation, ...]:
@@ -108,8 +112,8 @@ class _CountingUnaryPayload(UnaryElementwisePayload):
 
 @dataclass(frozen=True)
 class _InverseSliceCostModel(OpCostModel):
-    def cost(self, tile_work, tile) -> int:
-        del tile
+    def cost(self, tile_work, tile, assigned_device) -> int:
+        del tile, assigned_device
         return 100 // tile_work.output_slices[0].tensor_slice.num_elements
 
 
@@ -134,6 +138,7 @@ def test_stage_candidate_contains_immutable_per_tile_intrinsic_facts() -> None:
     assert candidate.plan.stage_id == 7
     assert candidate.plan.tile_count == 2
     assert candidate.plan.logical_shape == (2, 1)
+    assert candidate.plan.device_names == ("core",)
     assert tuple(
         (fact.tile_id, fact.compute_cycles, fact.permanent_l1_bytes)
         for fact in candidate.tile_facts
@@ -142,9 +147,11 @@ def test_stage_candidate_contains_immutable_per_tile_intrinsic_facts() -> None:
 
 
 def test_stage_compute_accumulates_layers_per_tile_before_finding_peak() -> None:
-    x = Tensor("x", 1, (8,), 2)
-    intermediate = Tensor("intermediate", 1, (8,), 2)
-    output = Tensor("output", 1, (8,), 2)
+    x = Tensor("x", 1, (8,), 2, dtype=TensorDType.FLOAT16)
+    intermediate = Tensor(
+        "intermediate", 1, (8,), 2, dtype=TensorDType.FLOAT16
+    )
+    output = Tensor("output", 1, (8,), 2, dtype=TensorDType.FLOAT16)
     first = Node(
         "first",
         OpKind.CUSTOM,
@@ -173,8 +180,8 @@ def test_stage_compute_accumulates_layers_per_tile_before_finding_peak() -> None
 
 
 def test_equal_compute_shapes_prefer_smaller_logical_height() -> None:
-    x = Tensor("input", 2, (8, 8), 2)
-    output = Tensor("output", 2, (8, 8), 2)
+    x = Tensor("input", 2, (8, 8), 2, dtype=TensorDType.FLOAT16)
+    output = Tensor("output", 2, (8, 8), 2, dtype=TensorDType.FLOAT16)
     node = Node(
         "stage",
         OpKind.ELEMENTWISE,
@@ -195,8 +202,8 @@ def test_equal_compute_shapes_prefer_smaller_logical_height() -> None:
 
 
 def test_l1_infeasible_shape_is_skipped_for_a_feasible_alternative() -> None:
-    x = Tensor("input", 1, (8,), 2)
-    output = Tensor("output", 1, (8,), 2)
+    x = Tensor("input", 1, (8,), 2, dtype=TensorDType.FLOAT16)
+    output = Tensor("output", 1, (8,), 2, dtype=TensorDType.FLOAT16)
     node = Node(
         "stage",
         OpKind.ELEMENTWISE,
@@ -219,8 +226,8 @@ def test_l1_infeasible_shape_is_skipped_for_a_feasible_alternative() -> None:
 
 def test_stage_candidate_cache_reuses_successful_analysis() -> None:
     _CountingUnaryPayload.build_calls = 0
-    x = Tensor("input", 1, (8,), 2)
-    output = Tensor("output", 1, (8,), 2)
+    x = Tensor("input", 1, (8,), 2, dtype=TensorDType.FLOAT16)
+    output = Tensor("output", 1, (8,), 2, dtype=TensorDType.FLOAT16)
     node = Node(
         "stage",
         OpKind.ELEMENTWISE,
@@ -243,8 +250,8 @@ def test_stage_candidate_cache_reuses_successful_analysis() -> None:
 
 def test_stage_candidate_cache_reuses_l1_infeasible_miss() -> None:
     _CountingUnaryPayload.build_calls = 0
-    x = Tensor("input", 1, (8,), 2)
-    output = Tensor("output", 1, (8,), 2)
+    x = Tensor("input", 1, (8,), 2, dtype=TensorDType.FLOAT16)
+    output = Tensor("output", 1, (8,), 2, dtype=TensorDType.FLOAT16)
     node = Node(
         "stage",
         OpKind.ELEMENTWISE,

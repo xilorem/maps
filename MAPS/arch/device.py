@@ -49,33 +49,6 @@ class WorkKind(Enum):
     CAST = auto()
     DMA = auto()
 
-    @property
-    def fallback_kind(self) -> "WorkKind":
-        if self in {
-            WorkKind.ABS,
-            WorkKind.ADD,
-            WorkKind.DIV,
-            WorkKind.DEPTHWISE_CONV,
-            WorkKind.EXP,
-            WorkKind.GROUP_NORMALIZE,
-            WorkKind.GROUP_REDUCE,
-            WorkKind.LOG,
-            WorkKind.MUL,
-            WorkKind.NEG,
-            WorkKind.POW,
-            WorkKind.RELU,
-            WorkKind.RESHAPE,
-            WorkKind.SIGMOID,
-            WorkKind.SLICE,
-            WorkKind.SQRT,
-            WorkKind.SUB,
-            WorkKind.TRANSPOSE,
-            WorkKind.WEIGHT_PACK,
-        }:
-            return WorkKind.ELEMENTWISE
-        return self
-
-
 class DMAJob(Enum):
     READJOB = auto()
     WRITEJOB = auto()
@@ -147,10 +120,10 @@ class Device:
         object.__setattr__(self, "throughput", dict(self.throughput))
         object.__setattr__(self, "capabilities", frozenset(self.capabilities))
 
-    def supports(self, work: WorkKind | WorkSignature) -> bool:
-        if isinstance(work, WorkSignature):
-            return work in self.capabilities
-        return work in self.throughput or work.fallback_kind in self.throughput
+    def supports(self, signature: WorkSignature) -> bool:
+        """Return whether this Device declares the exact typed capability."""
+
+        return signature in self.capabilities
 
     def cycles(self, work: object) -> int:
         raise NotImplementedError
@@ -158,10 +131,9 @@ class Device:
     def _throughput_cycles(self, work_kind: WorkKind, amount: int) -> int:
         if amount < 0:
             raise ValueError("device work amount must be >= 0")
-        if not self.supports(work_kind):
+        if work_kind not in self.throughput:
             raise ValueError(f"device {self.name} does not support {work_kind.name} work")
-        throughput_kind = work_kind if work_kind in self.throughput else work_kind.fallback_kind
-        compute_cycles = ceil(amount / self.throughput[throughput_kind])
+        compute_cycles = ceil(amount / self.throughput[work_kind])
         if compute_cycles < 0:
             raise ValueError("device cycle estimator must return >= 0")
         return self.startup_cycles + compute_cycles

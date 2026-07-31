@@ -25,7 +25,13 @@ class StagePlan:
     logical_shape: tuple[int, int]
     nodes: tuple[Node, ...]
     node_output_layouts: tuple[tuple, ...]
-    device_names: tuple[str | None, ...] = ()
+    device_names: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        if len(self.device_names) != len(self.nodes):
+            raise ValueError("Stage Plan must retain one Device name per Layer")
+        if any(not device_name for device_name in self.device_names):
+            raise ValueError("Stage Plan Device names must not be empty")
 
 
 @dataclass(frozen=True)

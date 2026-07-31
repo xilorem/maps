@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from MAPS.arch import DeviceKind, Tile, WorkKind
+from MAPS.arch import Device, Tile
 from MAPS.ops.common.cost import OpCostModel
 from MAPS.ops.defs.direct_conv import Conv2DTileWork
 
@@ -17,28 +17,15 @@ class Conv2DCostModel(OpCostModel):
     generation, packing, and boundary overhead are intentionally not modeled.
     """
 
-    preferred_device_kinds: tuple[DeviceKind, ...] = (
-        DeviceKind.MATRIX,
-        DeviceKind.SYSTOLIC,
-    )
-
     def cost(
         self,
         tile_work: Conv2DTileWork,
         tile: Tile,
-        assigned_device: object | None = None,
+        assigned_device: Device,
     ) -> int:
-        del assigned_device
-        devices = tuple(
-            device for device in tile.devices if device.supports(WorkKind.CONV2D)
-        )
-        preferred = tuple(
-            device for device in devices if device.kind in self.preferred_device_kinds
-        )
-        candidates = preferred or devices
-        if not candidates:
-            raise ValueError(f"tile {tile.tile_id} has no device for CONV2D work")
-        return min(
-            device._throughput_cycles(WorkKind.CONV2D, tile_work.operation_count())
-            for device in candidates
-        )
+        if assigned_device not in tile.devices:
+            raise ValueError(
+                f"assigned device {assigned_device.name} is not present on tile "
+                f"{tile.tile_id}"
+            )
+        return assigned_device.cycles(tile_work)

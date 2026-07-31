@@ -15,8 +15,52 @@ from MAPS.arch import (
 from MAPS.core.dtype import TensorDType
 from MAPS.hw.devices.redmule import REDMULE_DEVICE
 from MAPS.hw.devices.spatz import SPATZ_DEVICE
+from MAPS.hw.devices.capabilities import same_dtype_signatures
 
 L1_CORE_TRANSFER_LATENCY = 4
+
+_FLOAT_DTYPES = (TensorDType.FLOAT16, TensorDType.FLOAT32)
+_UNARY_CORE_WORK = (
+    WorkKind.ABS,
+    WorkKind.EXP,
+    WorkKind.GROUP_REDUCE,
+    WorkKind.IM2COL,
+    WorkKind.LOG,
+    WorkKind.NEG,
+    WorkKind.OUTPUT_REFORMAT,
+    WorkKind.RELU,
+    WorkKind.REDUCE_MAX,
+    WorkKind.REDUCE_SUM,
+    WorkKind.RESHAPE,
+    WorkKind.SIGMOID,
+    WorkKind.SLICE,
+    WorkKind.SQRT,
+    WorkKind.TRANSPOSE,
+)
+_BINARY_CORE_WORK = (
+    WorkKind.ADD,
+    WorkKind.DIV,
+    WorkKind.MUL,
+    WorkKind.POW,
+    WorkKind.SUB,
+)
+
+
+_MAGIA_CORE_CAPABILITIES = (
+    same_dtype_signatures(_UNARY_CORE_WORK, (1,), _FLOAT_DTYPES)
+    | same_dtype_signatures(_BINARY_CORE_WORK, (2,), _FLOAT_DTYPES)
+    | same_dtype_signatures((WorkKind.MUL,), (1,), _FLOAT_DTYPES)
+    | same_dtype_signatures((WorkKind.DEPTHWISE_CONV,), (2, 3), _FLOAT_DTYPES)
+    | same_dtype_signatures((WorkKind.GROUP_NORMALIZE,), (5,), _FLOAT_DTYPES)
+    | frozenset(
+        WorkSignature(
+            work_kind=WorkKind.GEMM,
+            input_dtypes=(TensorDType.FLOAT32,) * input_count,
+            output_dtypes=(TensorDType.FLOAT32,),
+        )
+        for input_count in (2, 3)
+    )
+)
 
 
 MAGIA_IDMA_READ_DEVICE = DMADevice(
@@ -42,7 +86,6 @@ MAGIA_CORE_DEVICE = ScalarDevice(
     kind=DeviceKind.SCALAR,
     throughput={
         WorkKind.GEMM: 1,
-        WorkKind.ELEMENTWISE: 1,
         WorkKind.GROUP_NORMALIZE: 1,
         WorkKind.GROUP_REDUCE: 1,
         WorkKind.ABS: 1,
@@ -67,40 +110,7 @@ MAGIA_CORE_DEVICE = ScalarDevice(
         WorkKind.IM2COL: 1,
         WorkKind.OUTPUT_REFORMAT: 1,
     },
-    capabilities=frozenset(
-        {
-            WorkSignature(
-                work_kind=WorkKind.GEMM,
-                input_dtypes=(TensorDType.FLOAT32, TensorDType.FLOAT32),
-                output_dtypes=(TensorDType.FLOAT32,),
-            ),
-            WorkSignature(
-                work_kind=WorkKind.GEMM,
-                input_dtypes=(TensorDType.FLOAT32,) * 3,
-                output_dtypes=(TensorDType.FLOAT32,),
-            ),
-            WorkSignature(
-                work_kind=WorkKind.IM2COL,
-                input_dtypes=(TensorDType.FLOAT16,),
-                output_dtypes=(TensorDType.FLOAT16,),
-            ),
-            WorkSignature(
-                work_kind=WorkKind.IM2COL,
-                input_dtypes=(TensorDType.FLOAT32,),
-                output_dtypes=(TensorDType.FLOAT32,),
-            ),
-            WorkSignature(
-                work_kind=WorkKind.OUTPUT_REFORMAT,
-                input_dtypes=(TensorDType.FLOAT16,),
-                output_dtypes=(TensorDType.FLOAT16,),
-            ),
-            WorkSignature(
-                work_kind=WorkKind.OUTPUT_REFORMAT,
-                input_dtypes=(TensorDType.FLOAT32,),
-                output_dtypes=(TensorDType.FLOAT32,),
-            ),
-        }
-    ),
+    capabilities=_MAGIA_CORE_CAPABILITIES,
 )
 
 MAGIA_REDMULE_DEVICE = REDMULE_DEVICE
@@ -126,7 +136,6 @@ MAGIA_DEVICE_ASSIGNMENT = FixedDeviceAssignment(
     | {
         signature: MAGIA_SPATZ_DEVICE.name
         for signature in MAGIA_SPATZ_DEVICE.capabilities
-        if signature.work_kind is WorkKind.CAST
     }
 )
 

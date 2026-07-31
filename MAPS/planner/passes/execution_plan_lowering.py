@@ -131,11 +131,7 @@ def _build_layer(
     output_layouts = node_output_layouts(plan, node)
     return Layer(
         node=node,
-        device_name=(
-            plan.device_names[layer_index]
-            if plan.device_names
-            else None
-        ),
+        device_name=plan.device_names[layer_index],
         inputs=tuple(
             _build_layer_input(
                 stage_id,

@@ -1,4 +1,5 @@
-from MAPS.arch import DMADevice, DMAJob, DeviceKind, EndpointKind, RoutingPolicy, ScalarDevice, SystolicDevice, TrafficKind, WorkKind
+from MAPS.arch import DMADevice, DMAJob, DeviceKind, EndpointKind, RoutingPolicy, ScalarDevice, SystolicDevice, TrafficKind, WorkKind, WorkSignature
+from MAPS.core.dtype import TensorDType
 from MAPS.hw.chips.magia import (
     MAGIA_L1_BANDWIDTH_BYTES,
     MAGIA_L1_DATA_BYTES,
@@ -56,8 +57,20 @@ def test_magia_tile_profile_is_used_by_the_mesh() -> None:
     mesh = magia_mesh()
 
     assert mesh.tiles[0].devices is MAGIA_TILE_DEVICES
-    assert MAGIA_CORE_DEVICE.supports(WorkKind.ADD)
-    assert MAGIA_CORE_DEVICE.supports(WorkKind.DIV)
+    assert MAGIA_CORE_DEVICE.supports(
+        WorkSignature(
+            WorkKind.ADD,
+            (TensorDType.FLOAT32, TensorDType.FLOAT32),
+            (TensorDType.FLOAT32,),
+        )
+    )
+    assert MAGIA_CORE_DEVICE.supports(
+        WorkSignature(
+            WorkKind.DIV,
+            (TensorDType.FLOAT16, TensorDType.FLOAT16),
+            (TensorDType.FLOAT16,),
+        )
+    )
     assert all(tile.devices[3] is MAGIA_SPATZ_DEVICE for tile in mesh.tiles)
 
 

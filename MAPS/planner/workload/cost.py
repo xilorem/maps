@@ -5,7 +5,6 @@ from __future__ import annotations
 from MAPS.arch import WorkSignature
 from MAPS.core.graph import Node
 from MAPS.core.layout import TensorLayout
-from MAPS.planner.contracts.devices import node_requires_fixed_device_assignment
 
 
 def cost_estimator(
@@ -31,8 +30,6 @@ def cost_estimator(
                 tile,
                 (
                     tile.assigned_device(WorkSignature.from_node(node))
-                    if node_requires_fixed_device_assignment(node)
-                    else None
                 ),
             )
             for tile, work in tile_work

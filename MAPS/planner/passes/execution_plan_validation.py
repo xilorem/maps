@@ -16,7 +16,6 @@ from MAPS.planner.validation.memory import (
     estimate_stage_l1_memory_for_tile,
     estimate_stage_l2_memory,
 )
-from MAPS.planner.contracts.devices import node_requires_fixed_device_assignment
 from MAPS.transitions.contracts import (
     InputTransition,
     IntermediateTransition,
@@ -184,8 +183,6 @@ def _validate_layer_device(
 ) -> None:
     stage = execution_plan.stages[stage_id]
     layer = stage.layers[layer_index]
-    if not node_requires_fixed_device_assignment(layer.node):
-        return
     try:
         signature = WorkSignature.from_node(layer.node)
     except ValueError as exc:

@@ -14,16 +14,24 @@ from MAPS.deployment import (
     write_execution_plan_bundle,
 )
 from MAPS.pipeline import ExecutionPlan, Layer, LayerInput, Stage
+from MAPS.ops.defs.elementwise import UnaryElementwisePayload
 from MAPS.transitions import InputDestination
 from tests.noc_utils import rectangular_test_noc, rectangular_test_tiles
 
 
 def _bundle(l2_size: int = 4096) -> DeploymentBundle:
     weight = Tensor("weight", 2, (2, 2), 4, True, TensorDType.FLOAT32)
-    node = Node("consume_weight", OpKind.CUSTOM, inputs=(weight,))
+    output = Tensor("output", 2, (2, 2), 4, dtype=TensorDType.FLOAT32)
+    node = Node(
+        "consume_weight",
+        OpKind.ELEMENTWISE,
+        inputs=(weight,),
+        outputs=(output,),
+        payload=UnaryElementwisePayload("Relu", weight, output),
+    )
     graph = Graph(
         "model",
-        tensors=(weight,),
+        tensors=(weight, output),
         nodes=(node,),
         initializers=(weight,),
     )
@@ -47,6 +55,7 @@ def _bundle(l2_size: int = 4096) -> DeploymentBundle:
                         destinations=(InputDestination(0, full_slice),),
                     ),
                 ),
+                device_name="core",
             ),
         ),
     )

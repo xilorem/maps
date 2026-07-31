@@ -3,13 +3,15 @@ from dataclasses import replace
 import pytest
 
 from MAPS.arch import FixedDeviceAssignment
-from MAPS.core import Graph, Node, OpKind, Tensor, TensorDType
+from MAPS.core import ConstantStore, Graph, Node, OpKind, Tensor, TensorDType
 from MAPS.core.graph import Edge
 from MAPS.hw.chips import magia_mesh
+from MAPS.importers.model import ImportedModel
+from MAPS.ops.defs.elementwise import UnaryElementwisePayload
 from MAPS.ops.defs.gemm import GemmPayload
 from MAPS.planner.contracts.options import PlannerOptions, SpatialMappingOptions
 from MAPS.planner.passes.execution_plan_validation import validate_execution_plan
-from MAPS.planner.plan import plan_graph
+from MAPS.planner.plan import plan_graph, plan_model
 from MAPS.planner.validation.contracts import PlannerConstraints
 from MAPS.utils.execution_plan_json import execution_plan_json_payload
 
@@ -61,6 +63,33 @@ def _gemm_graph(dtype: TensorDType, *, with_bias: bool) -> Graph:
     )
 
 
+def _unary_model(op_name: str) -> ImportedModel:
+    x = _typed_tensor("x", TensorDType.FLOAT32, (8,))
+    output = _typed_tensor("output", TensorDType.FLOAT32, (8,))
+    node = Node(
+        name=op_name.lower(),
+        kind=OpKind.ELEMENTWISE,
+        inputs=(x,),
+        outputs=(output,),
+        payload=UnaryElementwisePayload(
+            op_name=op_name,
+            x=x,
+            output=output,
+        ),
+    )
+    return ImportedModel(
+        graph=Graph(
+            name=f"typed_{op_name.lower()}",
+            tensors=(x, output),
+            nodes=(node,),
+            edges=(Edge(x, None, node), Edge(output, node, None)),
+            inputs=(x,),
+            outputs=(output,),
+        ),
+        constants=ConstantStore(()),
+    )
+
+
 def _quiet_options() -> PlannerOptions:
     return PlannerOptions(
         spatial_mapping=SpatialMappingOptions(print_mapping=False),
@@ -96,6 +125,23 @@ def test_magia_plans_typed_gemm_with_one_hardware_owned_device_name(
     assert "capabilities" not in layer_payload
     assert "device_assignment" not in layer_payload
     assert "throughput" not in layer_payload
+
+
+@pytest.mark.parametrize(
+    ("op_name", "expected_device"),
+    (("Relu", "spatz"), ("Log", "core")),
+)
+def test_magia_plans_elementwise_work_with_explicit_device_assignment(
+    op_name: str,
+    expected_device: str,
+) -> None:
+    bundle = plan_model(
+        _unary_model(op_name),
+        magia_mesh(width=1, height=1),
+        _quiet_options(),
+    )
+
+    assert bundle.execution_plan.stages[0].layers[0].device_name == expected_device
 
 
 def test_execution_plan_validation_rejects_incapable_layer_device_name() -> None:

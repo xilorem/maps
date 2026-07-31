@@ -5,12 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import cast
 
-from MAPS.arch import Mesh, WorkSignature
+from MAPS.arch import Mesh
 from MAPS.core.graph import Node
 from MAPS.core.tensor import Tensor
 from MAPS.ops.common.payload import OpPayload
 from MAPS.planner.contracts.stages import StagePlan, StageSelection
-from MAPS.planner.contracts.devices import node_requires_fixed_device_assignment
+from MAPS.planner.device_assignment import assigned_device_name
 from MAPS.planner.workload.layouts import resolve_stage_layouts, verify_stage_locality
 from MAPS.planner.workload.memory import permanent_l1_allocation_for_tile_work
 from MAPS.planner.workload.submesh import representative_connected_submesh
@@ -107,10 +107,8 @@ class StageCandidateAnalyzer:
             )
             cost_models = tuple(payload.cost_model for payload in payloads)
             device_names = tuple(
-                _fixed_device_name(node, submesh.tiles)
-                if node_requires_fixed_device_assignment(node)
-                else None
-                for node, payload in zip(stage_nodes, payloads)
+                assigned_device_name(node, submesh.tiles)
+                for node in stage_nodes
             )
             placement_cycles = tuple(
                 int(
@@ -176,24 +174,7 @@ class StageCandidateAnalyzer:
         return best_candidate
 
 
-def _fixed_device_name(node: Node, tiles: tuple) -> str:
-    signature = WorkSignature.from_node(node)
-    try:
-        assigned = tuple(tile.assigned_device(signature) for tile in tiles)
-    except ValueError as exc:
-        raise ValueError(f"node {node.name} with {signature}: {exc}") from exc
-    device_names = {device.name for device in assigned}
-    if len(device_names) != 1:
-        raise ValueError(
-            f"node {node.name} with {signature} has inconsistent fixed Device "
-            f"assignments across tiles: {sorted(device_names)}"
-        )
-    return assigned[0].name
-
-
-def _node_cost(cost_model, tile_work, tile, device_name: str | None) -> int:
-    if device_name is None:
-        return cost_model.cost(tile_work, tile)
+def _node_cost(cost_model, tile_work, tile, device_name: str) -> int:
     return cost_model.cost(
         tile_work,
         tile,

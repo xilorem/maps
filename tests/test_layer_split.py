@@ -6,6 +6,7 @@ from MAPS.core.layout import TensorRange
 from MAPS.core.submesh import Submesh
 from MAPS.core.tensor import Tensor
 from MAPS.hw.chips import magia_mesh
+from MAPS.hw.chips.magia import MAGIA_CORE_DEVICE
 from MAPS.ops.defs.split import SplitPayload, StaticSlicePayload
 
 
@@ -33,7 +34,11 @@ def test_static_slice_maps_sharded_output_to_offset_input_region() -> None:
         TensorRange(4, 4),
     )
     assert tile_work.operation_count() == 24
-    assert payload.cost_model.cost(tile_work, submesh.tiles[1]) == 24
+    assert payload.cost_model.cost(
+        tile_work,
+        submesh.tiles[1],
+        MAGIA_CORE_DEVICE,
+    ) == 24
 
 
 def test_static_slice_validates_offsets_bounds_and_element_representation() -> None:

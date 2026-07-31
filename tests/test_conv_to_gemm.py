@@ -421,7 +421,5 @@ def test_conv_data_transforms_require_exact_magia_core_capabilities() -> None:
         (TensorDType.FLOAT16,),
     )
 
-    assert WorkKind.IM2COL.fallback_kind is WorkKind.IM2COL
-    assert WorkKind.OUTPUT_REFORMAT.fallback_kind is WorkKind.OUTPUT_REFORMAT
     assert tile.assigned_device(fp16_im2col).name == "core"
     assert tile.assigned_device(fp16_output_reformat).name == "core"

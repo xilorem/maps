@@ -31,6 +31,7 @@ from MAPS.arch import (
 )
 from MAPS.hw.devices import (
     TENSIX_MATRIX_DEVICE,
+    TENSIX_DEVICE_ASSIGNMENT,
     TENSIX_READ_CORE,
     TENSIX_SCALAR_DEVICE,
     TENSIX_VECTOR_DEVICE,
@@ -251,6 +252,7 @@ def wormhole_n300d_mesh() -> Mesh:
                 y=y,
                 memory=L1Memory(size=N300D_L1_USABLE_BYTES, bandwidth=N300D_L1_BANDWIDTH_BYTES),
                 devices=N300D_TILE_DEVICES,
+                device_assignment=TENSIX_DEVICE_ASSIGNMENT,
             )
             for y in range(N300D_MESH_HEIGHT)
             for x in range(N300D_MESH_WIDTH)

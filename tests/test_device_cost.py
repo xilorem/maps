@@ -1,10 +1,11 @@
 import pytest
 
-from MAPS.arch import Device, DeviceKind, L1Memory, MatrixDevice, ScalarDevice, SystolicDevice, Tile, VectorDevice, WorkKind
+from MAPS.arch import Device, DeviceKind, L1Memory, MatrixDevice, ScalarDevice, SystolicDevice, Tile, VectorDevice, WorkKind, WorkSignature
 from MAPS.hw.chips import magia_mesh
 from MAPS.hw.chips.n300d import wormhole_n300d_mesh
 from MAPS.hw.chips.magia import MAGIA_CORE_DEVICE, MAGIA_REDMULE_DEVICE
 from MAPS.core.layout import TensorRange, TensorSlice
+from MAPS.core.dtype import TensorDType
 from MAPS.core.tensor import Tensor
 from MAPS.ops.costs.elementwise_cost import ElementwiseCostModel
 from MAPS.ops.costs.gemm_cost import GemmCostModel
@@ -89,7 +90,13 @@ def test_tile_can_use_generic_scalar_device() -> None:
     assert tile.devices[0].name == "core"
     assert tile.devices[0].kind is DeviceKind.SCALAR
     assert isinstance(tile.devices[0], ScalarDevice)
-    assert tile.devices[0].supports(WorkKind.GEMM)
+    assert tile.devices[0].supports(
+        WorkSignature(
+            WorkKind.GEMM,
+            (TensorDType.FLOAT32, TensorDType.FLOAT32),
+            (TensorDType.FLOAT32,),
+        )
+    )
 
 
 def test_tile_rejects_empty_devices() -> None:
@@ -109,7 +116,13 @@ def test_redmule_is_a_named_systolic_device() -> None:
     assert isinstance(device, SystolicDevice)
     assert device.array_width == REDMULE_ARRAY_WIDTH
     assert device.array_height == REDMULE_ARRAY_HEIGHT
-    assert device.supports(WorkKind.GEMM)
+    assert device.supports(
+        WorkSignature(
+            WorkKind.GEMM,
+            (TensorDType.FLOAT16, TensorDType.FLOAT16),
+            (TensorDType.FLOAT16,),
+        )
+    )
     assert device.throughput[WorkKind.GEMM] == REDMULE_ARRAY_WIDTH * REDMULE_ARRAY_HEIGHT
 
 
@@ -144,7 +157,13 @@ def test_redmule_gemm_cost_accounts_for_array_shape() -> None:
 def test_tensix_matrix_device_uses_matrix_kind() -> None:
     assert TENSIX_MATRIX_DEVICE.kind is DeviceKind.MATRIX
     assert isinstance(TENSIX_MATRIX_DEVICE, MatrixDevice)
-    assert TENSIX_MATRIX_DEVICE.supports(WorkKind.GEMM)
+    assert TENSIX_MATRIX_DEVICE.supports(
+        WorkSignature(
+            WorkKind.GEMM,
+            (TensorDType.FLOAT32, TensorDType.FLOAT32),
+            (TensorDType.FLOAT32,),
+        )
+    )
 
 
 def test_wormhole_tile_exposes_matrix_device_for_gemm() -> None:
@@ -177,9 +196,13 @@ def test_gemm_cost_prefers_matrix_device_when_available() -> None:
     ) == TENSIX_MATRIX_DEVICE.cycles(tile_work)
 
 
-def test_gemm_cost_requires_the_hardware_assigned_device() -> None:
-    with pytest.raises(ValueError, match="requires a fixed assigned Device"):
-        GemmCostModel().cost(_tile_work(), magia_mesh(width=1, height=1).tile(0, 0))
+def test_gemm_cost_rejects_a_device_outside_the_tile() -> None:
+    with pytest.raises(ValueError, match="is not present on tile 0"):
+        GemmCostModel().cost(
+            _tile_work(),
+            magia_mesh(width=1, height=1).tile(0, 0),
+            GENERIC_SCALAR_DEVICE,
+        )
 
 
 def test_vector_device_rejects_zero_length() -> None:
@@ -312,9 +335,10 @@ def test_spatz_leaves_unprofiled_work_on_scalar_core() -> None:
     tile = magia_mesh(width=1, height=1).tile(0, 0)
     work = _elementwise_work(WorkKind.LOG, count=8, elem_bytes=2)
 
-    assert not SPATZ_DEVICE.supports(WorkKind.LOG)
     assert work.work_kind is WorkKind.LOG
-    assert ElementwiseCostModel(work_kind=WorkKind.LOG).cost(work, tile) == (
+    assert ElementwiseCostModel(work_kind=WorkKind.LOG).cost(
+        work, tile, MAGIA_CORE_DEVICE
+    ) == (
         MAGIA_CORE_DEVICE.cycles(work)
     )
 
@@ -324,7 +348,9 @@ def test_profiled_elementwise_work_can_select_spatz_over_scalar() -> None:
     work = _elementwise_work(WorkKind.ADD, count=8, elem_bytes=2, input_count=2)
 
     assert SPATZ_DEVICE.cycles(work) < MAGIA_CORE_DEVICE.cycles(work)
-    assert ElementwiseCostModel(work_kind=WorkKind.ADD).cost(work, tile) == (
+    assert ElementwiseCostModel(work_kind=WorkKind.ADD).cost(
+        work, tile, SPATZ_DEVICE
+    ) == (
         SPATZ_DEVICE.cycles(work)
     )
 
@@ -333,7 +359,6 @@ def test_magia_gemm_still_uses_redmule_with_spatz_present() -> None:
     tile = magia_mesh(width=1, height=1).tile(0, 0)
     work = _tile_work()
 
-    assert not SPATZ_DEVICE.supports(WorkKind.GEMM)
     assert GemmCostModel().cost(
         work, tile, MAGIA_REDMULE_DEVICE
     ) == MAGIA_REDMULE_DEVICE.cycles(work)

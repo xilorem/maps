@@ -113,7 +113,6 @@ def test_typed_capability_distinguishes_same_width_types_from_throughput() -> No
 
     assert device.supports(fp32_add)
     assert not device.supports(int32_add)
-    assert device.supports(WorkKind.ADD)
 
 
 def test_redmule_declares_only_fp16_gemm_with_optional_bias() -> None:

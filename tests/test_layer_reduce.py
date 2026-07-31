@@ -1,5 +1,7 @@
 from MAPS.arch import WorkKind
 from MAPS.hw.chips import magia_mesh
+from MAPS.hw.devices.spatz import SPATZ_DEVICE
+from MAPS.core.dtype import TensorDType
 from MAPS.core.submesh import Submesh
 from MAPS.core.tensor import Tensor
 from MAPS.ops.costs.reduction_cost import ReductionCostModel
@@ -9,8 +11,14 @@ from MAPS.ops.defs.reduction import ReductionPayload
 def _make_reduce_sum_op() -> ReductionPayload:
     return ReductionPayload(
         op_name="ReduceSum",
-        x=Tensor(name="x", rank=2, dims=(4, 8), elem_bytes=2),
-        output=Tensor(name="out", rank=2, dims=(4, 1), elem_bytes=2),
+        x=Tensor(
+            name="x", rank=2, dims=(4, 8), elem_bytes=2,
+            dtype=TensorDType.FLOAT16,
+        ),
+        output=Tensor(
+            name="out", rank=2, dims=(4, 1), elem_bytes=2,
+            dtype=TensorDType.FLOAT16,
+        ),
         axis=1,
         work_kind=WorkKind.REDUCE_SUM,
     )
@@ -57,4 +65,8 @@ def test_reduce_cost_counts_input_elements() -> None:
         tile=submesh.tiles[0],
     )
 
-    assert ReductionCostModel(work_kind=WorkKind.REDUCE_SUM).cost(tile_work, submesh.tiles[0]) == 24
+    assert ReductionCostModel(work_kind=WorkKind.REDUCE_SUM).cost(
+        tile_work,
+        submesh.tiles[0],
+        SPATZ_DEVICE,
+    ) == SPATZ_DEVICE.cycles(tile_work)

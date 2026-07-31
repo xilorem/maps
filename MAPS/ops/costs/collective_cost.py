@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from MAPS.arch import Device, Tile
 from MAPS.transitions.transport import TransportCostModel
 from MAPS.core.graph import Node
 from MAPS.core.layout import TensorLayout, tile_tensor_slice
@@ -26,8 +27,8 @@ class AllReduceCostModel(OpCostModel):
     def cost(
         self,
         tile_work: object,
-        tile: object,
-        assigned_device: object | None = None,
+        tile: Tile,
+        assigned_device: Device,
     ) -> int:
         del assigned_device
         del tile_work, tile
