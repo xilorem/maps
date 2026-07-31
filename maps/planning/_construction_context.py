@@ -12,10 +12,11 @@ from maps.planning.stages import StagePlan
 class ExecutionPlanConstructionContext:
     """Precomputed identity indexes required during Execution Plan construction.
 
-    Graph nodes and tensors are immutable domain objects, but several lowering
-    decisions depend on object identity rather than value equality.  Building
-    these indexes once makes that rule explicit and prevents each lowering
-    component from reconstructing subtly different producer or stage maps.
+    Graph Nodes and Tensors are immutable domain objects, but several
+    construction decisions depend on object identity rather than value equality.
+    Building these indexes once makes that rule explicit and prevents each
+    construction component from reconstructing subtly different producer or
+    Stage maps.
     """
 
     graph: Graph
