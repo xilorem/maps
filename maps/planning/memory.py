@@ -12,7 +12,7 @@ from maps.planning.layouts import (
     tile_tensor_slice,
 )
 from maps.graph import Tensor
-from maps.operations import OpPayload
+from maps.operations.contracts import OpPayload
 from maps.planning.execution_plan import (
     ExecutionPlan,
     InitializerInput,

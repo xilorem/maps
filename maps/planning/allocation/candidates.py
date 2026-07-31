@@ -5,12 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import cast
 
-from maps.hardware import Mesh
+from maps.hardware import Mesh, WorkSignature
 from maps.graph import Node
 from maps.graph import Tensor
-from maps.operations import OpPayload
+from maps.operations.contracts import OpPayload
 from maps.planning.stages import StagePlan, StageFormation
-from MAPS.planner.device_assignment import assigned_device_name
 from maps.planning.allocation.layouts import resolve_stage_layouts, verify_stage_locality
 from maps.planning.allocation.memory import permanent_l1_allocation_for_tile_work
 from maps.planning.allocation.submesh import representative_connected_submesh
@@ -184,6 +183,23 @@ def _node_cost(cost_model, tile_work, tile, device_name: str) -> int:
         tile,
         tile.device_by_name(device_name),
     )
+
+
+def assigned_device_name(node: Node, tiles: tuple) -> str:
+    """Resolve one stable Device name for a Node across homogeneous Tiles."""
+
+    signature = WorkSignature.from_node(node)
+    try:
+        assigned = tuple(tile.assigned_device(signature) for tile in tiles)
+    except ValueError as exc:
+        raise ValueError(f"node {node.name} with {signature}: {exc}") from exc
+    device_names = {device.name for device in assigned}
+    if len(device_names) != 1:
+        raise ValueError(
+            f"node {node.name} with {signature} has inconsistent fixed Device "
+            f"assignments across tiles: {sorted(device_names)}"
+        )
+    return assigned[0].name
 
 
 def logical_shape_options(tile_count: int) -> tuple[tuple[int, int], ...]:

@@ -25,7 +25,8 @@ dev = [
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["MAPS*", "maps*"]
+include = ["maps*"]
+exclude = ["MAPS*"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

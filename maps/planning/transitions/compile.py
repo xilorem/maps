@@ -12,7 +12,7 @@ from maps.planning.layouts import (
     TensorSlice,
     TensorSubSlice,
 )
-from maps.operations import OpPayload
+from maps.operations.contracts import OpPayload
 from maps.planning.queries import node_output_index, node_output_layouts
 from maps.planning.stages import StagePlacement, StagePlan
 

@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from MAPS.arch import Tile
+from maps.hardware import Tile
 from maps.planning.layouts import LayoutAxis, LayoutAxisMode, TensorLayout, TensorRange, TensorSlice, TensorSliceRef, tile_tensor_slice
 from maps.planning.submesh import Submesh
-from MAPS.core.tensor import Tensor
+from maps.graph import Tensor
 from maps.operations import OpPayload
 from maps.operations import TileWork
 from maps.operations.gemm import GemmCostModel

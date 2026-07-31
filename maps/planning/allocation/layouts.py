@@ -6,8 +6,8 @@ from typing import cast
 
 from maps.graph import Node
 from maps.planning.layouts import TensorLayout, TensorSlice, tile_tensor_slice
-from maps.operations import find_layout_relation
-from maps.operations import OpPayload, TileWork
+from maps.operations.contracts import find_layout_relation
+from maps.operations.contracts import OpPayload, TileWork
 
 
 def resolve_stage_layouts(

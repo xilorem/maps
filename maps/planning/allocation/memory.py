@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from maps.graph import Tensor
-from maps.operations import TileWork
+from maps.operations.contracts import TileWork
 
 L1_ALLOCATION_ALIGNMENT_BYTES = 16
 

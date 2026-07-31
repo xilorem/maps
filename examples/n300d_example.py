@@ -9,26 +9,44 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from maps.target.n300d import build_mesh
-from maps.planning import PlanningConstraints, validate_execution_plan
-from MAPS.planner.plan import build_execution_plan
+from maps.graph import import_onnx_model, run_graph_rewrites
+from maps.target import SpecializationOptions, n300d
+from maps.planning import (
+    AllocationOptions,
+    PlacementOptions,
+    PlanningConstraints,
+    PlanningOptions,
+    plan,
+    validate_execution_plan,
+)
 from maps.deployment.serialization import write_execution_plan_json
-from MAPS.utils.print_submeshes import print_submeshes
+from maps.planning.reporting import print_submeshes
 
 DEFAULT_MODEL_PATH = PROJECT_ROOT / "examples" / "simple_three_stage.onnx"
 
 
 def main():
-    mesh = build_mesh()
+    mesh = n300d.build_mesh()
     output_path = (
         PROJECT_ROOT / "generated" / "n300d_example.execution-plan.json"
     )
-    execution_plan = build_execution_plan(
-        DEFAULT_MODEL_PATH,
+    imported = import_onnx_model(DEFAULT_MODEL_PATH)
+    rewritten = run_graph_rewrites(imported)
+    specialization = n300d.specialize(
+        rewritten,
         mesh,
-        print_allocation=True,
-        print_spatial_mapping=True,
-        print_spatial_mapping_progress=True,
+        SpecializationOptions(),
+    )
+    execution_plan = plan(
+        specialization.model.graph,
+        mesh,
+        PlanningOptions(
+            allocation=AllocationOptions(print_progress=True),
+            placement=PlacementOptions(
+                print_progress=True,
+                print_placement=True,
+            ),
+        ),
     )
     report = validate_execution_plan(execution_plan, PlanningConstraints())
 

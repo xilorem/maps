@@ -1,12 +1,57 @@
-from maps.hardware import Device, EndpointKind, FixedDeviceAssignment, L1Memory, NoC, NoCChannel, NoCEndpoint, NoCLink, NoCNode, Tile
-from MAPS.hw.devices.generic import (
-    GENERIC_DEVICE_ASSIGNMENT,
-    GENERIC_SCALAR_DEVICE,
-    IDMA_READ_DEVICE,
-    IDMA_WRITE_DEVICE,
+from maps.graph import TensorDType
+from maps.hardware import (
+    DMADevice,
+    DMAJob,
+    Device,
+    DeviceKind,
+    EndpointKind,
+    FixedDeviceAssignment,
+    L1Memory,
+    NoC,
+    NoCChannel,
+    NoCEndpoint,
+    NoCLink,
+    NoCNode,
+    ScalarDevice,
+    Tile,
+    WorkKind,
+    same_dtype_signatures,
 )
 
-DEFAULT_TEST_TILE_DEVICES = (IDMA_READ_DEVICE, IDMA_WRITE_DEVICE, GENERIC_SCALAR_DEVICE)
+_TEST_WORK = tuple(work_kind for work_kind in WorkKind if work_kind is not WorkKind.DMA)
+TEST_SCALAR_DEVICE = ScalarDevice(
+    name="core",
+    kind=DeviceKind.SCALAR,
+    throughput={work_kind: 1 for work_kind in _TEST_WORK},
+    capabilities=same_dtype_signatures(
+        _TEST_WORK,
+        (1, 2, 3, 5),
+        (TensorDType.FLOAT16, TensorDType.FLOAT32),
+    ),
+)
+TEST_IDMA_READ_DEVICE = DMADevice(
+    name="idma_read",
+    kind=DeviceKind.DMA,
+    throughput={WorkKind.DMA: 1},
+    job=DMAJob.READJOB,
+)
+TEST_IDMA_WRITE_DEVICE = DMADevice(
+    name="idma_write",
+    kind=DeviceKind.DMA,
+    throughput={WorkKind.DMA: 1},
+    job=DMAJob.WRITEJOB,
+)
+TEST_DEVICE_ASSIGNMENT = FixedDeviceAssignment(
+    {
+        signature: TEST_SCALAR_DEVICE.name
+        for signature in TEST_SCALAR_DEVICE.capabilities
+    }
+)
+DEFAULT_TEST_TILE_DEVICES = (
+    TEST_IDMA_READ_DEVICE,
+    TEST_IDMA_WRITE_DEVICE,
+    TEST_SCALAR_DEVICE,
+)
 
 
 def rectangular_test_tiles(
@@ -24,7 +69,7 @@ def rectangular_test_tiles(
             memory=memory,
             devices=devices,
             device_assignment=(
-                GENERIC_DEVICE_ASSIGNMENT
+                TEST_DEVICE_ASSIGNMENT
                 if devices == DEFAULT_TEST_TILE_DEVICES
                 else FixedDeviceAssignment()
             ),
