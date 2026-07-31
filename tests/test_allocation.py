@@ -6,8 +6,8 @@ import pytest
 
 from MAPS.arch import L1Memory, L2Memory, Mesh, Tile
 from MAPS.core.graph import Edge, Graph, Node, OpKind
-from MAPS.core.layout import TensorLayout
-from MAPS.core.submesh import Submesh
+from maps.planning.layouts import TensorLayout
+from maps.planning.submesh import Submesh
 from MAPS.core.dtype import TensorDType
 from MAPS.core.tensor import Tensor
 from maps.operations import OpCostModel

@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from MAPS.arch import Mesh
+from maps.hardware import Mesh
 from maps.planning.stages import StagePlacement, StagePlan
-from MAPS.planner.spatial.models import VirtualTraffic
-from MAPS.planner.spatial.topology import l2_access_point_tile_ids, tile_set_center
+from maps.planning.placement.models import VirtualTraffic
+from maps.planning.placement.topology import l2_access_point_tile_ids, tile_set_center
 
 
 def assign_stage_ownerships(

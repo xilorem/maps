@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections import deque
 from collections.abc import Iterable, Iterator
 
-from MAPS.arch import EndpointKind, Mesh, Tile
+from maps.hardware import EndpointKind, Mesh, Tile
 from maps.planning.stages import StagePlacement
 
 

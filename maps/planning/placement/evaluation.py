@@ -1,21 +1,21 @@
-"""Exact ownership-aware scoring for complete spatial mappings."""
+"""Exact ownership-aware scoring for complete Placements."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-from MAPS.arch import Mesh
-from MAPS.core.layout import tensor_slice_num_bytes
+from maps.hardware import Mesh
+from maps.planning.layouts import tensor_slice_num_bytes
 from maps.planning.stages import StagePlacement, StagePlan
-from MAPS.planner.spatial.models import MappingEvaluation, StageIOBreakdown, TileIOScore
-from MAPS.transitions import (
+from maps.planning.placement.models import MappingEvaluation, StageIOBreakdown, TileIOScore
+from maps.planning.transitions import (
     VirtualInputTransition,
     VirtualIntermediateTransition,
     VirtualOutputTransition,
     VirtualTransfer,
     VirtualTransition,
 )
-from MAPS.transitions.transport import TransportCostModel
+from maps.planning.transitions.transport import TransportCostModel
 
 
 @dataclass(frozen=True)

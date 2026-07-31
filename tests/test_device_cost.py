@@ -4,7 +4,7 @@ from maps.hardware import Device, DeviceKind, L1Memory, MatrixDevice, ScalarDevi
 from MAPS.hw.chips import magia_mesh
 from MAPS.hw.chips.n300d import wormhole_n300d_mesh
 from MAPS.hw.chips.magia import MAGIA_CORE_DEVICE, MAGIA_REDMULE_DEVICE
-from MAPS.core.layout import TensorRange, TensorSlice
+from maps.planning.layouts import TensorRange, TensorSlice
 from MAPS.core.dtype import TensorDType
 from MAPS.core.tensor import Tensor
 from maps.operations.elementwise import ElementwiseCostModel

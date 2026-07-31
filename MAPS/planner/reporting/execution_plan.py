@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from MAPS.pipeline.execution_plan import ExecutionPlan
 from maps.planning.stages import StagePlacement, StagePlan, virtual_submesh
-from MAPS.planner.spatial.evaluation import evaluate_mapping
+from maps.planning.placement.evaluation import evaluate_mapping
 from maps.planning.allocation.metrics import worst_tile_stage_compute
-from MAPS.transitions import VirtualTransition
+from maps.planning.transitions import VirtualTransition
 
 
 def print_execution_plan_stage_cost(

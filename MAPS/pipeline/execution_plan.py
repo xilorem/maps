@@ -8,7 +8,7 @@ from MAPS.arch import Mesh
 from MAPS.core.tensor import Tensor
 from MAPS.pipeline.execution import ExecutionContract
 from MAPS.pipeline.stage import Stage
-from MAPS.transitions.contracts import Transition
+from maps.planning.transitions.contracts import Transition
 
 
 @dataclass(frozen=True)

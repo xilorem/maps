@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from maps.graph import Node
-from MAPS.core.submesh import Submesh
+from maps.planning.submesh import Submesh
 
 StageFormation = dict[int, tuple[Node, ...]]
 
@@ -17,7 +17,7 @@ class StagePlan:
     ``tile_count`` and ``logical_shape`` describe virtual execution. ``nodes``
     and ``node_output_layouts`` have matching order and preserve the complete
     formed Stage. Physical placement is deliberately absent and is represented
-    by the separate ``StagePlacement`` contract produced by spatial mapping.
+    by the separate ``StagePlacement`` contract produced by Placement.
     """
 
     stage_id: int
@@ -40,7 +40,7 @@ class StagePlacement:
 
     ``virtual_to_physical`` must be a bijection covering both submeshes.  The
     physical region may be non-rectangular; connectivity is established by the
-    spatial mapper before this contract is constructed.
+    Placement implementation before this contract is constructed.
     """
 
     stage_id: int

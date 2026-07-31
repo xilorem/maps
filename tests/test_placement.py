@@ -1,17 +1,17 @@
 from MAPS.arch import L2Memory, Mesh
 from MAPS.core.graph import Edge, Graph, Node, OpKind
-from MAPS.core.submesh import Submesh
+from maps.planning.submesh import Submesh
 from MAPS.core.tensor import Tensor
 from maps.operations.gemm import GemmPayload
 from maps.planning.stages import StagePlacement, StagePlan, virtual_submesh
-from MAPS.planner.passes.spatial_mapping import map_spatially
-from MAPS.planner.spatial.evaluation import MappingEvaluator, evaluate_mapping
-from MAPS.planner.spatial.ownership import assign_stage_ownerships
-import MAPS.planner.spatial.repair as spatial_repair
-import MAPS.planner.spatial.topology as spatial_topology
-from MAPS.planner.spatial.models import VirtualTraffic
-from MAPS.planner.spatial.traffic import build_virtual_traffic
-from MAPS.transitions import VirtualIntermediateTransition, build_virtual_transitions
+from maps.planning.placement import place
+from maps.planning.placement.evaluation import MappingEvaluator, evaluate_mapping
+from maps.planning.placement.ownership import assign_stage_ownerships
+import maps.planning.placement.repair as placement_repair
+import maps.planning.placement.topology as placement_topology
+from maps.planning.placement.models import VirtualTraffic
+from maps.planning.placement.traffic import build_virtual_traffic
+from maps.planning.transitions import VirtualIntermediateTransition, build_virtual_transitions
 from tests.noc_utils import rectangular_test_noc, rectangular_test_tiles
 
 
@@ -93,7 +93,7 @@ def test_build_virtual_traffic_tracks_inter_stage_bytes() -> None:
     assert sum(traffic.output_weights[0].values()) > 0
 
 
-def test_map_spatially_returns_connected_adjacent_mapping() -> None:
+def test_place_returns_connected_adjacent_mapping() -> None:
     mesh = _test_mesh(4, 2)
     producer = _gemm_node("producer")
     consumer = _gemm_node("consumer", x=producer.outputs[0])
@@ -115,7 +115,7 @@ def test_map_spatially_returns_connected_adjacent_mapping() -> None:
         1: _single_node_stage_plan(mesh, 1, consumer, {0, 1}),
     }
 
-    mapping = map_spatially(
+    mapping = place(
         mesh=mesh,
         stage_plans=stage_plans,
         virtual_transitions=build_virtual_transitions(graph, stage_plans),
@@ -213,9 +213,9 @@ def test_repair_region_skips_an_infeasible_growth_attempt(monkeypatch) -> None:
         assert kwargs["exhaustive_future_feasibility"] is False
         raise ValueError("infeasible region")
 
-    monkeypatch.setattr(spatial_repair, "grow_stage_region", fail_growth)
+    monkeypatch.setattr(placement_repair, "grow_stage_region", fail_growth)
 
-    assert spatial_repair.repair_region(
+    assert placement_repair.repair_region(
         mesh=mesh,
         stage_plans={
             0: StagePlan(
@@ -481,12 +481,12 @@ def test_non_exhaustive_future_feasibility_uses_component_sizes(monkeypatch) -> 
         raise AssertionError("connected subsets must not be enumerated")
 
     monkeypatch.setattr(
-        spatial_topology,
+        placement_topology,
         "_can_partition_connected_regions",
         fail_subset_enumeration,
     )
 
-    assert spatial_topology.remaining_counts_fit_free_components(
+    assert placement_topology.remaining_counts_fit_free_components(
         mesh,
         set(range(mesh.num_tiles)),
         (10, 10),

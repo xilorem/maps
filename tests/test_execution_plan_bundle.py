@@ -6,8 +6,8 @@ import pytest
 
 from MAPS.arch import L1Memory, L2Memory, Mesh
 from MAPS.core import Constant, ConstantStore, Graph, Node, OpKind, Tensor, TensorDType
-from MAPS.core.layout import TensorRange, TensorSlice
-from MAPS.core.submesh import Submesh
+from maps.planning.layouts import TensorRange, TensorSlice
+from maps.planning.submesh import Submesh
 from MAPS.deployment import (
     DeploymentBundle,
     validate_execution_plan_bundle_files,
@@ -15,7 +15,7 @@ from MAPS.deployment import (
 )
 from MAPS.pipeline import ExecutionPlan, Layer, LayerInput, Stage
 from maps.operations.elementwise import UnaryElementwisePayload
-from MAPS.transitions import InputDestination
+from maps.planning.transitions import InputDestination
 from tests.noc_utils import rectangular_test_noc, rectangular_test_tiles
 
 

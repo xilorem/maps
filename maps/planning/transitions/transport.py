@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from enum import Enum, auto
 import math
 
-from MAPS.arch import DMADevice, DMAJob, EndpointKind, Mesh, NoCChannel, NoCRoute, RoutingPolicy, Tile, TrafficKind
+from maps.hardware import DMADevice, DMAJob, EndpointKind, Mesh, NoCChannel, NoCRoute, RoutingPolicy, Tile, TrafficKind
 
 
 class TransferKind(Enum):

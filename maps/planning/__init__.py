@@ -28,10 +28,10 @@ def plan(
     from MAPS.planner.passes.execution_plan_validation import (
         require_valid_execution_plan,
     )
-    from MAPS.planner.passes.spatial_mapping import map_spatially
+    from maps.planning.placement import place
     from MAPS.planner.reporting.execution_plan import print_execution_plan_stage_cost
     from MAPS.planner.validation.contracts import PlannerConstraints
-    from MAPS.transitions import build_virtual_transitions
+    from maps.planning.transitions import build_virtual_transitions
     from maps.planning.allocation import allocate
     from maps.planning.stage_formation import form_stages
 
@@ -39,8 +39,7 @@ def plan(
 
     options = options or PlanningOptions()
 
-    # TODO(maps-repository-architecture 10-11): contract Placement, Transitions,
-    # and Execution Plan ownership as their implementations migrate here.
+    # TODO(maps-repository-architecture 11): migrate Execution Plan ownership.
     stage_formation = form_stages(
         graph,
         options.stage_formation,
@@ -55,7 +54,7 @@ def plan(
         num_token_slots=options.execution.num_token_slots,
     )
     virtual_transitions = build_virtual_transitions(graph, stage_plans)
-    placements = map_spatially(
+    placements = place(
         mesh,
         stage_plans,
         virtual_transitions,

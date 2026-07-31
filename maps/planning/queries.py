@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from maps.hardware import Tile
 from maps.graph import Node
-from MAPS.core.layout import TensorSlice
+from maps.planning.layouts import TensorSlice
 from maps.planning.stages import StagePlan
 
 

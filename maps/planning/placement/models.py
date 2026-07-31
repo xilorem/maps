@@ -1,4 +1,4 @@
-"""Data contracts shared by spatial-mapping phases."""
+"""Data contracts shared by Placement phases."""
 
 from __future__ import annotations
 
@@ -62,7 +62,7 @@ class StageIOBreakdown:
 
 @dataclass(frozen=True)
 class MappingEvaluation:
-    """Exact score for a complete ownership-aware spatial mapping."""
+    """Exact score for a complete ownership-aware Placement."""
 
     placements: dict[int, StagePlacement]
     tile_scores: dict[int, TileIOScore]

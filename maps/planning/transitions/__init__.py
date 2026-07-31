@@ -1,4 +1,4 @@
-"""Canonical transition compilation, binding, and transport costing."""
+"""Planning-owned canonical transition compilation, binding, and costing."""
 
 from .compile import bind_transitions, build_virtual_transitions
 from .contracts import (

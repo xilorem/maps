@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from MAPS.arch import Mesh
-from MAPS.planner.spatial.models import VirtualTraffic
-from MAPS.planner.spatial.region_scoring import growth_candidate_score, region_score
-from MAPS.planner.spatial.topology import future_feasible_after_choice, neighbor_ids
+from maps.hardware import Mesh
+from maps.planning.placement.models import VirtualTraffic
+from maps.planning.placement.region_scoring import growth_candidate_score, region_score
+from maps.planning.placement.topology import future_feasible_after_choice, neighbor_ids
 
 
 def greedy_connected_region(

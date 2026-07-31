@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from MAPS.core.layout import TensorSlice, TensorSubSlice
+from maps.planning.layouts import TensorSlice, TensorSubSlice
 from MAPS.arch import WorkSignature
 from MAPS.pipeline.execution_plan import ExecutionPlan
 from MAPS.pipeline.layer import InitializerInput, LocalInput, TransitionSource
@@ -16,7 +16,7 @@ from MAPS.planner.validation.memory import (
     estimate_stage_l1_memory_for_tile,
     estimate_stage_l2_memory,
 )
-from MAPS.transitions.contracts import (
+from maps.planning.transitions.contracts import (
     InputTransition,
     IntermediateTransition,
     OutputTransition,

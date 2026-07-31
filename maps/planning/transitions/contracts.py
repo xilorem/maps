@@ -5,8 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TypeAlias
 
-from MAPS.core.layout import TensorSlice, TensorSubSlice
-from MAPS.core.tensor import Tensor
+from maps.graph import Tensor
+from maps.planning.layouts import TensorSlice, TensorSubSlice
 
 
 @dataclass(frozen=True)

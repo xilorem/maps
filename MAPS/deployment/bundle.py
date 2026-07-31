@@ -13,7 +13,7 @@ from MAPS.core.graph import Graph
 from MAPS.pipeline.execution_plan import ExecutionPlan
 from MAPS.planner.passes.execution_plan_validation import require_valid_execution_plan
 from MAPS.planner.validation.contracts import PlannerConstraints
-from MAPS.transitions.contracts import InputTransition, OutputTransition
+from maps.planning.transitions.contracts import InputTransition, OutputTransition
 from MAPS.utils.execution_plan_json import execution_plan_json_payload
 from MAPS.transforms.rewrite import RewriteReport
 

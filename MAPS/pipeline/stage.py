@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from MAPS.core.submesh import Submesh
+from maps.planning.submesh import Submesh
 from MAPS.pipeline.layer import Layer
 
 if TYPE_CHECKING:

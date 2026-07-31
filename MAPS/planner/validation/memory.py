@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import cast
 
 from MAPS.arch import Tile
-from MAPS.core.layout import (
+from maps.planning.layouts import (
     TensorRange,
     TensorSlice,
     tensor_slice_num_bytes,
@@ -22,7 +22,7 @@ from MAPS.pipeline.layer import (
 )
 from MAPS.pipeline.stage import Stage
 from maps.planning.allocation.memory import permanent_l1_allocation_bytes
-from MAPS.transitions.contracts import InputTransition
+from maps.planning.transitions.contracts import InputTransition
 
 
 def estimate_stage_l1_memory_for_tile(

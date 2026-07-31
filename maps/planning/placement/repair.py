@@ -1,32 +1,32 @@
-"""Ownership-aware local repair of complete spatial mappings."""
+"""Ownership-aware local repair of complete Placements."""
 
 from __future__ import annotations
 
 from collections import deque
 
-from MAPS.arch import Mesh
+from maps.hardware import Mesh
 from maps.planning.stages import StagePlacement, StagePlan
-from MAPS.planner.spatial.evaluation import MappingEvaluator
-from MAPS.planner.spatial.models import (
+from maps.planning.placement.evaluation import MappingEvaluator
+from maps.planning.placement.models import (
     MappingEvaluation,
     RepairCandidate,
     TileIOScore,
     VirtualTraffic,
 )
-from MAPS.planner.spatial.ownership import assign_stage_ownerships
-from MAPS.planner.spatial.region_results import placements_from_regions
-from MAPS.planner.spatial.region_scoring import region_anchor_cost, sorted_candidate_tiles
-from MAPS.planner.spatial.regions import grow_stage_region, local_stage_order, stage_target_point
-from MAPS.planner.spatial.topology import (
+from maps.planning.placement.ownership import assign_stage_ownerships
+from maps.planning.placement.region_results import placements_from_regions
+from maps.planning.placement.region_scoring import region_anchor_cost, sorted_candidate_tiles
+from maps.planning.placement.regions import grow_stage_region, local_stage_order, stage_target_point
+from maps.planning.placement.topology import (
     l2_access_point_tile_ids,
     owner_by_tile_id,
     shared_boundary_length,
     shortest_path_between_regions,
 )
-from MAPS.transitions import VirtualTransition
+from maps.planning.transitions import VirtualTransition
 
 
-def improve_spatial_mapping(
+def improve_placement(
     mesh: Mesh,
     stage_plans: dict[int, StagePlan],
     placements: dict[int, StagePlacement],
@@ -66,7 +66,7 @@ def improve_spatial_mapping(
         )
         _debug(
             debug,
-            "[spatial_mapping] "
+            "[placement] "
             f"iter={iteration} objective={current_evaluation.objective} "
             f"worst_tile={worst_tile.tile_id} worst_stage={worst_tile.stage_id} "
             f"repair_candidates={[(sorted(c.stages), c.reason) for c in candidates[:max_repair_regions]]}",
@@ -103,7 +103,7 @@ def improve_spatial_mapping(
             )
             _debug(
                 debug,
-                "[spatial_mapping] "
+                "[placement] "
                 f"iter={iteration} region={sorted(candidate.stages)} "
                 f"reason={candidate.reason} trial_objective={evaluation.objective}",
             )
@@ -115,14 +115,14 @@ def improve_spatial_mapping(
                 best_candidate = candidate
 
         if best_trial is None or best_placements is None or best_candidate is None:
-            _debug(debug, f"[spatial_mapping] iter={iteration} no_improving_repair_found")
+            _debug(debug, f"[placement] iter={iteration} no_improving_repair_found")
             break
         current_placements = best_placements
         current_evaluation = best_trial
         tabu.append(best_candidate.stages)
         _debug(
             debug,
-            "[spatial_mapping] "
+            "[placement] "
             f"iter={iteration} accepted_region={sorted(best_candidate.stages)} "
             f"reason={best_candidate.reason} objective={current_evaluation.objective}",
         )
@@ -226,13 +226,13 @@ def repair_region(
             best_regions = local_regions
 
     if best_regions is None:
-        _debug(debug, f"[spatial_mapping] repair_failed stages={sorted(affected_stages)}")
+        _debug(debug, f"[placement] repair_failed stages={sorted(affected_stages)}")
         return None
     merged_placements = dict(current_placements)
     merged_placements.update(
         placements_from_regions(mesh, stage_plans, best_regions)
     )
-    _debug(debug, f"[spatial_mapping] repair_regions stages={sorted(affected_stages)}")
+    _debug(debug, f"[placement] repair_regions stages={sorted(affected_stages)}")
     return merged_placements
 
 

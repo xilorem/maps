@@ -8,7 +8,7 @@ from maps.hardware import Mesh
 from maps.graph import Graph, Node
 from maps.planning.stages import StagePlan, virtual_submesh
 from maps.planning.allocation.candidates import StageCandidate
-from MAPS.transitions import build_virtual_transitions
+from maps.planning.transitions import build_virtual_transitions
 
 
 @dataclass(frozen=True)
@@ -77,8 +77,8 @@ def _virtual_communication_cycles(
     """Estimate producer-side virtual-tile communication cycles."""
 
     # Virtual traffic is a pre-placement analysis shared by Allocation estimation
-    # and spatial mapping; it does not depend on physical mapping decisions.
-    from MAPS.planner.spatial.traffic import build_virtual_traffic
+    # and Placement; it does not depend on physical mapping decisions.
+    from maps.planning.placement.traffic import build_virtual_traffic
 
     virtual_transitions = build_virtual_transitions(graph, plans)
     traffic = build_virtual_traffic(virtual_transitions, plans)

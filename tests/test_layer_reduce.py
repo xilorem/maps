@@ -2,7 +2,7 @@ from MAPS.arch import WorkKind
 from MAPS.hw.chips import magia_mesh
 from MAPS.hw.devices.spatz import SPATZ_DEVICE
 from MAPS.core.dtype import TensorDType
-from MAPS.core.submesh import Submesh
+from maps.planning.submesh import Submesh
 from MAPS.core.tensor import Tensor
 from maps.operations.reduction import ReductionCostModel
 from maps.operations.reduction import ReductionPayload

@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from MAPS.arch import Mesh
+from maps.hardware import Mesh
 from maps.planning.stages import StagePlacement, StagePlan
-from MAPS.planner.spatial.models import VirtualTraffic
-from MAPS.planner.spatial.ownership import stage_order
-from MAPS.planner.spatial.region_results import placements_from_regions
-from MAPS.planner.spatial.region_scoring import sorted_candidate_tiles
-from MAPS.planner.spatial.region_search import beam_connected_region, greedy_connected_region
-from MAPS.planner.spatial.topology import l2_access_point_tile_ids, tile_set_center
+from maps.planning.placement.models import VirtualTraffic
+from maps.planning.placement.ownership import stage_order
+from maps.planning.placement.region_results import placements_from_regions
+from maps.planning.placement.region_scoring import sorted_candidate_tiles
+from maps.planning.placement.region_search import beam_connected_region, greedy_connected_region
+from maps.planning.placement.topology import l2_access_point_tile_ids, tile_set_center
 
 
 def build_initial_stage_placements(
@@ -30,7 +30,7 @@ def build_initial_stage_placements(
     free_tile_ids = set(range(mesh.num_tiles))
     placed_regions: dict[int, set[int]] = {}
     ordered_stage_ids = stage_order(tile_counts, traffic)
-    _debug(debug, f"[spatial_mapping] phase=initial_seeding stage_order={ordered_stage_ids}")
+    _debug(debug, f"[placement] phase=initial_seeding stage_order={ordered_stage_ids}")
     for stage_idx, stage_id in enumerate(ordered_stage_ids):
         remaining_tile_counts = {
             other_stage_id: tile_counts[other_stage_id]
@@ -51,7 +51,7 @@ def build_initial_stage_placements(
         free_tile_ids -= region
         _debug(
             debug,
-            "[spatial_mapping] "
+            "[placement] "
             f"seeded stage={stage_id} target=({target[0]:.2f},{target[1]:.2f}) "
             f"tiles={sorted(region)}",
         )

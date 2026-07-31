@@ -5,8 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from MAPS.core.layout import TensorLayout
-from MAPS.transitions.contracts import InputDestination
+from maps.planning.layouts import TensorLayout
+from maps.planning.transitions.contracts import InputDestination
 
 if TYPE_CHECKING:
     from MAPS.core.graph import Node

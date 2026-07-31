@@ -1,16 +1,16 @@
-"""Human-readable spatial-mapping diagnostics."""
+"""Human-readable Placement diagnostics."""
 
 from __future__ import annotations
 
-from MAPS.arch import Mesh
-from MAPS.core.graph import Node
+from maps.graph import Node
+from maps.hardware import Mesh
 from maps.planning.stages import StagePlacement, StagePlan
-from MAPS.planner.spatial.evaluation import evaluate_mapping
-from MAPS.planner.spatial.topology import owner_by_tile_id
-from MAPS.transitions import VirtualTransition
+from maps.planning.placement.evaluation import evaluate_mapping
+from maps.planning.placement.topology import owner_by_tile_id
+from maps.planning.transitions import VirtualTransition
 
 
-def print_spatial_mapping_details(
+def print_placement_details(
     mesh: Mesh,
     stage_plans: dict[int, StagePlan],
     placements: dict[int, StagePlacement],
@@ -25,7 +25,7 @@ def print_spatial_mapping_details(
         placements,
         virtual_transitions,
     )
-    print(f"\n[spatial_mapping] chosen physical submeshes for {label}:")
+    print(f"\n[placement] chosen physical submeshes for {label}:")
     for stage_id in stage_plans:
         placement = placements[stage_id]
         submesh = placement.physical_submesh
@@ -36,7 +36,7 @@ def print_spatial_mapping_details(
             f"virtual_to_physical={dict(sorted(placement.virtual_to_physical.items()))}"
         )
     print_placement_grid(mesh, placements)
-    print(f"[spatial_mapping] stage worst physical-tile IO costs for {label}:")
+    print(f"[placement] stage worst physical-tile IO costs for {label}:")
     for stage_id in stage_plans:
         io_cost = evaluation.stage_breakdowns[stage_id]
         print(
@@ -46,7 +46,7 @@ def print_spatial_mapping_details(
             f"total={io_cost.total}"
         )
     print(
-        f"[spatial_mapping] bottleneck for {label} "
+        f"[placement] bottleneck for {label} "
         f"worst_stage_io={max((cost.total for cost in evaluation.stage_breakdowns.values()), default=0)} "
         f"objective={evaluation.objective}"
     )
@@ -60,7 +60,7 @@ def print_placement_grid(
 
     owners = owner_by_tile_id(placements)
     cell_width = max(1, *(len(str(stage_id)) for stage_id in placements))
-    print("Spatial mapping mesh:")
+    print("Placement mesh:")
     for y in range(mesh.height):
         cells = []
         for x in range(mesh.width):

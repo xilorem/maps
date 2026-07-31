@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from MAPS.arch import Mesh, Tile
-from MAPS.planner.spatial.models import VirtualTraffic
-from MAPS.planner.spatial.topology import (
+from maps.hardware import Mesh, Tile
+from maps.planning.placement.models import VirtualTraffic
+from maps.planning.placement.topology import (
     future_space_penalty,
     l2_access_point_tile_ids,
     region_compactness,

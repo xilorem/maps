@@ -3,16 +3,16 @@ import pytest
 from MAPS.arch import WorkKind
 from MAPS.core import (
     Graph,
-    LayoutAxisMode,
     Node,
     OpKind,
-    Submesh,
     Tensor,
     TensorDType,
 )
 from MAPS.core.graph import Edge
 from MAPS.hw.chips import magia_mesh
 from maps.operations.cast import CastPayload
+from maps.planning.layouts import LayoutAxisMode
+from maps.planning.submesh import Submesh
 from MAPS.planner.contracts.options import PlannerOptions, SpatialMappingOptions
 from MAPS.planner.plan import plan_graph
 from MAPS.utils.execution_plan_json import execution_plan_json_payload

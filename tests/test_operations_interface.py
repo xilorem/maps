@@ -69,7 +69,7 @@ from maps.operations.reduction import (
 )
 from maps.operations.softmax import SoftmaxPayload
 from maps.operations.split import SplitPayload, StaticSlicePayload, StaticSliceTileWork
-from MAPS.core.submesh import Submesh
+from maps.planning.submesh import Submesh
 from MAPS.hw.chips import magia_mesh
 from MAPS.planner.contracts.options import PlannerOptions, SpatialMappingOptions
 from MAPS.planner.plan import plan_graph

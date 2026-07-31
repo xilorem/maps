@@ -18,7 +18,7 @@ from MAPS.hw.chips.magia import magia_mesh
 from MAPS.hw.devices.generic import GENERIC_SCALAR_DEVICE
 import pytest
 
-from MAPS.transitions import TransferKind, TransferLeg, TransportCostModel
+from maps.planning.transitions import TransferKind, TransferLeg, TransportCostModel
 from tests.noc_utils import rectangular_test_tiles
 
 

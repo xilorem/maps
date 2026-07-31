@@ -1,22 +1,22 @@
-"""Spatial-mapping pass facade."""
+"""Place virtual Stage Plans onto connected physical mesh regions."""
 
 from __future__ import annotations
 
-from MAPS.arch import Mesh
+from maps.hardware import Mesh
 from maps.planning.stages import StagePlacement, StagePlan
-from MAPS.planner.spatial.diagnostics import (
+from maps.planning.placement.diagnostics import (
     print_placement_grid,
-    print_spatial_mapping_details,
+    print_placement_details,
 )
-from MAPS.planner.spatial.evaluation import MappingEvaluator
-from MAPS.planner.spatial.ownership import assign_stage_ownerships, stage_order
-from MAPS.planner.spatial.regions import build_initial_stage_placements
-from MAPS.planner.spatial.repair import improve_spatial_mapping
-from MAPS.planner.spatial.traffic import build_virtual_traffic
-from MAPS.transitions import VirtualTransition
+from maps.planning.placement.evaluation import MappingEvaluator
+from maps.planning.placement.ownership import assign_stage_ownerships, stage_order
+from maps.planning.placement.regions import build_initial_stage_placements
+from maps.planning.placement.repair import improve_placement
+from maps.planning.placement.traffic import build_virtual_traffic
+from maps.planning.transitions import VirtualTransition
 
 
-def map_spatially(
+def place(
     mesh: Mesh,
     stage_plans: dict[int, StagePlan],
     virtual_transitions: tuple[VirtualTransition, ...],
@@ -24,7 +24,7 @@ def map_spatially(
     print_mapping: bool = True,
     print_costs: bool = False,
 ) -> dict[int, StagePlacement]:
-    """Map virtual stage plans onto connected physical mesh regions.
+    """Place virtual Stage Plans onto connected physical mesh regions.
 
     Contract:
         Stage plans must contain complete virtual layouts, their tile counts must
@@ -51,10 +51,10 @@ def map_spatially(
         raise ValueError("requested stage tiles exceed available mesh tiles")
 
     traffic = build_virtual_traffic(virtual_transitions, stage_plans)
-    _debug(show_progress, "[spatial_mapping] phase=virtual_analysis")
+    _debug(show_progress, "[placement] phase=virtual_analysis")
     _debug(
         show_progress,
-        "[spatial_mapping] "
+        "[placement] "
         f"stage_order={stage_order(tile_counts, traffic)} "
         f"communication_degree={traffic.communication_degree} "
         f"bottleneck_risk={traffic.bottleneck_risk} "
@@ -77,11 +77,11 @@ def map_spatially(
     evaluation = evaluator.evaluate(placements)
     _debug(
         show_progress,
-        "[spatial_mapping] "
+        "[placement] "
         f"phase=initial_mapping objective={evaluation.objective} "
         f"worst_tile={evaluation.worst_tile_id}",
     )
-    placements = improve_spatial_mapping(
+    placements = improve_placement(
         mesh,
         stage_plans,
         placements,
@@ -93,7 +93,7 @@ def map_spatially(
     )
 
     if print_costs:
-        print_spatial_mapping_details(
+        print_placement_details(
             mesh,
             stage_plans,
             placements,
@@ -112,4 +112,4 @@ def _debug(enabled: bool, message: str) -> None:
         print(message)
 
 
-__all__ = ["map_spatially"]
+__all__ = ["place"]

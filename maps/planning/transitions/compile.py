@@ -4,15 +4,14 @@ from __future__ import annotations
 
 from typing import cast
 
-from MAPS.arch import Tile
-from MAPS.core.graph import Graph, Node
-from MAPS.core.layout import (
+from maps.graph import Graph, Node, Tensor
+from maps.hardware import Tile
+from maps.planning.layouts import (
     TensorLayout,
     TensorRange,
     TensorSlice,
     TensorSubSlice,
 )
-from MAPS.core.tensor import Tensor
 from maps.operations import OpPayload
 from maps.planning.queries import node_output_index, node_output_layouts
 from maps.planning.stages import StagePlacement, StagePlan

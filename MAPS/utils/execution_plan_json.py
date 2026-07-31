@@ -10,14 +10,14 @@ from typing import Any
 
 from MAPS.arch import Mesh
 from MAPS.core.dtype import TensorDType
-from MAPS.core.submesh import Submesh
+from maps.planning.submesh import Submesh
 from MAPS.pipeline.execution_plan import ExecutionPlan
 from MAPS.pipeline.layer import InitializerInput, LocalInput, TransitionSource
 from maps.operations.elementwise import (
     BinaryElementwisePayload,
     UnaryElementwisePayload,
 )
-from MAPS.transitions.contracts import (
+from maps.planning.transitions.contracts import (
     InputTransition,
     IntermediateTransition,
     OutputTransition,

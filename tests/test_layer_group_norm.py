@@ -1,6 +1,6 @@
 from MAPS.core.graph import Node, OpKind
-from MAPS.core.layout import TensorRange
-from MAPS.core.submesh import Submesh
+from maps.planning.layouts import TensorRange
+from maps.planning.submesh import Submesh
 from MAPS.core.tensor import Tensor
 from MAPS.hw.chips import magia_mesh
 from maps.operations.collective import AllReducePayload

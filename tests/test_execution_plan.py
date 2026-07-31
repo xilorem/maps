@@ -3,7 +3,7 @@ from pathlib import Path
 
 from MAPS.core.dtype import TensorDType
 from MAPS.core.graph import Edge, Graph, Node, OpKind
-from MAPS.core.submesh import Submesh
+from maps.planning.submesh import Submesh
 from MAPS.core.tensor import Tensor
 from MAPS.hw.chips import magia_mesh
 from maps.operations.gemm import GemmPayload
@@ -14,7 +14,7 @@ from MAPS.planner.passes.execution_plan_validation import validate_execution_pla
 from MAPS.planner.validation.contracts import PlannerConstraints
 from MAPS.planner.validation.memory import estimate_stage_l1_memory_for_tile
 from maps.planning.allocation.memory import permanent_l1_allocation_for_tile
-from MAPS.transitions import (
+from maps.planning.transitions import (
     InputTransition,
     IntermediateTransition,
     OutputTransition,
@@ -255,9 +255,9 @@ def test_lower_execution_plan_unifies_communication_and_initializer_residency(
 
 def test_execution_plan_validation_rejects_transition_endpoint_mismatches() -> None:
     from MAPS.arch import L2Memory, Mesh
-    from MAPS.core.layout import TensorRange, TensorSlice
+    from maps.planning.layouts import TensorRange, TensorSlice
     from MAPS.pipeline import ExecutionPlan, Layer, LayerInput, Stage
-    from MAPS.transitions import InputDestination
+    from maps.planning.transitions import InputDestination
     from tests.noc_utils import rectangular_test_noc, rectangular_test_tiles
 
     mesh = Mesh(
@@ -385,7 +385,7 @@ def test_execution_plan_validation_rejects_transition_endpoint_mismatches() -> N
 
 def test_execution_plan_validation_rejects_mismatched_transfer_regions() -> None:
     from MAPS.arch import L2Memory, Mesh
-    from MAPS.core.layout import (
+    from maps.planning.layouts import (
         LayoutAxis,
         LayoutAxisMode,
         TensorLayout,
@@ -394,7 +394,7 @@ def test_execution_plan_validation_rejects_mismatched_transfer_regions() -> None
         TensorSubSlice,
     )
     from MAPS.pipeline import ExecutionPlan, Layer, LayerInput, LayerOutput, Stage
-    from MAPS.transitions import IntermediateTransition, Transfer
+    from maps.planning.transitions import IntermediateTransition, Transfer
     from tests.noc_utils import rectangular_test_noc, rectangular_test_tiles
 
     mesh = Mesh(

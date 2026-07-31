@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import cast
 
 from maps.graph import Node
-from MAPS.core.layout import TensorLayout, TensorSlice, tile_tensor_slice
+from maps.planning.layouts import TensorLayout, TensorSlice, tile_tensor_slice
 from maps.operations import find_layout_relation
 from maps.operations import OpPayload, TileWork
 

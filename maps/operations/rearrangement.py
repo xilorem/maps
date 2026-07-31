@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from math import prod
 
 from maps.hardware import Tile, WorkKind
-from MAPS.core.layout import (
+from maps.planning.layouts import (
     LayoutAxis,
     LayoutAxisMode,
     TensorLayout,
@@ -15,7 +15,7 @@ from MAPS.core.layout import (
     TensorSliceRef,
     tile_tensor_slice,
 )
-from MAPS.core.submesh import Submesh
+from maps.planning.submesh import Submesh
 from maps.graph import Tensor
 from .contracts import LayoutRelation, OpCostModel, OpPayload, TileWork, sharded_layout
 

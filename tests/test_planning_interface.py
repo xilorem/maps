@@ -12,8 +12,12 @@ from maps.planning import (
     plan,
 )
 from maps.planning.allocation import allocate
+from maps.planning.layouts import TensorLayout
+from maps.planning.placement import place
+from maps.planning.submesh import Submesh
 from maps.planning.stage_formation import form_stages
 from maps.planning.stages import StagePlan
+from maps.planning.transitions import build_virtual_transitions
 from maps.target import SpecializationOptions, magia, n300d
 
 from tests.test_precision_lowering import _gemm_model
@@ -25,6 +29,13 @@ def test_planning_owns_stage_formation_and_allocation_contracts() -> None:
     assert form_stages.__module__ == "maps.planning.stage_formation"
     assert allocate.__module__ == "maps.planning.allocation"
     assert StagePlan.__module__ == "maps.planning.stages"
+
+
+def test_planning_owns_transitions_placement_and_layout_contracts() -> None:
+    assert build_virtual_transitions.__module__ == "maps.planning.transitions.compile"
+    assert place.__module__ == "maps.planning.placement"
+    assert TensorLayout.__module__ == "maps.planning.layouts"
+    assert Submesh.__module__ == "maps.planning.submesh"
 
 
 @pytest.mark.parametrize(

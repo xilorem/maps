@@ -1,14 +1,14 @@
-"""Tensor layout IR matching the runtime-side layout structures."""
+"""Planning-owned Tensor placement layouts and concrete slices."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import IntEnum
 
-from MAPS.arch import Tile
+from maps.graph import TENSOR_MAX_DIMS, Tensor
+from maps.hardware import Tile
 
 from .submesh import Submesh
-from .tensor import TENSOR_MAX_DIMS, Tensor
 
 TENSOR_AXIS_NONE: int | None = None
 

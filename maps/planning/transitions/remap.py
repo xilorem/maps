@@ -1,8 +1,8 @@
 """Tensor ownership helpers used by canonical Transition compilation."""
 
-from MAPS.arch import Tile
-from MAPS.core.layout import TensorLayout, TensorSlice, tile_tensor_slice
-from MAPS.core.tensor import Tensor
+from maps.graph import Tensor
+from maps.hardware import Tile
+from maps.planning.layouts import TensorLayout, TensorSlice, tile_tensor_slice
 
 
 def tile_owned_slices(tensor: Tensor, layout: TensorLayout) -> tuple[tuple[Tile, TensorSlice], ...]:

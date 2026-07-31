@@ -2,8 +2,8 @@ from MAPS.arch import L1Memory, Tile, WorkKind
 from MAPS.hw.chips import magia_mesh
 from MAPS.hw.chips.magia import MAGIA_CORE_DEVICE
 from MAPS.hw.devices.generic import GENERIC_SCALAR_DEVICE
-from MAPS.core.layout import TensorRange
-from MAPS.core.submesh import Submesh
+from maps.planning.layouts import TensorRange
+from maps.planning.submesh import Submesh
 from MAPS.core.tensor import Tensor
 from maps.operations.convolution import Conv2DPayload
 from maps.operations.depthwise_convolution import DepthwiseConvPayload

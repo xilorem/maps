@@ -1,10 +1,10 @@
-"""Placed submesh IR matching the runtime-side `submesh_t`."""
+"""Planning-owned connected tile-region contract."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-from MAPS.arch import Mesh, Tile
+from maps.hardware import Mesh, Tile
 
 
 def _adjacent_tile_ids(mesh: Mesh, tile_id: int) -> set[int]:

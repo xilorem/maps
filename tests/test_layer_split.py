@@ -2,8 +2,8 @@ import pytest
 
 from MAPS.arch import WorkKind
 from MAPS.core.dtype import TensorDType
-from MAPS.core.layout import TensorRange
-from MAPS.core.submesh import Submesh
+from maps.planning.layouts import TensorRange
+from maps.planning.submesh import Submesh
 from MAPS.core.tensor import Tensor
 from MAPS.hw.chips import magia_mesh
 from MAPS.hw.chips.magia import MAGIA_CORE_DEVICE

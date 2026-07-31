@@ -19,8 +19,8 @@ from MAPS.planner.lowering.context import (
     ExecutionPlanLoweringContext,
     build_lowering_context,
 )
-from MAPS.transitions import bind_transitions
-from MAPS.transitions.contracts import (
+from maps.planning.transitions import bind_transitions
+from maps.planning.transitions.contracts import (
     InputDestination,
     InputTransition,
     IntermediateTransition,

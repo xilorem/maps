@@ -14,7 +14,7 @@ import MAPS.planner.plan as plan_module
 from MAPS.planner.passes.execution_plan_validation import validate_execution_plan
 from MAPS.planner.plan import build_execution_plan
 from MAPS.planner.validation.contracts import PlannerConstraints
-from MAPS.transitions import (
+from maps.planning.transitions import (
     InputTransition,
     IntermediateTransition,
     OutputTransition,
@@ -264,7 +264,7 @@ def test_build_execution_plan_disables_mapping_progress_by_default(monkeypatch) 
         seen["mapped_transitions"] = virtual_transitions
         return {}
 
-    monkeypatch.setattr(plan_module, "map_spatially", fake_map_spatially)
+    monkeypatch.setattr(plan_module, "place", fake_map_spatially)
 
     def fake_lower(
         graph,
@@ -327,7 +327,7 @@ def test_build_execution_plan_can_enable_mapping_progress(monkeypatch) -> None:
         seen["show_progress"] = kwargs["show_progress"]
         return {}
 
-    monkeypatch.setattr(plan_module, "map_spatially", fake_map_spatially)
+    monkeypatch.setattr(plan_module, "place", fake_map_spatially)
 
     def fake_lower(
         graph,
