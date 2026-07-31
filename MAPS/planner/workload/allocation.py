@@ -47,10 +47,7 @@ def seed_stage_candidates(
         )
         for stage_id in stage_ids
     }
-    minimum_tile_count = sum(
-        candidate.plan.tile_count
-        for candidate in candidates.values()
-    )
+    minimum_tile_count = _used_tile_count(candidates)
     if minimum_tile_count > mesh.num_tiles:
         raise ValueError("minimum L1-feasible tile counts exceed available tiles")
     return candidates
@@ -77,10 +74,7 @@ def grow_stage_candidates(
     """
 
     selected_candidates = dict(selected_candidates)
-    used_tiles = sum(
-        candidate.plan.tile_count
-        for candidate in selected_candidates.values()
-    )
+    used_tiles = _used_tile_count(selected_candidates)
     active_stage_ids = set(context.stage_selection)
 
     _debug(debug, f"[workload_balancing] start used_tiles={used_tiles}/{mesh.num_tiles}")
@@ -184,10 +178,7 @@ def grow_stage_candidates(
             break
 
         previous_count = used_tiles
-        used_tiles = sum(
-            candidate.plan.tile_count
-            for candidate in selected_candidates.values()
-        )
+        used_tiles = _used_tile_count(selected_candidates)
 
         _debug(
             debug,
@@ -385,6 +376,15 @@ def _candidate_tile_counts(
         stage_id: candidate.plan.tile_count
         for stage_id, candidate in candidates.items()
     }
+
+
+def _used_tile_count(candidates: dict[int, StageCandidate]) -> int:
+    """Return the number of tiles occupied by a candidate selection."""
+
+    return sum(
+        candidate.plan.tile_count
+        for candidate in candidates.values()
+    )
 
 
 def _stage_label(stage_nodes: tuple[Node, ...]) -> str:

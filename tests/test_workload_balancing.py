@@ -2,16 +2,20 @@ from typing import ClassVar
 
 import pytest
 
-from MAPS.arch import L1Memory, L2Memory, Mesh
+from MAPS.arch import L1Memory, L2Memory, Mesh, Tile
 from MAPS.core.graph import Edge, Graph, Node, OpKind
+from MAPS.core.layout import TensorLayout
 from MAPS.core.submesh import Submesh
 from MAPS.core.tensor import Tensor
 from MAPS.ops.common.cost import OpCostModel
+from MAPS.ops.common.tile_work import TileWork
 from MAPS.ops.defs.gemm import GemmPayload
-from MAPS.ops.defs.elementwise import UnaryElementwisePayload
+from MAPS.ops.defs.elementwise import ElementwiseTileWork, UnaryElementwisePayload
 from MAPS.planner.passes.stage_selection import form_stages
 from MAPS.planner.passes.workload_balancing import balance_workload
+from MAPS.planner.workload import allocation as allocation_module
 from MAPS.planner.workload.allocation import grow_tile_count_for_stage
+from MAPS.planner.workload.candidates import StageCandidate
 from MAPS.planner.workload.metrics import (
     estimate_selection_metrics,
     virtual_communication_cycles,
@@ -157,7 +161,11 @@ def test_balance_workload_starts_from_minimum_l1_feasible_tile_count() -> None:
 class _CountingUnaryPayload(UnaryElementwisePayload):
     build_calls: ClassVar[int] = 0
 
-    def build_tile_work(self, output_layouts, tile):
+    def build_tile_work(
+        self,
+        output_layouts: tuple[TensorLayout, ...],
+        tile: Tile,
+    ) -> ElementwiseTileWork:
         type(self).build_calls += 1
         return super().build_tile_work(output_layouts, tile)
 
@@ -167,7 +175,7 @@ class _PlateauCostModel(OpCostModel):
         self._unsharded_cycles = unsharded_cycles
         self._sharded_cycles = sharded_cycles
 
-    def cost(self, tile_work, tile) -> int:
+    def cost(self, tile_work: TileWork, tile: Tile) -> int:
         del tile
         if tile_work.output_slices[0].tensor_slice.num_elements == 8:
             return self._unsharded_cycles
@@ -195,6 +203,31 @@ class _PlateauCostPayload(UnaryElementwisePayload):
         )
 
 
+def _plateau_node(
+    name: str,
+    unsharded_cycles: int,
+    sharded_cycles: int,
+) -> tuple[Node, Tensor]:
+    input_tensor = Tensor(f"{name}_input", 1, (8,), 2, is_initializer=True)
+    output = Tensor(f"{name}_output", 1, (8,), 2)
+    return (
+        Node(
+            name,
+            OpKind.ELEMENTWISE,
+            inputs=(input_tensor,),
+            outputs=(output,),
+            payload=_PlateauCostPayload(
+                "Relu",
+                input_tensor,
+                output,
+                unsharded_cycles,
+                sharded_cycles,
+            ),
+        ),
+        input_tensor,
+    )
+
+
 def test_balance_workload_reuses_candidates_across_growth_probes() -> None:
     _CountingUnaryPayload.build_calls = 0
     input_tensor = Tensor("input", 1, (8,), 2, is_initializer=True)
@@ -218,6 +251,47 @@ def test_balance_workload_reuses_candidates_across_growth_probes() -> None:
 
     assert plans[0].tile_count == 2
     assert _CountingUnaryPayload.build_calls == 5
+
+
+def test_balance_workload_rejects_growth_that_worsens_global_objective(
+    monkeypatch,
+) -> None:
+    first, first_initializer = _plateau_node("first", 10, 5)
+    second, second_initializer = _plateau_node("second", 9, 8)
+    graph = Graph(
+        "global_objective",
+        nodes=(first, second),
+        initializers=(first_initializer, second_initializer),
+    )
+    mesh = _mesh_with_l1(3, 1, l1_size=4096)
+
+    def evaluate_selection(
+        candidates: dict[int, StageCandidate],
+        **kwargs: object,
+    ) -> dict[int, float]:
+        del kwargs
+        tile_counts = tuple(
+            candidates[stage_id].plan.tile_count
+            for stage_id in sorted(candidates)
+        )
+        return {
+            (1, 1): {0: 10.0, 1: 9.0},
+            (2, 1): {0: 5.0, 1: 20.0},
+            (1, 2): {0: 10.0, 1: 8.0},
+        }[tile_counts]
+
+    monkeypatch.setattr(
+        allocation_module,
+        "evaluate_candidate_selection",
+        evaluate_selection,
+    )
+
+    plans = balance_workload(graph, mesh, {0: (first,), 1: (second,)})
+
+    assert {stage_id: plan.tile_count for stage_id, plan in plans.items()} == {
+        0: 1,
+        1: 2,
+    }
 
 
 def test_planner_selected_token_slots_control_l1_feasibility() -> None:
@@ -501,36 +575,8 @@ def test_growth_prefers_tile_count_with_more_physical_shape_options() -> None:
 def test_growth_prunes_stage_when_doubling_current_count_does_not_improve(
     capsys,
 ) -> None:
-    no_scale_input = Tensor("no_scale_input", 1, (8,), 2, is_initializer=True)
-    no_scale_output = Tensor("no_scale_output", 1, (8,), 2)
-    no_scale = Node(
-        "no_scale",
-        OpKind.ELEMENTWISE,
-        inputs=(no_scale_input,),
-        outputs=(no_scale_output,),
-        payload=_PlateauCostPayload(
-            "Relu",
-            no_scale_input,
-            no_scale_output,
-            unsharded_cycles=30,
-            sharded_cycles=30,
-        ),
-    )
-    scales_input = Tensor("scales_input", 1, (8,), 2, is_initializer=True)
-    scales_output = Tensor("scales_output", 1, (8,), 2)
-    scales = Node(
-        "scales",
-        OpKind.ELEMENTWISE,
-        inputs=(scales_input,),
-        outputs=(scales_output,),
-        payload=_PlateauCostPayload(
-            "Relu",
-            scales_input,
-            scales_output,
-            unsharded_cycles=20,
-            sharded_cycles=10,
-        ),
-    )
+    no_scale, no_scale_input = _plateau_node("no_scale", 30, 30)
+    scales, scales_input = _plateau_node("scales", 20, 10)
     graph = Graph(
         "growth",
         nodes=(no_scale, scales),
