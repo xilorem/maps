@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from MAPS.core.tensor import Tensor
+from MAPS.ops.common.tile_work import TileWork
+
 L1_ALLOCATION_ALIGNMENT_BYTES = 16
 
 
@@ -9,7 +12,7 @@ def permanent_l1_allocation_for_stage(
     stage_nodes: tuple,
     node_output_layouts: tuple[tuple, ...],
     submesh,
-    initializer_tensors: frozenset,
+    initializer_tensors: frozenset[Tensor],
     num_token_slots: int = 2,
 ) -> int:
     """Return the greatest permanent L1 allocation on any virtual tile."""
@@ -33,7 +36,7 @@ def permanent_l1_allocation_for_tile(
     stage_nodes: tuple,
     node_output_layouts: tuple[tuple, ...],
     tile,
-    initializer_tensors: frozenset,
+    initializer_tensors: frozenset[Tensor],
     num_token_slots: int = 2,
 ) -> int:
     """Mirror the backend's monotonic, non-reusing tile-L1 allocator."""
@@ -50,8 +53,8 @@ def permanent_l1_allocation_for_tile(
 
 
 def permanent_l1_allocation_for_tile_work(
-    tile_work: tuple,
-    initializer_tensors: frozenset,
+    tile_work: tuple[TileWork, ...],
+    initializer_tensors: frozenset[Tensor],
     num_token_slots: int = 2,
 ) -> int:
     """Return permanent L1 bytes from already constructed Layer Tile Work."""
@@ -86,7 +89,10 @@ def permanent_l1_allocation_bytes(allocation_sizes) -> int:
     return next_offset
 
 
-def _is_initializer(tensor: object, initializer_tensors: frozenset) -> bool:
+def _is_initializer(
+    tensor: object,
+    initializer_tensors: frozenset[Tensor],
+) -> bool:
     return tensor in initializer_tensors or getattr(tensor, "is_initializer", False)
 
 

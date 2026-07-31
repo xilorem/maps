@@ -7,6 +7,7 @@ from typing import cast
 
 from MAPS.arch import Mesh
 from MAPS.core.graph import Node
+from MAPS.core.tensor import Tensor
 from MAPS.ops.common.payload import OpPayload
 from MAPS.planner.contracts.stages import StagePlan, StageSelection
 from MAPS.planner.workload.layouts import resolve_stage_layouts, verify_stage_locality
@@ -38,7 +39,7 @@ class StageCandidate:
     def stage_compute(self) -> int:
         """Return the greatest accumulated Layer compute on one virtual tile."""
 
-        return max((fact.compute_cycles for fact in self.tile_facts), default=0)
+        return max(fact.compute_cycles for fact in self.tile_facts)
 
 
 class StageCandidateAnalyzer:
@@ -48,7 +49,7 @@ class StageCandidateAnalyzer:
         self,
         stage_selection: StageSelection,
         mesh: Mesh,
-        initializer_tensors: frozenset,
+        initializer_tensors: frozenset[Tensor],
         num_token_slots: int = 2,
     ) -> None:
         self._stage_selection = {
@@ -174,7 +175,7 @@ def best_stage_plan(
     mesh: Mesh,
     stage_id: int,
     tile_count: int,
-    initializer_tensors: frozenset,
+    initializer_tensors: frozenset[Tensor],
     num_token_slots: int = 2,
 ) -> StagePlan:
     """Choose the lowest-compute L1-feasible layout at one tile count.

@@ -106,6 +106,19 @@ class _CountingUnaryPayload(UnaryElementwisePayload):
         return super().build_tile_work(output_layouts, tile)
 
 
+@dataclass(frozen=True)
+class _InverseSliceCostModel(OpCostModel):
+    def cost(self, tile_work, tile) -> int:
+        del tile
+        return 100 // tile_work.output_slices[0].tensor_slice.num_elements
+
+
+class _InverseSliceCostPayload(UnaryElementwisePayload):
+    @property
+    def cost_model(self) -> OpCostModel:
+        return _InverseSliceCostModel()
+
+
 def test_stage_candidate_contains_immutable_per_tile_intrinsic_facts() -> None:
     node = _unary_node("stage")
     analyzer = StageCandidateAnalyzer(
@@ -120,6 +133,7 @@ def test_stage_candidate_contains_immutable_per_tile_intrinsic_facts() -> None:
     assert candidate is not None
     assert candidate.plan.stage_id == 7
     assert candidate.plan.tile_count == 2
+    assert candidate.plan.logical_shape == (2, 1)
     assert tuple(
         (fact.tile_id, fact.compute_cycles, fact.permanent_l1_bytes)
         for fact in candidate.tile_facts
@@ -178,6 +192,29 @@ def test_equal_compute_shapes_prefer_smaller_logical_height() -> None:
 
     assert candidate is not None
     assert candidate.plan.logical_shape == (4, 1)
+
+
+def test_l1_infeasible_shape_is_skipped_for_a_feasible_alternative() -> None:
+    x = Tensor("input", 1, (8,), 2)
+    output = Tensor("output", 1, (8,), 2)
+    node = Node(
+        "stage",
+        OpKind.ELEMENTWISE,
+        inputs=(x,),
+        outputs=(output,),
+        payload=_InverseSliceCostPayload("Relu", x, output),
+    )
+    analyzer = StageCandidateAnalyzer(
+        {0: (node,)},
+        _mesh(2, l1_size=48),
+        frozenset(),
+    )
+
+    candidate = analyzer.candidate(0, 2)
+
+    assert candidate is not None
+    assert candidate.plan.logical_shape == (2, 1)
+    assert candidate.stage_compute == 25
 
 
 def test_stage_candidate_cache_reuses_successful_analysis() -> None:

@@ -6,15 +6,16 @@ from typing import cast
 
 from MAPS.core.graph import Node
 from MAPS.core.layout import TensorLayout, TensorSlice, tile_tensor_slice
-from MAPS.ops.common.payload import OpPayload
 from MAPS.ops.common.layout_relation import find_layout_relation
+from MAPS.ops.common.payload import OpPayload
+from MAPS.ops.common.tile_work import TileWork
 
 
 def resolve_stage_layouts(
     stage_nodes: tuple[Node, ...],
     submesh,
     logical_shape: tuple[int, int],
-) -> tuple[tuple, ...]:
+) -> tuple[tuple[TensorLayout, ...], ...]:
     """Resolve one coherent set of output layouts in stage execution order."""
 
     producer_output_by_tensor: dict[object, tuple[Node, int]] = {}
@@ -59,9 +60,9 @@ def resolve_stage_layouts(
 
 def verify_stage_locality(
     stage_nodes: tuple[Node, ...],
-    node_output_layouts: tuple[tuple, ...],
+    node_output_layouts: tuple[tuple[TensorLayout, ...], ...],
     submesh,
-    node_tile_work: tuple[tuple, ...],
+    node_tile_work: tuple[tuple[TileWork, ...], ...],
 ) -> None:
     """Require every local consumer read to fit its same-tile producer slice."""
 
