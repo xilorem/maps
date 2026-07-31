@@ -15,9 +15,8 @@ from MAPS.pipeline import ExecutionContract
 from MAPS.planner.contracts.options import (
     PlannerOptions,
     SpatialMappingOptions,
-    StageFormationOptions,
-    AllocationOptions,
 )
+from maps.planning import AllocationOptions, StageFormationOptions
 from MAPS.planner.passes.execution_plan_validation import validate_execution_plan
 from MAPS.planner.validation.contracts import PlannerConstraints
 from MAPS.planner.plan import build_execution_plan_bundle

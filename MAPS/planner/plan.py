@@ -15,10 +15,8 @@ from MAPS.pipeline.execution_plan import ExecutionPlan
 from MAPS.planner.contracts.options import (
     PlannerOptions,
     SpatialMappingOptions,
-    StageFormationOptions,
-    AllocationOptions,
 )
-from MAPS.planner.device_assignment import assigned_device_name
+from maps.planning import AllocationOptions, StageFormationOptions
 from MAPS.planner.passes.execution_plan_lowering import lower_execution_plan
 from MAPS.planner.passes.execution_plan_validation import (
     require_valid_execution_plan,
@@ -102,8 +100,6 @@ def _plan_decisions(
     mesh: Mesh,
     options: PlannerOptions,
 ):
-    for node in graph.nodes:
-        assigned_device_name(node, mesh.tiles)
     stage_formation = form_stages(graph, options.stage_formation)
 
     stage_plans = allocate(

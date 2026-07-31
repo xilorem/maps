@@ -24,7 +24,6 @@ def plan(
     filesystem work.
     """
 
-    from MAPS.planner.device_assignment import assigned_device_name
     from MAPS.planner.passes.execution_plan_lowering import lower_execution_plan
     from MAPS.planner.passes.execution_plan_validation import (
         require_valid_execution_plan,
@@ -42,9 +41,6 @@ def plan(
 
     # TODO(maps-repository-architecture 10-11): contract Placement, Transitions,
     # and Execution Plan ownership as their implementations migrate here.
-    for node in graph.nodes:
-        assigned_device_name(node, mesh.tiles)
-
     stage_formation = form_stages(
         graph,
         options.stage_formation,

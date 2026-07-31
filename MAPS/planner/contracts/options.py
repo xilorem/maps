@@ -4,21 +4,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from maps.planning.options import (
+    AllocationOptions as _AllocationOptions,
+    StageFormationOptions as _StageFormationOptions,
+)
 from MAPS.pipeline.execution import ExecutionContract
-
-
-@dataclass(frozen=True)
-class AllocationOptions:
-    """Weights and diagnostics used while allocating virtual stage tiles.
-
-    ``compute_weight`` and ``communication_weight`` scale the two components of
-    the bottleneck objective. They do not change legality: every returned plan
-    must fit in tile L1 memory and the total allocation must fit on the mesh.
-    """
-
-    compute_weight: float = 1.0
-    communication_weight: float = 10.0
-    print_progress: bool = False
 
 
 @dataclass(frozen=True)
@@ -32,21 +22,6 @@ class SpatialMappingOptions:
     print_progress: bool = False
     print_mapping: bool = True
     print_costs: bool = False
-
-
-@dataclass(frozen=True)
-class StageFormationOptions:
-    """Deterministic graph-level stage coalescing configuration.
-
-    Zero selects maximal eligible coalescing, one disables automatic
-    coalescing, and larger values bound automatic groups by canonical nodes.
-    """
-
-    max_stage_nodes: int = 0
-
-    def __post_init__(self) -> None:
-        if self.max_stage_nodes < 0:
-            raise ValueError("max_stage_nodes must be >= 0")
 
 
 @dataclass(frozen=True)
@@ -64,8 +39,10 @@ class PlannerOptions:
     Allocation feasibility and Execution Plan lowering.
     """
 
-    stage_formation: StageFormationOptions = field(default_factory=StageFormationOptions)
-    allocation: AllocationOptions = field(default_factory=AllocationOptions)
+    stage_formation: _StageFormationOptions = field(
+        default_factory=_StageFormationOptions
+    )
+    allocation: _AllocationOptions = field(default_factory=_AllocationOptions)
     spatial_mapping: SpatialMappingOptions = field(default_factory=SpatialMappingOptions)
     execution: ExecutionContract = field(default_factory=ExecutionContract)
     print_execution_plan_cost: bool = True

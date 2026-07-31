@@ -3,7 +3,14 @@ from dataclasses import replace
 import pytest
 
 from maps.hardware import FixedDeviceAssignment
-from maps.planning import ExecutionPlan, PlacementOptions, PlanningOptions, plan
+from maps.planning import (
+    AllocationOptions,
+    ExecutionPlan,
+    PlacementOptions,
+    PlanningOptions,
+    StageFormationOptions,
+    plan,
+)
 from maps.planning.allocation import allocate
 from maps.planning.stage_formation import form_stages
 from maps.planning.stages import StagePlan
@@ -13,6 +20,8 @@ from tests.test_precision_lowering import _gemm_model
 
 
 def test_planning_owns_stage_formation_and_allocation_contracts() -> None:
+    assert StageFormationOptions.__module__ == "maps.planning.options"
+    assert AllocationOptions.__module__ == "maps.planning.options"
     assert form_stages.__module__ == "maps.planning.stage_formation"
     assert allocate.__module__ == "maps.planning.allocation"
     assert StagePlan.__module__ == "maps.planning.stages"

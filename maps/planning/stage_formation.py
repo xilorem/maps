@@ -16,7 +16,7 @@ from maps.planning.stage_validation import (
 
 
 @dataclass(frozen=True)
-class _Unit:
+class _FormationUnit:
     nodes: tuple[Node, ...]
     explicit: bool
     key: object | None = None
@@ -118,7 +118,7 @@ def form_stages(
 
 def _validate_explicit_stage_edges(
     stages: StageFormation,
-    units: tuple[_Unit, ...],
+    units: tuple[_FormationUnit, ...],
     communication_edges: StageCommunicationEdges,
 ) -> None:
     stage_by_node_id = {
@@ -135,7 +135,7 @@ def _validate_explicit_stage_edges(
             raise ValueError(f"explicit stage group {unit.key!r} violates {violation}")
 
 
-def _explicit_units(graph: Graph) -> tuple[_Unit, ...]:
+def _explicit_units(graph: Graph) -> tuple[_FormationUnit, ...]:
     keys = tuple(explicit_stage_group_key(node) for node in graph.nodes)
     positions_by_key: dict[object, list[int]] = {}
     for position, key in enumerate(keys):
@@ -150,17 +150,17 @@ def _explicit_units(graph: Graph) -> tuple[_Unit, ...]:
         if len(nodes) > 1 and not _dependency_connected(nodes):
             raise ValueError(f"explicit stage group {key!r} is not dependency-connected")
 
-    units: list[_Unit] = []
+    units: list[_FormationUnit] = []
     position = 0
     while position < len(graph.nodes):
         key = keys[position]
         if key is None:
-            units.append(_Unit((graph.nodes[position],), explicit=False))
+            units.append(_FormationUnit((graph.nodes[position],), explicit=False))
             position += 1
             continue
         positions = positions_by_key[key]
         nodes = tuple(graph.nodes[index] for index in positions)
-        units.append(_Unit(nodes, explicit=True, key=key))
+        units.append(_FormationUnit(nodes, explicit=True, key=key))
         position = positions[-1] + 1
     return tuple(units)
 

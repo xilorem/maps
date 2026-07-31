@@ -53,6 +53,13 @@ class StageCandidateAnalyzer:
             stage_id: tuple(stage_nodes)
             for stage_id, stage_nodes in stage_formation.items()
         }
+        self._device_names = {
+            stage_id: tuple(
+                assigned_device_name(node, mesh.tiles)
+                for node in stage_nodes
+            )
+            for stage_id, stage_nodes in self._stage_formation.items()
+        }
         self._mesh = mesh
         self._initializer_tensors = initializer_tensors
         self._num_token_slots = num_token_slots
@@ -87,6 +94,7 @@ class StageCandidateAnalyzer:
         )
         best_candidate: StageCandidate | None = None
         payloads = tuple(cast(OpPayload, node.payload) for node in stage_nodes)
+        device_names = self._device_names[stage_id]
         for logical_shape in logical_shape_options(tile_count):
             layouts = resolve_stage_layouts(stage_nodes, submesh, logical_shape)
             node_tile_work = tuple(
@@ -106,10 +114,6 @@ class StageCandidateAnalyzer:
                 node_tile_work,
             )
             cost_models = tuple(payload.cost_model for payload in payloads)
-            device_names = tuple(
-                assigned_device_name(node, submesh.tiles)
-                for node in stage_nodes
-            )
             placement_cycles = tuple(
                 int(
                     cost_model.placement_cost(

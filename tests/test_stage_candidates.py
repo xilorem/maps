@@ -11,6 +11,7 @@ from maps.operations import OpCostModel
 from maps.operations import LayoutRelation
 from maps.operations import OpPayload, sharded_layout
 from maps.operations.elementwise import ElementwiseTileWork, UnaryElementwisePayload
+import maps.planning.allocation.candidates as candidates_module
 from maps.planning.allocation.candidates import StageCandidateAnalyzer
 from tests.noc_utils import rectangular_test_noc, rectangular_test_tiles
 
@@ -144,6 +145,27 @@ def test_stage_candidate_contains_immutable_per_tile_intrinsic_facts() -> None:
         for fact in candidate.tile_facts
     ) == ((0, 4, 32), (1, 4, 32))
     assert candidate.stage_compute == 4
+
+
+def test_stage_candidate_resolves_device_assignment_once(monkeypatch) -> None:
+    node = _unary_node("stage")
+    assignment_calls = 0
+    assigned_device_name = candidates_module.assigned_device_name
+
+    def count_assignment(*args, **kwargs):
+        nonlocal assignment_calls
+        assignment_calls += 1
+        return assigned_device_name(*args, **kwargs)
+
+    monkeypatch.setattr(candidates_module, "assigned_device_name", count_assignment)
+    analyzer = StageCandidateAnalyzer(
+        stage_formation={0: (node,)},
+        mesh=_mesh(2),
+        initializer_tensors=frozenset(),
+    )
+
+    assert analyzer.candidate(stage_id=0, tile_count=2) is not None
+    assert assignment_calls == 1
 
 
 def test_stage_compute_accumulates_layers_per_tile_before_finding_peak() -> None:

@@ -17,8 +17,8 @@ from MAPS.pipeline import ExecutionContract
 from MAPS.planner.contracts.options import (
     PlannerOptions,
     SpatialMappingOptions,
-    AllocationOptions,
 )
+from maps.planning import AllocationOptions
 from MAPS.planner.plan import build_execution_plan_bundle
 
 
