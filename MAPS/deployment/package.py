@@ -315,7 +315,7 @@ def write_deployment_package(
                 print_mapping=False,
                 print_costs=False,
             ),
-            print_pipeline_cost=False,
+            print_execution_plan_cost=False,
         ),
     )
 

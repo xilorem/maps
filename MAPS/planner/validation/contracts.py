@@ -7,14 +7,12 @@ from dataclasses import dataclass, field
 
 @dataclass(frozen=True)
 class PlannerConstraints:
-    """Hard legality constraints checked against a completed Pipeline.
+    """Hard legality constraints checked against a completed Execution Plan.
 
     Capacity flags control whether L1 and L2 residency estimates are enforced.
-    Cross-submesh policy controls transition layout legality.
     """
 
     max_stage_nodes: int = 0
-    allow_cross_submesh_remap: bool = True
     enforce_l1_capacity: bool = True
     enforce_l2_capacity: bool = True
 

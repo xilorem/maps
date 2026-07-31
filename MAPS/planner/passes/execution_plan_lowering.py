@@ -16,7 +16,7 @@ from MAPS.planner.contracts.queries import (
 )
 from MAPS.planner.contracts.stages import StagePlacement, StagePlan
 from MAPS.planner.lowering.context import (
-    PipelineLoweringContext,
+    ExecutionPlanLoweringContext,
     build_lowering_context,
 )
 from MAPS.transitions import bind_transitions
@@ -94,7 +94,7 @@ def _build_stage(
     stage_id: int,
     plan: StagePlan,
     placement: StagePlacement,
-    context: PipelineLoweringContext,
+    context: ExecutionPlanLoweringContext,
     transition_ids: dict[tuple[int, int], int],
     initializer_ids: set[int],
 ) -> Stage:
@@ -124,7 +124,7 @@ def _build_layer(
     node: Node,
     plan: StagePlan,
     placement: StagePlacement,
-    context: PipelineLoweringContext,
+    context: ExecutionPlanLoweringContext,
     transition_ids: dict[tuple[int, int], int],
     initializer_ids: set[int],
 ) -> Layer:
@@ -164,7 +164,7 @@ def _build_layer_input(
     node: Node,
     output_layouts: tuple,
     placement: StagePlacement,
-    context: PipelineLoweringContext,
+    context: ExecutionPlanLoweringContext,
     transition_ids: dict[tuple[int, int], int],
     initializer_ids: set[int],
 ) -> LayerInput:

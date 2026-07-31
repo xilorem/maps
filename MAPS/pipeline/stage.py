@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class Stage:
-    """One scheduled pipeline stage on a placed submesh."""
+    """One scheduled Execution Plan Stage on a placed submesh."""
 
     name: str
     submesh: Submesh

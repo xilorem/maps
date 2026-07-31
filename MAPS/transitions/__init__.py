@@ -1,6 +1,5 @@
-"""Canonical transition compilation plus legacy transition costing."""
+"""Canonical transition compilation, binding, and transport costing."""
 
-from .build import build_transition
 from .compile import bind_transitions, build_virtual_transitions
 from .contracts import (
     InputDestination,
@@ -18,9 +17,6 @@ from .contracts import (
     VirtualTransfer,
     VirtualTransition,
 )
-from .cost import TransitionCost, estimate_transition_cost
-from .model import TransitionFragment, TransitionMode
-from .remap import build_direct_remap_fragments, tile_owned_slices
 from .transport import TransferKind, TransferLeg, TransportCostModel
 
 __all__ = [
@@ -34,9 +30,6 @@ __all__ = [
     "TransferLeg",
     "TransportCostModel",
     "Transition",
-    "TransitionCost",
-    "TransitionFragment",
-    "TransitionMode",
     "VirtualInputDestination",
     "VirtualInputTransition",
     "VirtualIntermediateTransition",
@@ -45,9 +38,5 @@ __all__ = [
     "VirtualTransfer",
     "VirtualTransition",
     "bind_transitions",
-    "build_direct_remap_fragments",
-    "build_transition",
     "build_virtual_transitions",
-    "estimate_transition_cost",
-    "tile_owned_slices",
 ]

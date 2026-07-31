@@ -1,1 +1,1 @@
-"""Implementation modules for planner-side Pipeline legality validation."""
+"""Implementation modules for planner-side Execution Plan validation."""

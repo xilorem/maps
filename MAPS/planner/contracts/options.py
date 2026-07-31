@@ -54,11 +54,11 @@ class PlannerOptions:
     """Complete configuration for planning an already imported graph.
 
     Pass-specific options remain grouped by pass. ``execution`` is shared by
-    workload feasibility and executable-pipeline lowering.
+    workload feasibility and Execution Plan lowering.
     """
 
     stage_selection: StageSelectionOptions = field(default_factory=StageSelectionOptions)
     workload: WorkloadBalancingOptions = field(default_factory=WorkloadBalancingOptions)
     spatial_mapping: SpatialMappingOptions = field(default_factory=SpatialMappingOptions)
     execution: ExecutionContract = field(default_factory=ExecutionContract)
-    print_pipeline_cost: bool = True
+    print_execution_plan_cost: bool = True

@@ -175,7 +175,7 @@ def evaluate_mapping(
 
     Behavior:
         Graph inputs are charged as L2 reads on consumer tiles, graph outputs as
-        L2 writes on producer tiles, and inter-stage fragments as routed L1
+        L2 writes on producer tiles, and inter-stage Transfers as routed L1
         writes on producer tiles.  Strided transfers retain row information for
         the transport model.
 

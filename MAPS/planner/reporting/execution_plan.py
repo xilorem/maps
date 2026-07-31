@@ -3,15 +3,14 @@
 from __future__ import annotations
 
 from MAPS.pipeline.execution_plan import ExecutionPlan
-from MAPS.pipeline.pipeline import Pipeline
 from MAPS.planner.contracts.stages import StagePlacement, StagePlan, virtual_submesh
 from MAPS.planner.spatial.evaluation import evaluate_mapping
 from MAPS.planner.workload.metrics import worst_tile_compute_workload
 from MAPS.transitions import VirtualTransition
 
 
-def print_pipeline_stage_cost(
-    execution_plan: ExecutionPlan | Pipeline,
+def print_execution_plan_stage_cost(
+    execution_plan: ExecutionPlan,
     stage_plans: dict[int, StagePlan],
     placements: dict[int, StagePlacement],
     virtual_transitions: tuple[VirtualTransition, ...],
@@ -45,7 +44,7 @@ def print_pipeline_stage_cost(
         default=0,
     )
     print(
-        "[planner] pipeline_stage_cost="
+        "[planner] execution_plan_stage_cost="
         f"{worst_stage_compute + worst_stage_io} "
         f"(worst_compute={worst_stage_compute} worst_io={worst_stage_io})"
     )

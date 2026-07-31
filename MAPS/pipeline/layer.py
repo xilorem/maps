@@ -1,4 +1,4 @@
-"""Layer IR for scheduled graph nodes inside a pipeline stage."""
+"""Layer IR for scheduled graph nodes inside an Execution Plan Stage."""
 
 from __future__ import annotations
 
@@ -11,28 +11,6 @@ from MAPS.transitions.contracts import InputDestination
 if TYPE_CHECKING:
     from MAPS.core.graph import Node
     from MAPS.core.tensor import Tensor
-
-
-@dataclass(frozen=True)
-class ExternalInput:
-    """Layer input read from an external base address."""
-
-    base_addr: int
-
-    def __post_init__(self) -> None:
-        if self.base_addr <= 0:
-            raise ValueError("external inputs require base_addr > 0")
-
-
-@dataclass(frozen=True)
-class TransitionInput:
-    """Layer input produced by an explicit inter-stage transition."""
-
-    transition_id: int
-
-    def __post_init__(self) -> None:
-        if self.transition_id < 0:
-            raise ValueError("transition inputs require transition_id >= 0")
 
 
 @dataclass(frozen=True)
@@ -66,9 +44,7 @@ class LocalInput:
 
 
 LayerInputSource = (
-    ExternalInput
-    | InitializerInput
-    | TransitionInput
+    InitializerInput
     | TransitionSource
     | LocalInput
 )
@@ -84,17 +60,6 @@ class LayerInput:
     def __post_init__(self) -> None:
         if self.tensor_id < 0:
             raise ValueError("tensor_id must be >= 0")
-
-    @classmethod
-    def external(cls, tensor_id: int, base_addr: int) -> "LayerInput":
-        return cls(tensor_id=tensor_id, source=ExternalInput(base_addr=base_addr))
-
-    @classmethod
-    def transition(cls, tensor_id: int, transition_id: int) -> "LayerInput":
-        return cls(
-            tensor_id=tensor_id,
-            source=TransitionInput(transition_id=transition_id),
-        )
 
     @classmethod
     def initializer(

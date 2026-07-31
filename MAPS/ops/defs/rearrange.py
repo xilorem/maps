@@ -24,7 +24,6 @@ from MAPS.ops.common.layout_relation import LayoutRelation
 from MAPS.ops.common.tile_work import TileWork
 from MAPS.ops.registry import register_op
 from MAPS.ops.spec import LoweredOperation, OpSpec
-from MAPS.transitions.model import TransitionMode
 
 
 def _full_slice(tensor: Tensor) -> TensorSlice:
@@ -169,7 +168,6 @@ class TransposePayload(_RearrangePayload):
     output: Tensor
     permutation: tuple[int, ...]
     work_kind: WorkKind = WorkKind.TRANSPOSE
-    input_transition_mode: TransitionMode = TransitionMode.PERMUTED_REMAP
 
     def __post_init__(self) -> None:
         if self.work_kind is not WorkKind.TRANSPOSE:

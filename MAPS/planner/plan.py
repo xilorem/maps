@@ -25,7 +25,7 @@ from MAPS.planner.passes.execution_plan_validation import (
 from MAPS.planner.passes.spatial_mapping import map_spatially
 from MAPS.planner.passes.stage_selection import form_stages
 from MAPS.planner.passes.workload_balancing import balance_workload
-from MAPS.planner.reporting.pipeline import print_pipeline_stage_cost
+from MAPS.planner.reporting.execution_plan import print_execution_plan_stage_cost
 from MAPS.planner.validation.contracts import PlannerConstraints
 from MAPS.transitions import build_virtual_transitions
 from MAPS.utils.execution_plan_json import write_execution_plan_json
@@ -83,8 +83,8 @@ def plan_graph(
         )
         raise ValueError(f"planner produced an invalid Execution Plan: {details}")
 
-    if options.print_pipeline_cost:
-        print_pipeline_stage_cost(
+    if options.print_execution_plan_cost:
+        print_execution_plan_stage_cost(
             execution_plan,
             stage_plans,
             placements,
@@ -192,8 +192,8 @@ def build_execution_plan_bundle(
         PlannerConstraints(),
         error_prefix="planner produced an invalid Execution Plan",
     )
-    if options.print_pipeline_cost:
-        print_pipeline_stage_cost(
+    if options.print_execution_plan_cost:
+        print_execution_plan_stage_cost(
             execution_plan,
             stage_plans,
             placements,

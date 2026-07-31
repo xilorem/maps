@@ -1,4 +1,4 @@
-"""Indexes used while lowering planner decisions into Pipeline IR."""
+"""Indexes used while lowering planner decisions into Execution Plan IR."""
 
 from __future__ import annotations
 
@@ -9,8 +9,8 @@ from MAPS.planner.contracts.stages import StagePlan
 
 
 @dataclass(frozen=True)
-class PipelineLoweringContext:
-    """Precomputed identity indexes required throughout pipeline lowering.
+class ExecutionPlanLoweringContext:
+    """Precomputed identity indexes required throughout Execution Plan lowering.
 
     Graph nodes and tensors are immutable domain objects, but several lowering
     decisions depend on object identity rather than value equality.  Building
@@ -30,11 +30,11 @@ class PipelineLoweringContext:
 def build_lowering_context(
     graph: Graph,
     stage_plans: dict[int, StagePlan],
-) -> PipelineLoweringContext:
+) -> ExecutionPlanLoweringContext:
     """Index graph ownership and ordering for a consistent lowering operation."""
 
     stage_selection = _resolve_stage_selection(graph, stage_plans)
-    return PipelineLoweringContext(
+    return ExecutionPlanLoweringContext(
         graph=graph,
         stage_selection=stage_selection,
         node_stage_ids={

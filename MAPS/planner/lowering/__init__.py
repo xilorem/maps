@@ -1,1 +1,1 @@
-"""Implementation modules for lowering planner decisions into Pipeline IR."""
+"""Implementation modules for lowering planner decisions into Execution Plan IR."""

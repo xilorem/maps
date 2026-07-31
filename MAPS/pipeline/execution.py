@@ -1,4 +1,4 @@
-"""Runtime buffering contract carried by every planned pipeline."""
+"""Runtime buffering contract carried by every Execution Plan."""
 
 from __future__ import annotations
 

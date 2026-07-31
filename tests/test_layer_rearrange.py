@@ -4,7 +4,6 @@ from MAPS.core.submesh import Submesh
 from MAPS.core.tensor import Tensor
 from MAPS.hw.chips import magia_mesh
 from MAPS.ops.defs.rearrange import ReshapePayload, TransposePayload
-from MAPS.transitions.model import TransitionMode
 
 
 def test_reshape_preserves_rectangular_channel_ownership() -> None:
@@ -37,7 +36,7 @@ def test_transpose_inverse_permutates_required_input_ownership() -> None:
         submesh.tiles[1],
     )
 
-    assert payload.input_transition_mode is TransitionMode.PERMUTED_REMAP
+    assert not hasattr(payload, "input_transition_mode")
     assert tile_work.output_slice.dims == (
         TensorRange(0, 6),
         TensorRange(0, 2),

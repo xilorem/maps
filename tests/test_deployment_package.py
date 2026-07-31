@@ -333,7 +333,7 @@ def test_planner_execution_plan_generates_deterministic_runtime_package(
         PlannerOptions(
             execution=ExecutionContract(num_token_slots=2),
             stage_selection=StageSelectionOptions(max_stage_nodes=1),
-            print_pipeline_cost=False,
+            print_execution_plan_cost=False,
         ),
     )
     serialized = []
