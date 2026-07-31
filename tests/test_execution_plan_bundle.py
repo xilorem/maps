@@ -1,3 +1,4 @@
+from dataclasses import replace
 import json
 
 import numpy as np
@@ -136,3 +137,25 @@ def test_serialized_bundle_validation_detects_weight_corruption(tmp_path) -> Non
 
     with pytest.raises(ValueError, match="checksum mismatch"):
         validate_execution_plan_bundle_files(json_path, weights_path)
+
+
+def test_write_execution_plan_bundle_rejects_initializer_tensor_dtype_mismatch(
+    tmp_path,
+) -> None:
+    bundle = _bundle()
+    weight = replace(
+        bundle.execution_plan.tensors[0],
+        elem_bytes=2,
+        dtype=TensorDType.FLOAT16,
+    )
+    execution_plan = replace(bundle.execution_plan, tensors=(weight,))
+
+    with pytest.raises(
+        ValueError,
+        match="constant 'weight' dtype does not match Execution Plan tensor",
+    ):
+        write_execution_plan_bundle(
+            replace(bundle, execution_plan=execution_plan),
+            tmp_path / "model.json",
+            tmp_path / "model.weights.bin",
+        )

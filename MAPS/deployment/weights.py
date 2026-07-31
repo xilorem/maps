@@ -70,12 +70,14 @@ def pack_weights(
         raise ValueError("weight alignment must be a positive power of two")
 
     tensor_ids: dict[str, int] = {}
+    tensors_by_name = {}
     for tensor_id, tensor in enumerate(execution_plan.tensors):
         if tensor.name in tensor_ids:
             raise ValueError(
                 f"execution plan tensor name '{tensor.name}' is not unique"
             )
         tensor_ids[tensor.name] = tensor_id
+        tensors_by_name[tensor.name] = tensor
 
     missing = sorted(
         constant.name for constant in constants.constants
@@ -85,6 +87,23 @@ def pack_weights(
         raise ValueError(
             f"constants have no Execution Plan tensor ID: {', '.join(missing)}"
         )
+    for constant in constants.constants:
+        tensor = tensors_by_name[constant.name]
+        if not tensor.is_initializer:
+            raise ValueError(
+                f"constant '{constant.name}' maps to a non-initializer "
+                "Execution Plan tensor"
+            )
+        if tensor.dtype is not constant.dtype:
+            raise ValueError(
+                f"constant '{constant.name}' dtype does not match "
+                "Execution Plan tensor"
+            )
+        if tensor.dims != constant.shape:
+            raise ValueError(
+                f"constant '{constant.name}' shape does not match "
+                "Execution Plan tensor"
+            )
 
     ordered = sorted(
         constants.constants,

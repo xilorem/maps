@@ -18,7 +18,10 @@ from MAPS.planner.contracts.options import (
     WorkloadBalancingOptions,
 )
 from MAPS.planner.passes.execution_plan_lowering import lower_execution_plan
-from MAPS.planner.passes.execution_plan_validation import validate_execution_plan
+from MAPS.planner.passes.execution_plan_validation import (
+    require_valid_execution_plan,
+    validate_execution_plan,
+)
 from MAPS.planner.passes.spatial_mapping import map_spatially
 from MAPS.planner.passes.stage_selection import form_stages
 from MAPS.planner.passes.workload_balancing import balance_workload
@@ -159,9 +162,6 @@ def build_execution_plan(
     return execution_plan
 
 
-build_pipeline = build_execution_plan
-
-
 def build_execution_plan_bundle(
     model_path: str | Path,
     arch: Mesh,
@@ -187,13 +187,11 @@ def build_execution_plan_bundle(
         virtual_transitions,
         execution=options.execution,
     )
-    validation = validate_execution_plan(execution_plan, PlannerConstraints())
-    if not validation.is_valid:
-        details = "; ".join(
-            f"{violation.kind}: {violation.message}"
-            for violation in validation.violations
-        )
-        raise ValueError(f"planner produced an invalid Execution Plan: {details}")
+    require_valid_execution_plan(
+        execution_plan,
+        PlannerConstraints(),
+        error_prefix="planner produced an invalid Execution Plan",
+    )
     if options.print_pipeline_cost:
         print_pipeline_stage_cost(
             execution_plan,
@@ -211,6 +209,5 @@ def build_execution_plan_bundle(
 __all__ = [
     "build_execution_plan",
     "build_execution_plan_bundle",
-    "build_pipeline",
     "plan_graph",
 ]

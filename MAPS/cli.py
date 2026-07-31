@@ -39,7 +39,6 @@ def _build_parser() -> argparse.ArgumentParser:
 def _plan_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="maps plan")
     parser.add_argument("model", type=Path)
-    parser.add_argument("--target", choices=("magia-v2",), default="magia-v2")
     parser.add_argument("--mesh", type=_mesh, default=(32, 32))
     parser.add_argument("--token-slots", type=int, default=2)
     parser.add_argument("--max-stage-nodes", type=int, default=0)
@@ -111,10 +110,12 @@ def main(arguments: list[str] | None = None) -> int:
     arguments = list(sys.argv[1:] if arguments is None else arguments)
     parser = _build_parser()
     try:
-        if arguments and arguments[0] == "plan":
-            return _run_plan(arguments[1:])
-        if arguments and arguments[0] == "package":
-            return _run_package(arguments[1:])
+        commands = {
+            "plan": _run_plan,
+            "package": _run_package,
+        }
+        if arguments and (command := commands.get(arguments[0])) is not None:
+            return command(arguments[1:])
         parser.parse_args(arguments)
     except (
         FileExistsError,

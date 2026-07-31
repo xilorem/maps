@@ -62,6 +62,24 @@ def validate_execution_plan(
     return ConstraintReport(tuple(violations))
 
 
+def require_valid_execution_plan(
+    execution_plan: ExecutionPlan,
+    constraints: PlannerConstraints,
+    *,
+    error_prefix: str,
+) -> None:
+    """Raise one detailed error when an Execution Plan violates constraints."""
+
+    report = validate_execution_plan(execution_plan, constraints)
+    if report.is_valid:
+        return
+    details = "; ".join(
+        f"{violation.kind}: {violation.message}"
+        for violation in report.violations
+    )
+    raise ValueError(f"{error_prefix}: {details}")
+
+
 def _validate_stage(
     violations: list[ConstraintViolation],
     stage_id: int,
@@ -549,4 +567,4 @@ def _global_subslice_region(
     )
 
 
-__all__ = ["validate_execution_plan"]
+__all__ = ["require_valid_execution_plan", "validate_execution_plan"]

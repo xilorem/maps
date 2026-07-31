@@ -30,7 +30,7 @@ import MAPS.planner.plan as plan_module
 from MAPS.planner.passes.pipeline_lowering import lower_pipeline
 from MAPS.planner.passes.execution_plan_validation import validate_execution_plan
 from MAPS.planner.passes.validation import validate_constraints
-from MAPS.planner.plan import build_pipeline
+from MAPS.planner.plan import build_execution_plan
 from MAPS.planner.validation.contracts import PlannerConstraints
 from MAPS.utils.pipeline_json import pipeline_json_payload, write_pipeline_json
 from tests.noc_utils import rectangular_test_noc, rectangular_test_tiles
@@ -376,7 +376,7 @@ def test_lower_pipeline_builds_local_inputs_for_grouped_stage_nodes() -> None:
     assert report.is_valid, report.violations
 
 
-def test_build_pipeline_returns_a_valid_execution_plan() -> None:
+def test_build_execution_plan_returns_a_valid_execution_plan() -> None:
     try:
         import onnx
         from onnx import TensorProto, helper
@@ -413,7 +413,7 @@ def test_build_pipeline_returns_a_valid_execution_plan() -> None:
         model = helper.make_model(graph)
         onnx.save(model, model_path)
 
-        execution_plan = build_pipeline(
+        execution_plan = build_execution_plan(
             model_path,
             _mesh_with_l1(2, 2, l1_size=4096),
         )
@@ -457,7 +457,7 @@ def test_build_pipeline_returns_a_valid_execution_plan() -> None:
     assert report.is_valid, report.violations
 
 
-def test_build_pipeline_lowers_softmax_into_edge_communicating_stages() -> None:
+def test_build_execution_plan_lowers_softmax_into_edge_communicating_stages() -> None:
     try:
         import onnx
         from onnx import TensorProto, helper
@@ -473,7 +473,7 @@ def test_build_pipeline_lowers_softmax_into_edge_communicating_stages() -> None:
         model = helper.make_model(graph)
         onnx.save(model, model_path)
 
-        execution_plan = build_pipeline(
+        execution_plan = build_execution_plan(
             model_path,
             _mesh_with_l1(2, 2, l1_size=4096),
         )
@@ -514,7 +514,7 @@ def test_build_pipeline_lowers_softmax_into_edge_communicating_stages() -> None:
     assert report.is_valid, report.violations
 
 
-def test_build_pipeline_exports_direct_conv_semantics(tmp_path: Path) -> None:
+def test_build_execution_plan_exports_direct_conv_semantics(tmp_path: Path) -> None:
     try:
         import onnx
         from onnx import TensorProto, helper
@@ -548,7 +548,7 @@ def test_build_pipeline_exports_direct_conv_semantics(tmp_path: Path) -> None:
     )
     onnx.save(helper.make_model(graph), model_path)
 
-    execution_plan = build_pipeline(
+    execution_plan = build_execution_plan(
         model_path,
         _mesh_with_l1(2, 1, l1_size=4096),
         output_json_path=json_path,
@@ -575,7 +575,7 @@ def test_build_pipeline_exports_direct_conv_semantics(tmp_path: Path) -> None:
     assert "initializations" not in payload
     assert "finalizations" not in payload
     second_json_path = tmp_path / "conv.execution-plan-again.json"
-    independently_planned = build_pipeline(
+    independently_planned = build_execution_plan(
         model_path,
         _mesh_with_l1(2, 1, l1_size=4096),
         output_json_path=second_json_path,
@@ -590,7 +590,7 @@ def test_build_pipeline_exports_direct_conv_semantics(tmp_path: Path) -> None:
     assert layer["node"]["payload"]["work_kind"] == "CONV2D"
 
 
-def test_build_pipeline_disables_spatial_mapping_progress_by_default(monkeypatch) -> None:
+def test_build_execution_plan_disables_mapping_progress_by_default(monkeypatch) -> None:
     try:
         import onnx
         from onnx import TensorProto, helper
@@ -645,7 +645,7 @@ def test_build_pipeline_disables_spatial_mapping_progress_by_default(monkeypatch
         model = helper.make_model(graph)
         onnx.save(model, model_path)
 
-        execution_plan = build_pipeline(
+        execution_plan = build_execution_plan(
             model_path,
             _mesh_with_l1(2, 2, l1_size=4096),
         )
@@ -654,7 +654,7 @@ def test_build_pipeline_disables_spatial_mapping_progress_by_default(monkeypatch
     assert seen["show_progress"] is False
 
 
-def test_build_pipeline_can_enable_spatial_mapping_progress(monkeypatch) -> None:
+def test_build_execution_plan_can_enable_mapping_progress(monkeypatch) -> None:
     try:
         import onnx
         from onnx import TensorProto, helper
@@ -707,7 +707,7 @@ def test_build_pipeline_can_enable_spatial_mapping_progress(monkeypatch) -> None
         model = helper.make_model(graph)
         onnx.save(model, model_path)
 
-        execution_plan = build_pipeline(
+        execution_plan = build_execution_plan(
             model_path,
             _mesh_with_l1(2, 2, l1_size=4096),
             print_spatial_mapping_progress=True,

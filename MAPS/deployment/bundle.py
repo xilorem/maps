@@ -11,7 +11,7 @@ from typing import Any
 from MAPS.core.constants import ConstantStore, validate_constants
 from MAPS.core.graph import Graph
 from MAPS.pipeline.execution_plan import ExecutionPlan
-from MAPS.planner.passes.execution_plan_validation import validate_execution_plan
+from MAPS.planner.passes.execution_plan_validation import require_valid_execution_plan
 from MAPS.planner.validation.contracts import PlannerConstraints
 from MAPS.transitions.contracts import InputTransition, OutputTransition
 from MAPS.utils.execution_plan_json import execution_plan_json_payload
@@ -90,16 +90,11 @@ def write_execution_plan_bundle(
     """Write deterministic Execution Plan JSON and packed weights, then reopen both."""
 
     validate_constants(bundle.graph, bundle.constants)
-    report = validate_execution_plan(
+    require_valid_execution_plan(
         bundle.execution_plan,
         PlannerConstraints(),
+        error_prefix="deployment bundle has an invalid Execution Plan",
     )
-    if not report.is_valid:
-        details = "; ".join(
-            f"{violation.kind}: {violation.message}"
-            for violation in report.violations
-        )
-        raise ValueError(f"deployment bundle has an invalid Execution Plan: {details}")
     packed = pack_weights(bundle.execution_plan, bundle.constants)
     required_l2 = len(packed.data) + _static_activation_bytes(bundle)
     capacity = bundle.execution_plan.mesh.l2_memory.size
