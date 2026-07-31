@@ -1,0 +1,43 @@
+"""Migration-only bridge to the existing concrete chip descriptions."""
+
+from MAPS.hw.chips import (
+    MAGIA_L1_DATA_BYTES,
+    MAGIA_L1_RESERVED_BYTES,
+    MAGIA_L1_SIZE_BYTES,
+    MAGIA_L1_STACK_BYTES,
+    MAGIA_L1_USABLE_BYTES,
+    MAGIA_L2_SIZE_BYTES,
+    MAGIA_MESH_HEIGHT,
+    MAGIA_MESH_WIDTH,
+    N300D_L1_RESERVED_BYTES,
+    N300D_L1_SIZE_BYTES,
+    N300D_L1_STACK_BYTES,
+    N300D_L1_USABLE_BYTES,
+    N300D_L2_SIZE_BYTES,
+    N300D_MESH_HEIGHT,
+    N300D_MESH_WIDTH,
+    magia_mesh,
+    magia_planner_options,
+    wormhole_n300d_mesh,
+)
+
+__all__ = [
+    "MAGIA_L1_DATA_BYTES",
+    "MAGIA_L1_RESERVED_BYTES",
+    "MAGIA_L1_SIZE_BYTES",
+    "MAGIA_L1_STACK_BYTES",
+    "MAGIA_L1_USABLE_BYTES",
+    "MAGIA_L2_SIZE_BYTES",
+    "MAGIA_MESH_HEIGHT",
+    "MAGIA_MESH_WIDTH",
+    "magia_mesh",
+    "magia_planner_options",
+    "N300D_L1_RESERVED_BYTES",
+    "N300D_L1_SIZE_BYTES",
+    "N300D_L1_STACK_BYTES",
+    "N300D_L1_USABLE_BYTES",
+    "N300D_L2_SIZE_BYTES",
+    "N300D_MESH_HEIGHT",
+    "N300D_MESH_WIDTH",
+    "wormhole_n300d_mesh",
+]
