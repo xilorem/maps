@@ -93,11 +93,11 @@ def _signature(
     )
 
 
-def test_typed_capability_is_exact_and_independent_from_throughput() -> None:
-    fp16_add = _signature(
+def test_typed_capability_distinguishes_same_width_types_from_throughput() -> None:
+    fp32_add = _signature(
         WorkKind.ADD,
-        (TensorDType.FLOAT16, TensorDType.FLOAT16),
-        (TensorDType.FLOAT16,),
+        (TensorDType.FLOAT32, TensorDType.FLOAT32),
+        (TensorDType.FLOAT32,),
     )
     int32_add = _signature(
         WorkKind.ADD,
@@ -108,10 +108,10 @@ def test_typed_capability_is_exact_and_independent_from_throughput() -> None:
         name="typed_core",
         kind=DeviceKind.SCALAR,
         throughput={WorkKind.ELEMENTWISE: 1},
-        capabilities=frozenset({fp16_add}),
+        capabilities=frozenset({fp32_add}),
     )
 
-    assert device.supports(fp16_add)
+    assert device.supports(fp32_add)
     assert not device.supports(int32_add)
     assert device.supports(WorkKind.ADD)
 

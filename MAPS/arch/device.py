@@ -149,10 +149,10 @@ class Device:
         object.__setattr__(self, "throughput", dict(self.throughput))
         object.__setattr__(self, "capabilities", frozenset(self.capabilities))
 
-    def supports(self, work_kind: WorkKind | WorkSignature) -> bool:
-        if isinstance(work_kind, WorkSignature):
-            return work_kind in self.capabilities
-        return work_kind in self.throughput or work_kind.fallback_kind in self.throughput
+    def supports(self, work: WorkKind | WorkSignature) -> bool:
+        if isinstance(work, WorkSignature):
+            return work in self.capabilities
+        return work in self.throughput or work.fallback_kind in self.throughput
 
     def cycles(self, work: object) -> int:
         raise NotImplementedError
