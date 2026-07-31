@@ -10,6 +10,7 @@ from MAPS.core.constants import validate_constants
 from MAPS.importers.model import ImportedModel
 
 from .decompose import decompose_graph_with_sources
+from .effects import RewriteEffect, RewriteTransformResult
 from .precision import precision_lower_model
 
 if TYPE_CHECKING:
@@ -21,16 +22,6 @@ class RewriteEvent:
     """One source Node affected by a named Graph Rewrite."""
 
     rewrite_name: str
-    source_node: str
-    original_signature: WorkSignature | None
-    resulting_signatures: tuple[WorkSignature, ...]
-    converted_initializers: tuple[str, ...] = ()
-
-
-@dataclass(frozen=True)
-class _RewriteEffect:
-    """Rewrite provenance before the canonical pass stamps its identity."""
-
     source_node: str
     original_signature: WorkSignature | None
     resulting_signatures: tuple[WorkSignature, ...]
@@ -51,17 +42,11 @@ class GraphRewriteResult:
 
 
 @dataclass(frozen=True)
-class _TransformResult:
-    model: ImportedModel
-    effects: tuple[_RewriteEffect, ...] = ()
-
-
-@dataclass(frozen=True)
 class GraphRewrite:
     """One named Imported Model transformation in the canonical sequence."""
 
     name: str
-    transform: Callable[[ImportedModel], _TransformResult]
+    transform: Callable[[ImportedModel], RewriteTransformResult]
 
     def __post_init__(self) -> None:
         if not self.name:
@@ -91,10 +76,10 @@ def _signature_or_none(node) -> WorkSignature | None:
         return None
 
 
-def _decompose_operations(model: ImportedModel) -> _TransformResult:
+def _decompose_operations(model: ImportedModel) -> RewriteTransformResult:
     graph, decompositions = decompose_graph_with_sources(model.graph)
     events = tuple(
-        _RewriteEffect(
+        RewriteEffect(
             source_node=source.name,
             original_signature=_signature_or_none(source),
             resulting_signatures=tuple(
@@ -103,25 +88,9 @@ def _decompose_operations(model: ImportedModel) -> _TransformResult:
         )
         for source, resulting_nodes in decompositions
     )
-    return _TransformResult(
+    return RewriteTransformResult(
         model=ImportedModel(graph=graph, constants=model.constants),
         effects=events,
-    )
-
-
-def _precision_lower_operations(model: ImportedModel, mesh: Mesh) -> _TransformResult:
-    rewritten, effects = precision_lower_model(model, mesh)
-    return _TransformResult(
-        model=rewritten,
-        effects=tuple(
-            _RewriteEffect(
-                source_node=effect.source_node,
-                original_signature=effect.original_signature,
-                resulting_signatures=effect.resulting_signatures,
-                converted_initializers=effect.converted_initializers,
-            )
-            for effect in effects
-        ),
     )
 
 
@@ -156,7 +125,7 @@ def run_graph_rewrites(
             raise ValueError("Precision Lowering requires a Mesh")
         result = GraphRewrite(
             "precision_lowering",
-            lambda current: _precision_lower_operations(current, mesh),
+            lambda current: precision_lower_model(current, mesh),
         ).apply(rewritten)
         rewritten = result.model
         events.extend(result.events)

@@ -255,6 +255,62 @@ def _fp16_gemm_model() -> ImportedModel:
     )
 
 
+def _initializer_fanout_model() -> ImportedModel:
+    imported = _gemm_model()
+    weight = imported.graph.initializers[0]
+    relu_output = _fp32_tensor("relu_output", weight.dims)
+    relu = Node(
+        "relu",
+        OpKind.ELEMENTWISE,
+        (weight,),
+        (relu_output,),
+        UnaryElementwisePayload("Relu", weight, relu_output),
+    )
+    graph = replace(
+        imported.graph,
+        name="initializer_fanout",
+        tensors=imported.graph.tensors + (relu_output,),
+        nodes=imported.graph.nodes + (relu,),
+        edges=imported.graph.edges
+        + (
+            Edge(weight, None, relu),
+            Edge(relu_output, relu, None),
+        ),
+        outputs=imported.graph.outputs + (relu_output,),
+    )
+    return replace(imported, graph=graph)
+
+
+def _shared_lowered_initializer_model() -> ImportedModel:
+    imported = _gemm_model()
+    x, weight, first_output = imported.graph.tensors
+    second_output = _fp32_tensor("second_output", first_output.dims)
+    first = imported.graph.nodes[0]
+    second = Node(
+        "second",
+        OpKind.GEMM,
+        (x, weight),
+        (second_output,),
+        GemmPayload(x, weight, None, second_output),
+    )
+    graph = replace(
+        imported.graph,
+        name="shared_lowered_initializer",
+        tensors=imported.graph.tensors + (second_output,),
+        nodes=(first, second),
+        edges=(
+            Edge(x, None, first),
+            Edge(weight, None, first),
+            Edge(first_output, first, None),
+            Edge(x, None, second),
+            Edge(weight, None, second),
+            Edge(second_output, second, None),
+        ),
+        outputs=(first_output, second_output),
+    )
+    return replace(imported, graph=graph)
+
+
 def test_magia_precision_lowers_fp32_gemm_and_restores_its_output() -> None:
     bundle = plan_model(
         _gemm_model(),
@@ -579,3 +635,48 @@ def test_precision_lowering_rejects_generated_name_collisions() -> None:
             magia_mesh(width=3, height=1),
             _quiet_magia_options(),
         )
+
+
+def test_shared_initializer_is_cloned_for_only_the_lowered_fanout_path() -> None:
+    bundle = plan_model(
+        _initializer_fanout_model(),
+        magia_mesh(),
+        _quiet_magia_options(),
+    )
+
+    gemm = next(node for node in bundle.graph.nodes if node.name == "gemm")
+    relu = next(node for node in bundle.graph.nodes if node.name == "relu")
+    assert gemm.inputs[1].name == "gemm__input_1_float16"
+    assert gemm.inputs[1].dtype is TensorDType.FLOAT16
+    assert relu.inputs[0].name == "weight"
+    assert relu.inputs[0].dtype is TensorDType.FLOAT32
+    assert [tensor.name for tensor in bundle.graph.initializers] == [
+        "weight",
+        "gemm__input_1_float16",
+    ]
+    assert bundle.constants.get("weight").dtype is TensorDType.FLOAT32
+    assert bundle.constants.get("gemm__input_1_float16").dtype is TensorDType.FLOAT16
+    assert bundle.rewrite_report.events[0].converted_initializers == (
+        "gemm__input_1_float16",
+    )
+
+
+def test_shared_initializer_is_converted_once_for_all_lowered_consumers() -> None:
+    bundle = plan_model(
+        _shared_lowered_initializer_model(),
+        magia_mesh(),
+        _quiet_magia_options(),
+    )
+
+    gemms = tuple(
+        node for node in bundle.graph.nodes if isinstance(node.payload, GemmPayload)
+    )
+    assert len(gemms) == 2
+    assert gemms[0].inputs[1] is gemms[1].inputs[1]
+    assert gemms[0].inputs[1].name == "weight"
+    assert gemms[0].inputs[1].dtype is TensorDType.FLOAT16
+    assert [constant.name for constant in bundle.constants.constants] == ["weight"]
+    assert bundle.constants.get("weight").dtype is TensorDType.FLOAT16
+    assert [
+        event.converted_initializers for event in bundle.rewrite_report.events
+    ] == [("weight",), ()]

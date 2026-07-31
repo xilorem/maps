@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import replace
 
 import numpy as np
 
 from MAPS.arch import Mesh, WorkKind, WorkSignature
-from MAPS.core.constants import Constant
+from MAPS.core.constants import Constant, ConstantStore
 from MAPS.core.dtype import TensorDType, dtype_elem_bytes
 from MAPS.core.graph import Graph, Node, OpKind
 from MAPS.core.tensor import Tensor
@@ -15,21 +15,14 @@ from MAPS.importers.model import ImportedModel
 from MAPS.ops.defs.cast import CastPayload
 from MAPS.ops.defs.gemm import GemmPayload
 
+from .effects import RewriteEffect, RewriteTransformResult
 from .graph_utils import build_graph_edges_from_nodes
-
-
-@dataclass(frozen=True)
-class PrecisionLoweringEffect:
-    source_node: str
-    original_signature: WorkSignature
-    resulting_signatures: tuple[WorkSignature, ...]
-    converted_initializers: tuple[str, ...]
 
 
 def precision_lower_model(
     model: ImportedModel,
     mesh: Mesh,
-) -> tuple[ImportedModel, tuple[PrecisionLoweringEffect, ...]]:
+) -> RewriteTransformResult:
     """Apply every matching Mesh recipe without cost-based selection."""
 
     recipes = {
@@ -38,14 +31,41 @@ def precision_lower_model(
     }
     tensors = {tensor.name: tensor for tensor in model.graph.tensors}
     constants = model.constants
-    initializer_names = {tensor.name for tensor in model.graph.initializers}
+    original_constants = model.constants
+    initializers = {tensor.name: tensor for tensor in model.graph.initializers}
     node_names = {node.name for node in model.graph.nodes}
     lowered_nodes: list[Node] = []
-    effects: list[PrecisionLoweringEffect] = []
+    effects: list[RewriteEffect] = []
+    node_rewrites = {}
+    initializer_target_dtypes: dict[str, list[TensorDType]] = {
+        name: [] for name in initializers
+    }
+    converted_initializer_cache: dict[tuple[str, TensorDType], Tensor] = {}
 
     for node in model.graph.nodes:
         source_signature = WorkSignature.from_node(node)
         recipe = recipes.get(source_signature)
+        if recipe is not None and (
+            len(recipe.target_signature.input_dtypes) != len(node.inputs)
+            or len(recipe.target_signature.output_dtypes) != len(node.outputs)
+        ):
+            raise ValueError(
+                f"node {node.name} Precision Lowering Recipe target arity does "
+                "not match the source operation"
+            )
+        node_rewrites[id(node)] = (source_signature, recipe)
+        for input_index, tensor in enumerate(node.inputs):
+            if tensor.name not in initializers:
+                continue
+            target_dtype = (
+                recipe.target_signature.input_dtypes[input_index]
+                if recipe is not None
+                else tensor.dtype
+            )
+            initializer_target_dtypes[tensor.name].append(target_dtype)
+
+    for node in model.graph.nodes:
+        source_signature, recipe = node_rewrites[id(node)]
         if recipe is None:
             lowered_nodes.append(node)
             continue
@@ -71,18 +91,45 @@ def precision_lower_model(
                 (target_dtype,),
             )
             _require_assignment(mesh, node.name, cast_signature)
-            if tensor.name in initializer_names:
-                converted = replace(
-                    tensor,
-                    elem_bytes=dtype_elem_bytes(target_dtype),
-                    dtype=target_dtype,
-                )
-                tensors[tensor.name] = converted
-                constants = constants.replace(
-                    _convert_constant(constants.get(tensor.name), target_dtype)
-                )
+            if tensor.name in initializers:
+                cache_key = (tensor.name, target_dtype)
+                converted = converted_initializer_cache.get(cache_key)
+                if converted is None:
+                    convert_in_place = all(
+                        required_dtype is target_dtype
+                        for required_dtype in initializer_target_dtypes[tensor.name]
+                    )
+                    converted_name = (
+                        tensor.name
+                        if convert_in_place
+                        else f"{node.name}__input_{input_index}_{target_dtype.value}"
+                    )
+                    converted = replace(
+                        tensor,
+                        name=converted_name,
+                        elem_bytes=dtype_elem_bytes(target_dtype),
+                        dtype=target_dtype,
+                    )
+                    converted_constant = replace(
+                        _convert_constant(
+                            original_constants.get(tensor.name),
+                            target_dtype,
+                        ),
+                        name=converted_name,
+                    )
+                    if convert_in_place:
+                        tensors[tensor.name] = converted
+                        initializers[tensor.name] = converted
+                        constants = constants.replace(converted_constant)
+                    else:
+                        _add_tensor(converted, tensors)
+                        initializers[converted.name] = converted
+                        constants = ConstantStore(
+                            constants.constants + (converted_constant,)
+                        )
+                    converted_initializer_cache[cache_key] = converted
+                    converted_initializers.append(converted.name)
                 target_inputs.append(converted)
-                converted_initializers.append(tensor.name)
                 continue
 
             cast_tensor = Tensor(
@@ -99,9 +146,8 @@ def precision_lower_model(
                 outputs=(cast_tensor,),
                 payload=CastPayload(x=tensor, output=cast_tensor),
             )
-            _require_generated_names(cast_node, cast_tensor, node_names, tensors)
-            node_names.add(cast_node.name)
-            tensors[cast_tensor.name] = cast_tensor
+            _reserve_node_name(cast_node.name, node_names)
+            _add_tensor(cast_tensor, tensors)
             replacement_nodes.append(cast_node)
             target_inputs.append(cast_tensor)
 
@@ -118,9 +164,7 @@ def precision_lower_model(
             )
         )
         for target_output in target_outputs:
-            if target_output.name in tensors:
-                raise ValueError(f"generated tensor name collision: '{target_output.name}'")
-            tensors[target_output.name] = target_output
+            _add_tensor(target_output, tensors)
 
         lowered_gemm = Node(
             name=node.name,
@@ -159,14 +203,12 @@ def precision_lower_model(
                 outputs=(output,),
                 payload=CastPayload(x=target_output, output=output),
             )
-            if restore_node.name in node_names:
-                raise ValueError(f"generated node name collision: '{restore_node.name}'")
-            node_names.add(restore_node.name)
+            _reserve_node_name(restore_node.name, node_names)
             replacement_nodes.append(restore_node)
 
         lowered_nodes.extend(replacement_nodes)
         effects.append(
-            PrecisionLoweringEffect(
+            RewriteEffect(
                 source_node=node.name,
                 original_signature=source_signature,
                 resulting_signatures=tuple(
@@ -187,9 +229,12 @@ def precision_lower_model(
         ),
         inputs=model.graph.inputs,
         outputs=model.graph.outputs,
-        initializers=tuple(tensors[tensor.name] for tensor in model.graph.initializers),
+        initializers=tuple(initializers.values()),
     )
-    return ImportedModel(graph=graph, constants=constants), tuple(effects)
+    return RewriteTransformResult(
+        model=ImportedModel(graph=graph, constants=constants),
+        effects=tuple(effects),
+    )
 
 
 def _require_assignment(
@@ -214,16 +259,16 @@ def _require_assignment(
             )
 
 
-def _require_generated_names(
-    node: Node,
-    tensor: Tensor,
-    node_names: set[str],
-    tensors: dict[str, Tensor],
-) -> None:
-    if node.name in node_names:
-        raise ValueError(f"generated node name collision: '{node.name}'")
+def _reserve_node_name(name: str, node_names: set[str]) -> None:
+    if name in node_names:
+        raise ValueError(f"generated node name collision: '{name}'")
+    node_names.add(name)
+
+
+def _add_tensor(tensor: Tensor, tensors: dict[str, Tensor]) -> None:
     if tensor.name in tensors:
         raise ValueError(f"generated tensor name collision: '{tensor.name}'")
+    tensors[tensor.name] = tensor
 
 
 def _convert_constant(constant: Constant, target_dtype: TensorDType) -> Constant:
@@ -247,4 +292,4 @@ def _convert_constant(constant: Constant, target_dtype: TensorDType) -> Constant
     )
 
 
-__all__ = ["PrecisionLoweringEffect", "precision_lower_model"]
+__all__ = ["precision_lower_model"]
