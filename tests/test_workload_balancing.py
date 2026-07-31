@@ -132,6 +132,25 @@ def test_workload_diagnostics_charge_inter_stage_writes_to_producer_tiles(
     assert "stage=1 nodes=consumer compute=512 communication=0" in output
 
 
+def test_workload_diagnostics_include_graph_input_and_output_transitions(
+    capsys,
+) -> None:
+    node = _gemm_node("gemm", m=8, k=8, n=8)
+    graph = Graph(
+        name="graph_io",
+        tensors=node.inputs + node.outputs,
+        nodes=(node,),
+        inputs=node.inputs,
+        outputs=node.outputs,
+    )
+    mesh = _mesh_with_l1(1, 1, l1_size=4096)
+
+    balance_workload(graph, mesh, {0: (node,)}, debug=True)
+
+    output = capsys.readouterr().out
+    assert "stage=0 nodes=gemm compute=512 communication=384" in output
+
+
 def test_balance_workload_preserves_layout_decisions() -> None:
     node = _gemm_node("gemm", m=16, k=16, n=16)
     graph = Graph(name="g", nodes=(node,))
@@ -257,6 +276,7 @@ def test_balance_workload_reuses_candidates_across_growth_probes(
 
 def test_balance_workload_rejects_growth_that_worsens_global_objective(
     monkeypatch,
+    capsys,
 ) -> None:
     first, first_initializer = _plateau_node("first", 10, 5)
     second, second_initializer = _plateau_node("second", 9, 8)
@@ -283,7 +303,11 @@ def test_balance_workload_rejects_growth_that_worsens_global_objective(
         }[tile_counts]
         return SelectionEvaluation(
             {
-                stage_id: StageMetricBreakdown(0, 0, metric)
+                stage_id: StageMetricBreakdown(
+                    compute_cycles=1000 + stage_id * 100 + tile_counts[stage_id],
+                    communication_cycles=2000 + stage_id * 100 + tile_counts[stage_id],
+                    weighted_bottleneck=metric,
+                )
                 for stage_id, metric in metrics.items()
             }
         )
@@ -294,12 +318,20 @@ def test_balance_workload_rejects_growth_that_worsens_global_objective(
         evaluate_selection,
     )
 
-    plans = balance_workload(graph, mesh, {0: (first,), 1: (second,)})
+    plans = balance_workload(
+        graph,
+        mesh,
+        {0: (first,), 1: (second,)},
+        debug=True,
+    )
 
+    output = capsys.readouterr().out
     assert {stage_id: plan.tile_count for stage_id, plan in plans.items()} == {
         0: 1,
         1: 2,
     }
+    assert "stage=0 nodes=first compute=1001 communication=2001" in output
+    assert "stage=1 nodes=second compute=1102 communication=2102" in output
 
 
 def test_planner_selected_token_slots_control_l1_feasibility() -> None:
@@ -534,6 +566,20 @@ def test_stage_candidate_uses_l1_feasible_logical_shape_for_fixed_tile_count() -
     assert candidate is not None
     assert candidate.plan.tile_count == 6
     assert candidate.plan.logical_shape[0] * candidate.plan.logical_shape[1] == 6
+
+
+def test_balance_workload_grows_an_improving_stage_past_two_tiles() -> None:
+    node = _gemm_node("gemm", m=32, k=32, n=32)
+    graph = Graph(
+        name="growth",
+        tensors=node.inputs + node.outputs,
+        nodes=(node,),
+    )
+    mesh = _mesh_with_l1(4, 4, l1_size=32768)
+
+    plans = balance_workload(graph, mesh, {0: (node,)})
+
+    assert plans[0].tile_count > 2
 
 
 def test_growth_prunes_stage_when_doubling_current_count_does_not_improve(
