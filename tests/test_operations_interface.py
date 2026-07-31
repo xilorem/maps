@@ -73,7 +73,7 @@ from maps.planning.submesh import Submesh
 from MAPS.hw.chips import magia_mesh
 from MAPS.planner.contracts.options import PlannerOptions, SpatialMappingOptions
 from MAPS.planner.plan import plan_graph
-from MAPS.utils.execution_plan_json import execution_plan_json_payload
+from maps.deployment.serialization import execution_plan_json_payload
 
 
 def test_operations_exposes_shared_planning_contracts() -> None:

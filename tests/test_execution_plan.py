@@ -29,7 +29,7 @@ from maps.planning.transitions import (
     OutputTransition,
     build_virtual_transitions,
 )
-from MAPS.utils.execution_plan_json import (
+from maps.deployment.serialization import (
     execution_plan_json_payload,
     write_execution_plan_json,
 )

@@ -9,17 +9,21 @@ import pytest
 
 from MAPS.cli import main
 import MAPS.cli as cli_module
-from MAPS.deployment import (
+from maps.deployment import (
+    build_deployment_bundle,
     validate_deployment_package,
     write_execution_plan_bundle,
     write_deployment_package,
 )
-from MAPS.hw.chips import magia_mesh
-from maps.planning import ExecutionContract
-from MAPS.planner.contracts.options import PlannerOptions
-from maps.planning import StageFormationOptions
-from MAPS.planner.plan import build_execution_plan_bundle
-import MAPS.deployment.package as package_module
+from maps.graph import import_onnx_model, run_graph_rewrites
+from maps.planning import (
+    ExecutionContract,
+    PlanningOptions,
+    StageFormationOptions,
+    plan,
+)
+from maps.target import SpecializationOptions, magia
+import maps.deployment.package as package_module
 
 
 def _write_package(path: Path) -> Path:
@@ -151,21 +155,10 @@ def test_write_deployment_package_verifies_before_atomic_publish(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    model = tmp_path / "model.onnx"
-    model.write_bytes(b"model")
+    model = Path(__file__).parents[1] / "examples" / "simple_three_stage.onnx"
     translator = tmp_path / "maps-translate"
     translator.write_bytes(b"executable")
     output = tmp_path / "published.maps"
-    monkeypatch.setattr(
-        package_module,
-        "build_execution_plan_bundle",
-        lambda *args, **kwargs: object(),
-    )
-
-    def fake_write_bundle(bundle, execution_plan_json, packed_weights):
-        Path(execution_plan_json).write_text("{}")
-        Path(packed_weights).write_bytes(b"MAPS")
-
     def fake_run(arguments, check):
         assert check is True
         package_argument = next(
@@ -175,18 +168,13 @@ def test_write_deployment_package_verifies_before_atomic_publish(
         _write_package(Path(package_argument.split("=", maxsplit=1)[1]))
         return subprocess.CompletedProcess(arguments, 0)
 
-    monkeypatch.setattr(
-        package_module,
-        "write_execution_plan_bundle",
-        fake_write_bundle,
-    )
     monkeypatch.setattr(package_module.subprocess, "run", fake_run)
 
     result = write_deployment_package(
         model,
         output,
-        mesh_width=2,
-        mesh_height=3,
+        mesh_width=4,
+        mesh_height=4,
         maps_translate=translator,
     )
 
@@ -199,29 +187,23 @@ def test_write_deployment_package_leaves_no_output_after_backend_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    model = tmp_path / "model.onnx"
-    model.write_bytes(b"model")
+    model = Path(__file__).parents[1] / "examples" / "simple_three_stage.onnx"
     translator = tmp_path / "maps-translate"
     translator.write_bytes(b"executable")
     output = tmp_path / "failed.maps"
-    monkeypatch.setattr(
-        package_module,
-        "build_execution_plan_bundle",
-        lambda *args, **kwargs: object(),
-    )
-    monkeypatch.setattr(
-        package_module,
-        "write_execution_plan_bundle",
-        lambda bundle, pipeline_json, packed_weights: None,
-    )
-
     def fail(*args, **kwargs):
         raise subprocess.CalledProcessError(1, "maps-translate")
 
     monkeypatch.setattr(package_module.subprocess, "run", fail)
 
     with pytest.raises(subprocess.CalledProcessError):
-        write_deployment_package(model, output, maps_translate=translator)
+        write_deployment_package(
+            model,
+            output,
+            mesh_width=4,
+            mesh_height=4,
+            maps_translate=translator,
+        )
 
     assert not output.exists()
     assert not list(tmp_path.glob(".failed.maps.staging-*"))
@@ -328,13 +310,22 @@ def test_planner_execution_plan_generates_deterministic_runtime_package(
         pytest.skip("maps-translate has not been built")
 
     model = Path(__file__).parents[1] / "examples" / "simple_three_stage.onnx"
-    bundle = build_execution_plan_bundle(
-        model,
-        magia_mesh(width=4, height=4),
-        PlannerOptions(
-            execution=ExecutionContract(num_token_slots=2),
-            stage_formation=StageFormationOptions(max_stage_nodes=1),
-            print_execution_plan_cost=False,
+    mesh = magia.build_mesh(width=4, height=4)
+    specialization = magia.specialize(
+        run_graph_rewrites(import_onnx_model(model)),
+        mesh,
+        SpecializationOptions(enable_precision_lowering=False),
+    )
+    bundle = build_deployment_bundle(
+        specialization,
+        plan(
+            specialization.model.graph,
+            mesh,
+            PlanningOptions(
+                execution=ExecutionContract(num_token_slots=2),
+                stage_formation=StageFormationOptions(max_stage_nodes=1),
+                print_execution_plan_cost=False,
+            ),
         ),
     )
     serialized = []

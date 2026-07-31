@@ -1,16 +1,16 @@
-"""Legacy bridge to the lowercase Deployment interface."""
+"""Deployment Bundles, serialization, packaging, and artifact validation."""
 
-from maps.deployment import (
+from .bundle import (
     DeploymentBundle,
-    PackedInitializer,
-    PackedWeights,
     build_deployment_bundle,
-    pack_weights,
+    validate_execution_plan_bundle_files,
+    write_execution_plan_bundle,
+)
+from .weights import PackedInitializer, PackedWeights, pack_weights
+from .package import (
     package_summary,
     validate_deployment_package,
-    validate_execution_plan_bundle_files,
     write_deployment_package,
-    write_execution_plan_bundle,
 )
 
 __all__ = [

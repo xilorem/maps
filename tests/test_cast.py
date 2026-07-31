@@ -15,7 +15,7 @@ from maps.planning.layouts import LayoutAxisMode
 from maps.planning.submesh import Submesh
 from MAPS.planner.contracts.options import PlannerOptions, SpatialMappingOptions
 from MAPS.planner.plan import plan_graph
-from MAPS.utils.execution_plan_json import execution_plan_json_payload
+from maps.deployment.serialization import execution_plan_json_payload
 
 
 def _tensor(name: str, dtype: TensorDType, dims: tuple[int, ...]) -> Tensor:

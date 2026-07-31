@@ -12,7 +12,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from maps.target.n300d import build_mesh
 from maps.planning import PlanningConstraints, validate_execution_plan
 from MAPS.planner.plan import build_execution_plan
-from MAPS.utils.execution_plan_json import write_execution_plan_json
+from maps.deployment.serialization import write_execution_plan_json
 from MAPS.utils.print_submeshes import print_submeshes
 
 DEFAULT_MODEL_PATH = PROJECT_ROOT / "examples" / "simple_three_stage.onnx"

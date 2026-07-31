@@ -7,7 +7,7 @@ import pytest
 from MAPS.arch import WorkKind, WorkSignature
 from MAPS.core import Constant, ConstantStore, Graph, Node, OpKind, Tensor, TensorDType
 from MAPS.core.graph import Edge
-from MAPS.deployment import write_execution_plan_bundle
+from maps.deployment import write_execution_plan_bundle
 from MAPS.hw.chips import magia_mesh, magia_planner_options
 from MAPS.importers.model import ImportedModel
 from maps.operations.convolution_transforms import Im2ColPayload, OutputReformatPayload

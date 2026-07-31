@@ -6,17 +6,37 @@ import pytest
 
 from MAPS.arch import L1Memory, L2Memory, Mesh
 from MAPS.core import Constant, ConstantStore, Graph, Node, OpKind, Tensor, TensorDType
+from maps.graph import ImportedModel
 from maps.planning.layouts import TensorRange, TensorSlice
 from maps.planning.submesh import Submesh
-from MAPS.deployment import (
+from maps.deployment import (
     DeploymentBundle,
+    PackedInitializer,
+    PackedWeights,
+    build_deployment_bundle,
+    pack_weights,
     validate_execution_plan_bundle_files,
     write_execution_plan_bundle,
+)
+from maps.deployment.serialization import (
+    execution_plan_json_payload,
+    write_execution_plan_json,
 )
 from maps.planning import ExecutionPlan, Layer, LayerInput, Stage
 from maps.operations.elementwise import UnaryElementwisePayload
 from maps.planning.transitions import InputDestination
+from maps.target import SpecializationResult
 from tests.noc_utils import rectangular_test_noc, rectangular_test_tiles
+
+
+def test_deployment_owns_bundle_packing_and_serialization() -> None:
+    assert DeploymentBundle.__module__ == "maps.deployment.bundle"
+    assert build_deployment_bundle.__module__ == "maps.deployment.bundle"
+    assert PackedInitializer.__module__ == "maps.deployment.weights"
+    assert PackedWeights.__module__ == "maps.deployment.weights"
+    assert pack_weights.__module__ == "maps.deployment.weights"
+    assert execution_plan_json_payload.__module__ == "maps.deployment.serialization"
+    assert write_execution_plan_json.__module__ == "maps.deployment.serialization"
 
 
 def _bundle(l2_size: int = 4096) -> DeploymentBundle:
@@ -71,7 +91,10 @@ def _bundle(l2_size: int = 4096) -> DeploymentBundle:
         (2, 2),
         np.array([[1.0, -2.0], [3.5, 4.0]], dtype="<f4").tobytes(),
     ),))
-    return DeploymentBundle(execution_plan, graph, constants)
+    return build_deployment_bundle(
+        SpecializationResult(ImportedModel(graph, constants)),
+        execution_plan,
+    )
 
 
 def _mesh(l2_size: int) -> Mesh:

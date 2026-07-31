@@ -4,7 +4,7 @@ import pytest
 
 from MAPS.arch import L1Memory, L2Memory, Mesh
 from maps.graph import ConstantStore, Graph, ImportedModel, Node, OpKind, Tensor
-from MAPS.deployment import write_execution_plan_bundle
+from maps.deployment import write_execution_plan_bundle
 from maps.graph import import_onnx_model
 from maps.operations.elementwise import UnaryElementwisePayload
 from maps.operations.softmax import SoftmaxPayload

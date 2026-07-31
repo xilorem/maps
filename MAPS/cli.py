@@ -7,7 +7,7 @@ from pathlib import Path
 import subprocess
 import sys
 
-from MAPS.deployment import (
+from maps.deployment import (
     package_summary,
     validate_deployment_package,
     write_deployment_package,

@@ -12,7 +12,7 @@ from maps.operations.gemm import GemmPayload
 from MAPS.planner.contracts.options import PlannerOptions, SpatialMappingOptions
 from maps.planning import PlanningConstraints, validate_execution_plan
 from MAPS.planner.plan import plan_graph, plan_model
-from MAPS.utils.execution_plan_json import execution_plan_json_payload
+from maps.deployment.serialization import execution_plan_json_payload
 
 
 def _typed_tensor(
