@@ -6,8 +6,39 @@ from MAPS.arch import Mesh
 from MAPS.core.graph import Graph, Node
 from MAPS.core.layout import tile_tensor_slice
 from MAPS.planner.contracts.stages import StagePlan, StageSelection, virtual_submesh
+from MAPS.planner.workload.candidates import StageCandidate
 from MAPS.planner.workload.submesh import representative_connected_submesh
 from MAPS.transitions import build_virtual_transitions
+
+
+def evaluate_candidate_selection(
+    candidates: dict[int, StageCandidate],
+    mesh: Mesh,
+    compute_weight: float,
+    communication_weight: float,
+    graph: Graph,
+) -> dict[int, float]:
+    """Evaluate one complete Stage Candidate selection."""
+
+    plans = {
+        stage_id: candidate.plan
+        for stage_id, candidate in candidates.items()
+    }
+    virtual_communication = virtual_communication_cycles(graph, mesh, plans)
+    return {
+        stage_id: max(
+            (
+                max(
+                    compute_weight * fact.compute_cycles,
+                    communication_weight
+                    * virtual_communication[stage_id][fact.tile_id],
+                )
+                for fact in candidate.tile_facts
+            ),
+            default=0.0,
+        )
+        for stage_id, candidate in candidates.items()
+    }
 
 
 def estimate_selection_metrics(

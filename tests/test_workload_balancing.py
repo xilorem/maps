@@ -1,15 +1,17 @@
+from typing import ClassVar
+
 import pytest
 
 from MAPS.arch import L1Memory, L2Memory, Mesh
 from MAPS.core.graph import Edge, Graph, Node, OpKind
 from MAPS.core.submesh import Submesh
 from MAPS.core.tensor import Tensor
+from MAPS.ops.common.cost import OpCostModel
 from MAPS.ops.defs.gemm import GemmPayload
 from MAPS.ops.defs.elementwise import UnaryElementwisePayload
 from MAPS.planner.passes.stage_selection import form_stages
 from MAPS.planner.passes.workload_balancing import balance_workload
 from MAPS.planner.workload.allocation import grow_tile_count_for_stage
-from MAPS.planner.workload import allocation as allocation_module
 from MAPS.planner.workload.metrics import (
     estimate_selection_metrics,
     virtual_communication_cycles,
@@ -150,6 +152,72 @@ def test_balance_workload_starts_from_minimum_l1_feasible_tile_count() -> None:
     plans = balance_workload(graph, mesh, form_stages(graph))
 
     assert plans[0].tile_count == 2
+
+
+class _CountingUnaryPayload(UnaryElementwisePayload):
+    build_calls: ClassVar[int] = 0
+
+    def build_tile_work(self, output_layouts, tile):
+        type(self).build_calls += 1
+        return super().build_tile_work(output_layouts, tile)
+
+
+class _PlateauCostModel(OpCostModel):
+    def __init__(self, unsharded_cycles: int, sharded_cycles: int) -> None:
+        self._unsharded_cycles = unsharded_cycles
+        self._sharded_cycles = sharded_cycles
+
+    def cost(self, tile_work, tile) -> int:
+        del tile
+        if tile_work.output_slices[0].tensor_slice.num_elements == 8:
+            return self._unsharded_cycles
+        return self._sharded_cycles
+
+
+class _PlateauCostPayload(UnaryElementwisePayload):
+    def __init__(
+        self,
+        op_name: str,
+        x: Tensor,
+        output: Tensor,
+        unsharded_cycles: int,
+        sharded_cycles: int,
+    ) -> None:
+        super().__init__(op_name, x, output)
+        object.__setattr__(self, "_unsharded_cycles", unsharded_cycles)
+        object.__setattr__(self, "_sharded_cycles", sharded_cycles)
+
+    @property
+    def cost_model(self) -> OpCostModel:
+        return _PlateauCostModel(
+            self._unsharded_cycles,
+            self._sharded_cycles,
+        )
+
+
+def test_balance_workload_reuses_candidates_across_growth_probes() -> None:
+    _CountingUnaryPayload.build_calls = 0
+    input_tensor = Tensor("input", 1, (8,), 2, is_initializer=True)
+    output = Tensor("output", 1, (8,), 2)
+    node = Node(
+        "stage",
+        OpKind.ELEMENTWISE,
+        inputs=(input_tensor,),
+        outputs=(output,),
+        payload=_CountingUnaryPayload("Relu", input_tensor, output),
+    )
+    graph = Graph(
+        "candidate_reuse",
+        tensors=(input_tensor, output),
+        nodes=(node,),
+        initializers=(input_tensor,),
+    )
+    mesh = _mesh_with_l1(2, 1, l1_size=4096)
+
+    plans = balance_workload(graph, mesh, {0: (node,)})
+
+    assert plans[0].tile_count == 2
+    assert _CountingUnaryPayload.build_calls == 5
 
 
 def test_planner_selected_token_slots_control_l1_feasibility() -> None:
@@ -431,73 +499,59 @@ def test_growth_prefers_tile_count_with_more_physical_shape_options() -> None:
 
 
 def test_growth_prunes_stage_when_doubling_current_count_does_not_improve(
-    monkeypatch,
+    capsys,
 ) -> None:
-    from types import SimpleNamespace
-
-    stage_selection = {
-        0: (Node("no_scale", OpKind.CUSTOM),),
-        1: (Node("scales", OpKind.CUSTOM),),
-    }
-    context = SimpleNamespace(
-        stage_selection=stage_selection,
-        initializer_tensors=frozenset(),
-        graph=Graph("growth", nodes=stage_selection[0] + stage_selection[1]),
+    no_scale_input = Tensor("no_scale_input", 1, (8,), 2, is_initializer=True)
+    no_scale_output = Tensor("no_scale_output", 1, (8,), 2)
+    no_scale = Node(
+        "no_scale",
+        OpKind.ELEMENTWISE,
+        inputs=(no_scale_input,),
+        outputs=(no_scale_output,),
+        payload=_PlateauCostPayload(
+            "Relu",
+            no_scale_input,
+            no_scale_output,
+            unsharded_cycles=30,
+            sharded_cycles=30,
+        ),
+    )
+    scales_input = Tensor("scales_input", 1, (8,), 2, is_initializer=True)
+    scales_output = Tensor("scales_output", 1, (8,), 2)
+    scales = Node(
+        "scales",
+        OpKind.ELEMENTWISE,
+        inputs=(scales_input,),
+        outputs=(scales_output,),
+        payload=_PlateauCostPayload(
+            "Relu",
+            scales_input,
+            scales_output,
+            unsharded_cycles=20,
+            sharded_cycles=10,
+        ),
+    )
+    graph = Graph(
+        "growth",
+        nodes=(no_scale, scales),
+        initializers=(no_scale_input, scales_input),
     )
     mesh = _mesh_with_l1(5, 1, l1_size=4096)
-    plans = {
-        stage_id: SimpleNamespace(logical_shape=(1, 1))
-        for stage_id in stage_selection
-    }
-    calls = []
-    normal_growth_calls = 0
 
-    monkeypatch.setattr(
-        allocation_module,
-        "plan_all_stages",
-        lambda *args, **kwargs: plans,
-    )
-    monkeypatch.setattr(
-        allocation_module,
-        "estimate_selection_metrics",
-        lambda *args, **kwargs: {0: 10.0, 1: 5.0},
-    )
-
-    def fake_growth(**kwargs):
-        nonlocal normal_growth_calls
-        call = (kwargs["stage_id"], kwargs.get("candidate_counts"))
-        calls.append(call)
-        if call == (0, (2,)):
-            return None
-        if call == (1, (2,)):
-            return 2, plans
-        if call == (1, None):
-            normal_growth_calls += 1
-            if normal_growth_calls == 1:
-                return 2, plans
-        return None
-
-    monkeypatch.setattr(
-        allocation_module,
-        "_growth_candidate_for_stage",
-        fake_growth,
-    )
-
-    tile_counts, _ = allocation_module.grow_tile_counts(
-        context,
+    plans = balance_workload(
+        graph,
         mesh,
-        tile_counts={0: 1, 1: 1},
-        compute_weight=1.0,
-        communication_weight=1.0,
-        debug=False,
+        {0: (no_scale,), 1: (scales,)},
+        debug=True,
     )
 
-    assert tile_counts == {0: 1, 1: 2}
-    assert calls.count((0, (2,))) == 1
-    assert (0, None) not in calls
-    assert (1, (2,)) in calls
-    assert (1, None) in calls
-    assert (1, (4,)) in calls
+    output = capsys.readouterr().out
+    assert {stage_id: plan.tile_count for stage_id, plan in plans.items()} == {
+        0: 1,
+        1: 2,
+    }
+    assert "stage=0 doubled_current_tile_count=2 no_improvement prune_stage" in output
+    assert "stage=1 doubled_current_tile_count=4 no_improvement prune_stage" in output
 
 
 def test_best_stage_plan_rejects_tile_work_that_does_not_fit() -> None:

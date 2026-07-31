@@ -5,7 +5,11 @@ from __future__ import annotations
 from MAPS.arch import Mesh
 from MAPS.core.graph import Graph
 from MAPS.planner.contracts.stages import StagePlan, StageSelection
-from MAPS.planner.workload.allocation import grow_tile_counts, seed_tile_counts
+from MAPS.planner.workload.allocation import (
+    grow_stage_candidates,
+    seed_stage_candidates,
+)
+from MAPS.planner.workload.candidates import StageCandidateAnalyzer
 from MAPS.planner.workload.context import build_workload_context
 from MAPS.planner.workload.diagnostics import print_stage_metric_breakdown
 
@@ -43,30 +47,46 @@ def balance_workload(
     """
 
     context = build_workload_context(graph, stage_selection)
-
-    # Assign to every stage the minimum number of tiles that fit into L1 tile memory
-    tile_counts = seed_tile_counts(
-        context,
+    analyzer = StageCandidateAnalyzer(
+        context.stage_selection,
         mesh,
-        debug,
-        num_token_slots=num_token_slots,
+        context.initializer_tensors,
+        num_token_slots,
     )
 
-    # Main tile growing loop
-    tile_counts, plans = grow_tile_counts(
+    candidates = seed_stage_candidates(
         context,
         mesh,
-        tile_counts,
+        analyzer,
+        debug,
+    )
+
+    candidates = grow_stage_candidates(
+        context,
+        mesh,
+        candidates,
+        analyzer,
         compute_weight=compute_weight,
         communication_weight=communication_weight,
         debug=debug,
-        num_token_slots=num_token_slots,
     )
+    plans = {
+        stage_id: candidate.plan
+        for stage_id, candidate in candidates.items()
+    }
 
     if debug:
-        print(f"[workload_balancing] final_tile_counts={tile_counts}")
-        print("[workload_balancing] final_logical_shapes="f"{ {stage_id: plan.logical_shape for stage_id, plan in plans.items()} }")
-        
+        print(
+            "[workload_balancing] "
+            f"final_tile_counts="
+            f"{ {stage_id: plan.tile_count for stage_id, plan in plans.items()} }"
+        )
+        print(
+            "[workload_balancing] "
+            f"final_logical_shapes="
+            f"{ {stage_id: plan.logical_shape for stage_id, plan in plans.items()} }"
+        )
+
     print_stage_metric_breakdown(
         enabled=debug,
         plans=plans,
