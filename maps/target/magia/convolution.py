@@ -17,20 +17,20 @@ from maps.graph import (
     Tensor,
     TensorDType,
 )
+from maps.graph.graph_utils import (
+    add_generated_tensor,
+    build_graph_edges_from_nodes,
+    reserve_generated_node_name,
+)
 from maps.hardware import WorkSignature
+from maps.operations.convolution import Conv2DPayload
 from maps.operations.convolution_transforms import (
     ChannelShardedGemmPayload,
     Im2ColPayload,
     OutputReformatPayload,
 )
-from maps.operations.convolution import Conv2DPayload
 
 from .effects import RewriteEffect, RewriteTransformResult
-from .graph_utils import (
-    add_generated_tensor,
-    build_graph_edges_from_nodes,
-    reserve_generated_node_name,
-)
 
 
 def lower_convolutions(model: ImportedModel) -> RewriteTransformResult:
@@ -224,9 +224,6 @@ def lower_convolutions(model: ImportedModel) -> RewriteTransformResult:
         model=ImportedModel(graph=graph, constants=constants),
         effects=tuple(effects),
     )
-
-
-lower_fp16_convolutions = lower_convolutions
 
 
 def _is_supported_dense_conv(node: Node) -> bool:

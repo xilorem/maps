@@ -1,6 +1,5 @@
 """Concrete planner-ready hardware targets."""
 
-from . import magia, n300d
 from .contracts import (
     PrecisionLoweringRecipe,
     RewriteEvent,
@@ -8,6 +7,7 @@ from .contracts import (
     SpecializationOptions,
     SpecializationResult,
 )
+from . import magia, n300d
 
 __all__ = [
     "PrecisionLoweringRecipe",

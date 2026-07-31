@@ -18,17 +18,17 @@ from maps.graph import (
     TensorDType,
     dtype_elem_bytes,
 )
+from maps.graph.graph_utils import (
+    add_generated_tensor,
+    build_graph_edges_from_nodes,
+    reserve_generated_node_name,
+)
 from maps.hardware import Mesh, WorkKind, WorkSignature
 from maps.operations.cast import CastPayload
 from maps.operations.gemm import GemmPayload
 from maps.target.contracts import PrecisionLoweringRecipe
 
 from .effects import RewriteEffect, RewriteTransformResult
-from .graph_utils import (
-    add_generated_tensor,
-    build_graph_edges_from_nodes,
-    reserve_generated_node_name,
-)
 
 
 def precision_lower_model(
