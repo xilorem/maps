@@ -77,7 +77,7 @@ class StaticSlicePayload(OpPayload):
 
     @property
     def cost_model(self) -> OpCostModel:
-        from MAPS.ops.costs.elementwise_cost import ElementwiseCostModel
+        from maps.operations.elementwise import ElementwiseCostModel
 
         return ElementwiseCostModel(work_kind=self.work_kind)
 

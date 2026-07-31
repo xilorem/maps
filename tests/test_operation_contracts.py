@@ -126,8 +126,7 @@ def _lower_registry_payload(node_name, inputs, outputs, attributes):
 
 
 def test_registry_rejects_collisions_without_partial_registration() -> None:
-    # Loading MatMul first ensures the collision is against a builtin entry.
-    assert get_op("matmul").name == "matmul"
+    # Explicit Graph converters reserve their external names from the registry.
     with pytest.raises(ValueError, match="duplicate ONNX op mapping"):
         register_op(
             OpSpec(

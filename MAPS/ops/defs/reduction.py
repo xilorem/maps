@@ -18,12 +18,16 @@ from MAPS.core.layout import (
 )
 from MAPS.core.submesh import Submesh
 from MAPS.core.tensor import Tensor
-from MAPS.ops.common.payload import CompositeOpPayload, OpPayload, sharded_layout
-from MAPS.ops.common.layout_relation import LayoutRelation
-from MAPS.ops.common.tile_work import TileWork
-from MAPS.ops.common.cost import OpCostModel
+from maps.operations import (
+    CompositeOpPayload,
+    LayoutRelation,
+    OpCostModel,
+    OpPayload,
+    TileWork,
+    sharded_layout,
+)
 from MAPS.ops.defs.collective import AllReducePayload
-from MAPS.ops.defs.elementwise import ElementwiseTileWork
+from maps.operations.elementwise import ElementwiseTileWork
 from MAPS.ops.registry import register_op
 from MAPS.ops.spec import LoweredOperation, OpSpec, STATIC_INPUT_VALUES
 
@@ -173,7 +177,7 @@ class ScalarMultiplyPayload(OpPayload):
 
     @property
     def cost_model(self) -> OpCostModel:
-        from MAPS.ops.costs.elementwise_cost import ElementwiseCostModel
+        from maps.operations.elementwise import ElementwiseCostModel
 
         return ElementwiseCostModel(work_kind=self.work_kind)
 

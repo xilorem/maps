@@ -12,7 +12,7 @@ from MAPS.core.layout import (
     tile_tensor_slice,
 )
 from MAPS.core.tensor import Tensor
-from MAPS.ops.common import OpPayload
+from maps.operations import OpPayload
 from MAPS.pipeline.execution_plan import ExecutionPlan
 from MAPS.pipeline.layer import (
     InitializerInput,

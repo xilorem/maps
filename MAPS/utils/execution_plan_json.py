@@ -13,11 +13,45 @@ from MAPS.core.dtype import TensorDType
 from MAPS.core.submesh import Submesh
 from MAPS.pipeline.execution_plan import ExecutionPlan
 from MAPS.pipeline.layer import InitializerInput, LocalInput, TransitionSource
+from maps.operations.elementwise import (
+    BinaryElementwisePayload,
+    UnaryElementwisePayload,
+)
 from MAPS.transitions.contracts import (
     InputTransition,
     IntermediateTransition,
     OutputTransition,
 )
+
+_RUNTIME_ELEMENTWISE_NAMES = {
+    "abs": "Abs",
+    "add": "Add",
+    "div": "Div",
+    "exp": "Exp",
+    "log": "Log",
+    "mul": "Mul",
+    "neg": "Neg",
+    "pow": "Pow",
+    "relu": "Relu",
+    "sigmoid": "Sigmoid",
+    "sqrt": "Sqrt",
+    "sub": "Sub",
+}
+
+
+def _elementwise_payload(
+    value: BinaryElementwisePayload | UnaryElementwisePayload,
+) -> dict[str, Any]:
+    """Preserve the established runtime names for elementwise Operations."""
+
+    return {
+        field.name: (
+            _RUNTIME_ELEMENTWISE_NAMES[value.op_name]
+            if field.name == "op_name"
+            else _to_jsonable(getattr(value, field.name))
+        )
+        for field in fields(value)
+    }
 
 
 def _to_jsonable(value: Any) -> Any:
@@ -66,6 +100,8 @@ def _to_jsonable(value: Any) -> Any:
             "submesh_id": value.submesh_id,
             "tile_ids": sorted(value.tile_ids),
         }
+    if isinstance(value, (BinaryElementwisePayload, UnaryElementwisePayload)):
+        return _elementwise_payload(value)
     if is_dataclass(value) and not isinstance(value, type):
         return {
             field.name: _to_jsonable(getattr(value, field.name))

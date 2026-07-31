@@ -31,11 +31,15 @@ def _ensure_builtins_registered() -> None:
 def register_op(spec: OpSpec) -> None:
     """Atomically register one operation frontend specification."""
 
+    from maps.graph.onnx.operations import get_operation_converter
+
     existing = _OPS_BY_NAME.get(spec.name)
     if existing is not None:
         raise ValueError(f"duplicate op spec name: {spec.name}")
 
     for onnx_name in spec.onnx_names:
+        if get_operation_converter(onnx_name) is not None:
+            raise ValueError(f"duplicate ONNX op mapping for {onnx_name}")
         existing = _OPS_BY_ONNX_NAME.get(onnx_name)
         if existing is not None:
             raise ValueError(
@@ -60,6 +64,11 @@ def get_op(name: str) -> OpSpec:
 def get_onnx_lowerer(onnx_op_type: str) -> OnnxLoweringFn | None:
     """Return the registered ONNX lowerer for one external op type."""
 
+    from maps.graph.onnx.operations import get_operation_converter
+
+    explicit_converter = get_operation_converter(onnx_op_type)
+    if explicit_converter is not None:
+        return explicit_converter
     _ensure_builtins_registered()
     spec = _OPS_BY_ONNX_NAME.get(onnx_op_type)
     if spec is None:
@@ -84,9 +93,12 @@ def registered_ops() -> tuple[OpSpec, ...]:
 def registered_onnx_lowerers() -> dict[str, OnnxLoweringFn]:
     """Return the registered ONNX lowerers keyed by ONNX op type."""
 
+    from maps.graph.onnx.operations import ONNX_OPERATION_CONVERTERS
+
     _ensure_builtins_registered()
-    return {
+    registered = {
         onnx_name: spec.lower_onnx
         for onnx_name, spec in _OPS_BY_ONNX_NAME.items()
         if spec.lower_onnx is not None
     }
+    return {**registered, **ONNX_OPERATION_CONVERTERS}

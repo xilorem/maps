@@ -8,7 +8,7 @@ from typing import cast
 from MAPS.arch import Mesh
 from MAPS.core.graph import Node
 from MAPS.core.tensor import Tensor
-from MAPS.ops.common.payload import OpPayload
+from maps.operations import OpPayload
 from MAPS.planner.contracts.stages import StagePlan, StageSelection
 from MAPS.planner.device_assignment import assigned_device_name
 from MAPS.planner.workload.layouts import resolve_stage_layouts, verify_stage_locality

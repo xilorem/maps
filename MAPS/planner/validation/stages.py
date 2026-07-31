@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 from MAPS.core.graph import Graph, Node
 from MAPS.core.tensor import Tensor
-from MAPS.ops.common.layout_relation import find_layout_relation
+from maps.operations import find_layout_relation
 from MAPS.planner.contracts.stages import StageSelection
 
 STAGE_GROUP_ID_ATTR = "stage_group_id"

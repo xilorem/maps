@@ -16,11 +16,9 @@ from MAPS.core.layout import (
 )
 from MAPS.core.submesh import Submesh
 from MAPS.core.tensor import Tensor
-from MAPS.ops.common.payload import OpPayload
-from MAPS.ops.common.tile_work import TileWork
-from MAPS.ops.common.cost import OpCostModel
-from MAPS.ops.defs.elementwise import BinaryElementwisePayload
-from MAPS.ops.defs.gemm import GemmPayload
+from maps.operations import OpCostModel, OpPayload, TileWork
+from maps.operations.elementwise import BinaryElementwisePayload
+from maps.operations.gemm import GemmPayload
 
 
 CONV_TRANSFORM_WORK_KINDS: dict[str, WorkKind] = {

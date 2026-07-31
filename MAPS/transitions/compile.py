@@ -13,7 +13,7 @@ from MAPS.core.layout import (
     TensorSubSlice,
 )
 from MAPS.core.tensor import Tensor
-from MAPS.ops.common import OpPayload
+from maps.operations import OpPayload
 from MAPS.planner.contracts.queries import node_output_index, node_output_layouts
 from MAPS.planner.contracts.stages import StagePlacement, StagePlan
 

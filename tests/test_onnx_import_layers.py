@@ -5,7 +5,7 @@ from dataclasses import dataclass
 import pytest
 
 from MAPS.arch import WorkKind
-from maps.graph import OpKind, decompose_graph
+from maps.graph import OpKind, TensorDType, decompose_graph
 from maps.graph.onnx.graph_parser import parse_graph
 from maps.graph.onnx.tensor_parser import onnx_dtype_elem_bytes
 from maps.graph.onnx.utils import build_tensor_producer_table
@@ -16,6 +16,7 @@ from MAPS.ops.defs.direct_conv import Conv2DPayload
 from MAPS.ops.defs.depthwise_conv import DepthwiseConvPayload
 from MAPS.ops.defs.elementwise import BinaryElementwisePayload, UnaryElementwisePayload
 from MAPS.ops.defs.gemm import GemmPayload
+from maps.operations.cast import CastPayload
 from MAPS.ops.defs.group_norm import GroupNormalizationPayload
 from MAPS.ops.registry import get_onnx_lowerer, register_op, registered_ops
 from MAPS.ops.defs.reduction import (
@@ -81,6 +82,27 @@ def test_parse_graph_supports_gemm_bias() -> None:
     assert isinstance(lowered_graph.nodes[0].payload, GemmPayload)
     assert lowered_graph.nodes[0].payload.y is not None
     assert lowered_graph.nodes[0].payload.y.name == "b"
+
+
+def test_parse_graph_explicitly_converts_cast_to_maps_operation() -> None:
+    from onnx import TensorProto, helper
+
+    x = helper.make_tensor_value_info("x", TensorProto.FLOAT, [2, 4])
+    y = helper.make_tensor_value_info("y", TensorProto.FLOAT16, [2, 4])
+    node = helper.make_node(
+        "Cast",
+        inputs=["x"],
+        outputs=["y"],
+        name="cast_0",
+        to=TensorProto.FLOAT16,
+    )
+
+    lowered = parse_graph(helper.make_graph([node], "tiny_cast", [x], [y])).nodes[0]
+
+    assert lowered.kind is OpKind.TRANSFORM
+    assert isinstance(lowered.payload, CastPayload)
+    assert lowered.payload.x.dtype is TensorDType.FLOAT32
+    assert lowered.payload.output.dtype is TensorDType.FLOAT16
 
 
 def test_parse_graph_lowers_conv_to_graph_node() -> None:
@@ -210,7 +232,7 @@ def test_parse_graph_lowers_exp_to_graph_node() -> None:
     assert len(lowered_graph.nodes) == 1
     assert lowered_graph.nodes[0].kind is OpKind.ELEMENTWISE
     assert isinstance(lowered_graph.nodes[0].payload, UnaryElementwisePayload)
-    assert lowered_graph.nodes[0].payload.op_name == "Exp"
+    assert lowered_graph.nodes[0].payload.op_name == "exp"
     assert lowered_graph.nodes[0].payload.x.name == "x"
     assert lowered_graph.nodes[0].payload.output.name == "y"
 
@@ -231,7 +253,7 @@ def test_parse_graph_lowers_log_to_graph_node() -> None:
     assert len(lowered_graph.nodes) == 1
     assert lowered_graph.nodes[0].kind is OpKind.ELEMENTWISE
     assert isinstance(lowered_graph.nodes[0].payload, UnaryElementwisePayload)
-    assert lowered_graph.nodes[0].payload.op_name == "Log"
+    assert lowered_graph.nodes[0].payload.op_name == "log"
     assert lowered_graph.nodes[0].payload.x.name == "x"
     assert lowered_graph.nodes[0].payload.output.name == "y"
 
@@ -257,7 +279,7 @@ def test_parse_graph_lowers_sigmoid_to_graph_node() -> None:
     assert len(lowered_graph.nodes) == 1
     assert lowered_graph.nodes[0].kind is OpKind.ELEMENTWISE
     assert isinstance(lowered_graph.nodes[0].payload, UnaryElementwisePayload)
-    assert lowered_graph.nodes[0].payload.op_name == "Sigmoid"
+    assert lowered_graph.nodes[0].payload.op_name == "sigmoid"
     assert lowered_graph.nodes[0].payload.work_kind is WorkKind.SIGMOID
     assert lowered_graph.nodes[0].payload.x.name == "x"
     assert lowered_graph.nodes[0].payload.output.name == "y"
@@ -278,7 +300,7 @@ def test_parse_graph_lowers_relu_to_elementwise_operation() -> None:
     lowered = parse_graph(graph).nodes[0].payload
 
     assert isinstance(lowered, UnaryElementwisePayload)
-    assert lowered.op_name == "Relu"
+    assert lowered.op_name == "relu"
     assert lowered.work_kind is WorkKind.RELU
 
 
@@ -509,7 +531,7 @@ def test_parse_graph_lowers_binary_elementwise_to_graph_node() -> None:
     assert len(lowered_graph.nodes) == 1
     assert lowered_graph.nodes[0].kind is OpKind.ELEMENTWISE
     assert isinstance(lowered_graph.nodes[0].payload, BinaryElementwisePayload)
-    assert lowered_graph.nodes[0].payload.op_name == "Add"
+    assert lowered_graph.nodes[0].payload.op_name == "add"
 
 
 def test_parse_graph_keeps_softmax_as_high_level_node() -> None:
@@ -836,8 +858,6 @@ def test_op_registry_reports_supported_onnx_ops() -> None:
     assert get_onnx_lowerer("GlobalAveragePool") is not None
     assert get_onnx_lowerer("Flatten") is not None
     assert {spec.name for spec in registered_ops()} >= {
-        "matmul",
-        "gemm",
         "conv",
         "softmax",
         "split",

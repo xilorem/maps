@@ -9,7 +9,7 @@ from MAPS.core.graph import Node, OpKind
 from MAPS.core.tensor import Tensor
 from MAPS.ops.common.payload import CompositeOpPayload
 from MAPS.ops.defs.collective import AllReducePayload
-from MAPS.ops.defs.elementwise import BinaryElementwisePayload, UnaryElementwisePayload
+from maps.operations.elementwise import BinaryElementwisePayload, UnaryElementwisePayload
 from MAPS.ops.defs.reduction import ReductionPayload
 from MAPS.ops.registry import register_op
 from MAPS.ops.spec import OpSpec

@@ -8,7 +8,7 @@ from typing import Callable
 from MAPS.arch import WorkKind
 from MAPS.core.graph import OpKind
 from MAPS.core.tensor import Tensor
-from MAPS.ops.common import OperationPayload
+from maps.operations import OperationPayload
 
 STATIC_INPUT_VALUES = "_static_input_values"
 

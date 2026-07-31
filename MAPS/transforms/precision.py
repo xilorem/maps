@@ -12,8 +12,8 @@ from MAPS.core.dtype import TensorDType, dtype_elem_bytes
 from MAPS.core.graph import Graph, Node, OpKind
 from MAPS.core.tensor import Tensor
 from MAPS.importers.model import ImportedModel
-from MAPS.ops.defs.cast import CastPayload
-from MAPS.ops.defs.gemm import GemmPayload
+from maps.operations.cast import CastPayload
+from maps.operations.gemm import GemmPayload
 
 from .contracts import PrecisionLoweringRecipe
 from .effects import RewriteEffect, RewriteTransformResult

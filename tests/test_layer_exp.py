@@ -77,11 +77,11 @@ def test_exp_cost_uses_exp_capable_device() -> None:
 
 
 def test_elementwise_work_kinds_preserve_operation_identity() -> None:
-    assert UNARY_ELEMENTWISE_OPS["Sigmoid"] is WorkKind.SIGMOID
-    assert UNARY_ELEMENTWISE_OPS["Sqrt"] is WorkKind.SQRT
-    assert UNARY_ELEMENTWISE_OPS["Log"] is WorkKind.LOG
-    assert BINARY_ELEMENTWISE_OPS["Add"] is WorkKind.ADD
-    assert BINARY_ELEMENTWISE_OPS["Div"] is WorkKind.DIV
+    assert UNARY_ELEMENTWISE_OPS["sigmoid"] is WorkKind.SIGMOID
+    assert UNARY_ELEMENTWISE_OPS["sqrt"] is WorkKind.SQRT
+    assert UNARY_ELEMENTWISE_OPS["log"] is WorkKind.LOG
+    assert BINARY_ELEMENTWISE_OPS["add"] is WorkKind.ADD
+    assert BINARY_ELEMENTWISE_OPS["div"] is WorkKind.DIV
 
 
 def test_binary_elementwise_tile_work_supports_broadcasting() -> None:
