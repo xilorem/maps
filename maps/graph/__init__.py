@@ -2,34 +2,73 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+from typing import TYPE_CHECKING
+
 from .constants import Constant, ConstantStore, validate_constants
 from .dtype import TensorDType, dtype_elem_bytes
 from .graph import Edge, Graph, Node, OpKind
 from .model import ImportedModel, validate_imported_model
 from .tensor import TENSOR_MAX_DIMS, Tensor
 
-_ONNX_EXPORTS = {
-    "InputShapes",
-    "import_onnx_graph",
-    "import_onnx_model",
-    "load_onnx_model",
-    "prepare_onnx_model",
-}
-_REWRITE_EXPORTS = {"GraphRewrite", "run_graph_rewrites"}
+if TYPE_CHECKING:
+    from onnx import ModelProto
+
+    from .onnx.preprocess import InputShapes
+    from .rewrites import GraphRewrite
+
+
+def import_onnx_graph(
+    path: str | Path,
+    *,
+    input_shapes: InputShapes | None = None,
+) -> Graph:
+    from .onnx import import_onnx_graph as import_graph
+
+    return import_graph(path, input_shapes=input_shapes)
+
+
+def import_onnx_model(
+    path: str | Path,
+    *,
+    input_shapes: InputShapes | None = None,
+) -> ImportedModel:
+    from .onnx import import_onnx_model as import_model
+
+    return import_model(path, input_shapes=input_shapes)
+
+
+def load_onnx_model(path: str | Path) -> ModelProto:
+    from .onnx import load_onnx_model as load_model
+
+    return load_model(path)
+
+
+def prepare_onnx_model(
+    model: ModelProto,
+    input_shapes: InputShapes | None = None,
+) -> ModelProto:
+    from .onnx import prepare_onnx_model as prepare_model
+
+    return prepare_model(model, input_shapes)
+
+
+def decompose_graph(graph: Graph) -> Graph:
+    from .decompose import decompose_graph as decompose
+
+    return decompose(graph)
+
+
+def run_graph_rewrites(model: ImportedModel) -> ImportedModel:
+    from .rewrites import run_graph_rewrites as run_rewrites
+
+    return run_rewrites(model)
 
 
 def __getattr__(name: str):
-    """Load optional adapters without coupling the logical model to them."""
+    """Load type-like rewrite contracts without coupling the Graph model."""
 
-    if name == "decompose_graph":
-        from .decompose import decompose_graph
-
-        return decompose_graph
-    if name in _ONNX_EXPORTS:
-        from . import onnx
-
-        return getattr(onnx, name)
-    if name in _REWRITE_EXPORTS:
+    if name == "GraphRewrite":
         from . import rewrites
 
         return getattr(rewrites, name)

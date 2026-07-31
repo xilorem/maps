@@ -60,12 +60,3 @@ def build_graph_edges(
         edges.append(Edge(tensor=tensor, src=src_node, dst=None))
 
     return tuple(edges)
-
-
-def build_lowered_graph_edges(
-    nodes: tuple[Node, ...],
-    tensors: dict[str, Tensor],
-    graph_output_names: tuple[str, ...],
-) -> tuple[Edge, ...]:
-    """Build explicit graph edges from an already-lowered node sequence."""
-    return build_graph_edges_from_nodes(nodes, tensors, graph_output_names)

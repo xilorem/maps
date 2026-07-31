@@ -98,7 +98,8 @@ def test_importing_logical_graph_does_not_load_hardware_or_planning() -> None:
         [
             sys.executable,
             "-c",
-            "import maps.graph, sys; "
+            "from maps.graph import import_onnx_model, run_graph_rewrites; "
+            "import sys; "
             "forbidden = tuple(name for name in sys.modules "
             "if name.startswith(('MAPS.arch', 'MAPS.hw', 'MAPS.planner', "
             "'maps.hardware', 'maps.target', 'maps.planning'))); "

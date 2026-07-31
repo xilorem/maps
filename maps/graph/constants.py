@@ -1,6 +1,7 @@
 
 from dataclasses import dataclass
 from math import prod
+from typing import Callable
 
 from maps.graph.dtype import TensorDType
 from maps.graph.dtype import dtype_elem_bytes
@@ -50,7 +51,11 @@ class ConstantStore:
             raise KeyError(name)
         return ConstantStore(tuple(item for item in self.constants if item.name != name))
 
-    def transform(self, name: str, transform) -> "ConstantStore":
+    def transform(
+        self,
+        name: str,
+        transform: Callable[[Constant], Constant],
+    ) -> "ConstantStore":
         return self.replace(transform(self.get(name)))
 
 
