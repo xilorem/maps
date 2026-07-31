@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from typing import cast
+
 from MAPS.core.graph import Node
-from MAPS.core.layout import TensorSlice, tile_tensor_slice
+from MAPS.core.layout import TensorLayout, TensorSlice, tile_tensor_slice
+from MAPS.ops.common.payload import OpPayload
 from MAPS.ops.common.layout_relation import find_layout_relation
 
 
@@ -15,13 +18,14 @@ def resolve_stage_layouts(
     """Resolve one coherent set of output layouts in stage execution order."""
 
     producer_output_by_tensor: dict[object, tuple[Node, int]] = {}
-    layouts_by_node: dict[int, tuple] = {}
-    resolved: list[tuple] = []
+    layouts_by_node: dict[int, tuple[TensorLayout, ...]] = {}
+    resolved: list[tuple[TensorLayout, ...]] = []
     for node in stage_nodes:
+        payload = cast(OpPayload, node.payload)
         standalone = list(
-            node.payload.output_layouts(submesh, logical_shape=logical_shape)
+            payload.output_layouts(submesh, logical_shape=logical_shape)
         )
-        derived_by_output: dict[int, object] = {}
+        derived_by_output: dict[int, TensorLayout] = {}
         for input_index, tensor in enumerate(node.inputs):
             producer_info = producer_output_by_tensor.get(tensor)
             if producer_info is None:
@@ -57,13 +61,16 @@ def verify_stage_locality(
     stage_nodes: tuple[Node, ...],
     node_output_layouts: tuple[tuple, ...],
     submesh,
+    node_tile_work: tuple[tuple, ...],
 ) -> None:
     """Require every local consumer read to fit its same-tile producer slice."""
 
     producer_by_tensor: dict[object, tuple[Node, int, tuple]] = {}
-    for node, layouts in zip(stage_nodes, node_output_layouts):
-        for tile in submesh.tiles:
-            work = node.payload.build_tile_work(output_layouts=layouts, tile=tile)
+    for node_index, (node, layouts) in enumerate(
+        zip(stage_nodes, node_output_layouts)
+    ):
+        for tile_index, tile in enumerate(submesh.tiles):
+            work = node_tile_work[node_index][tile_index]
             required_by_tensor = {
                 reference.tensor: reference.tensor_slice
                 for reference in work.input_slices

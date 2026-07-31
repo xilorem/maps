@@ -42,9 +42,23 @@ def permanent_l1_allocation_for_tile(
         node.payload.build_tile_work(output_layouts=layouts, tile=tile)
         for node, layouts in zip(stage_nodes, node_output_layouts)
     )
+    return permanent_l1_allocation_for_tile_work(
+        works,
+        initializer_tensors,
+        num_token_slots,
+    )
+
+
+def permanent_l1_allocation_for_tile_work(
+    tile_work: tuple,
+    initializer_tensors: frozenset,
+    num_token_slots: int = 2,
+) -> int:
+    """Return permanent L1 bytes from already constructed Layer Tile Work."""
+
     produced_tensors = set()
     allocation_sizes = []
-    for work in works:
+    for work in tile_work:
         for reference in work.input_slices:
             if reference.tensor in produced_tensors:
                 continue
