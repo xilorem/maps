@@ -12,6 +12,8 @@ from MAPS.deployment import (
     validate_deployment_package,
     write_deployment_package,
 )
+from MAPS.hw.chips import magia_mesh
+from MAPS.planner.plan import build_execution_plan
 
 
 def _mesh(value: str) -> tuple[int, int]:
@@ -29,9 +31,19 @@ def _mesh(value: str) -> tuple[int, int]:
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="maps")
     commands = parser.add_subparsers(dest="command", required=True)
-    commands.add_parser(
-        "package", help="build, inspect, or verify a deployment package"
-    )
+    commands.add_parser("plan", help="plan a model and write an Execution Plan")
+    commands.add_parser("package", help="build, inspect, or verify a deployment package")
+    return parser
+
+
+def _plan_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="maps plan")
+    parser.add_argument("model", type=Path)
+    parser.add_argument("--target", choices=("magia-v2",), default="magia-v2")
+    parser.add_argument("--mesh", type=_mesh, default=(32, 32))
+    parser.add_argument("--token-slots", type=int, default=2)
+    parser.add_argument("--max-stage-nodes", type=int, default=0)
+    parser.add_argument("--output", type=Path, required=True)
     return parser
 
 
@@ -81,10 +93,26 @@ def _run_package(arguments: list[str]) -> int:
     return 0
 
 
+def _run_plan(arguments: list[str]) -> int:
+    options = _plan_parser().parse_args(arguments)
+    width, height = options.mesh
+    build_execution_plan(
+        options.model,
+        magia_mesh(width=width, height=height),
+        output_json_path=options.output,
+        max_stage_nodes=options.max_stage_nodes,
+        num_token_slots=options.token_slots,
+    )
+    print(f"Execution Plan: {options.output}")
+    return 0
+
+
 def main(arguments: list[str] | None = None) -> int:
     arguments = list(sys.argv[1:] if arguments is None else arguments)
     parser = _build_parser()
     try:
+        if arguments and arguments[0] == "plan":
+            return _run_plan(arguments[1:])
         if arguments and arguments[0] == "package":
             return _run_package(arguments[1:])
         parser.parse_args(arguments)

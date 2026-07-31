@@ -10,7 +10,7 @@ import numpy as np
 
 from MAPS.core.constants import Constant, ConstantStore
 from MAPS.core.dtype import TensorDType
-from MAPS.pipeline.pipeline import Pipeline
+from MAPS.pipeline.execution_plan import ExecutionPlan
 
 
 DEFAULT_WEIGHT_ALIGNMENT = 16
@@ -59,20 +59,22 @@ def _deployment_bytes(constant: Constant) -> tuple[TensorDType, bytes]:
 
 
 def pack_weights(
-    pipeline: Pipeline,
+    execution_plan: ExecutionPlan,
     constants: ConstantStore,
     *,
     alignment: int = DEFAULT_WEIGHT_ALIGNMENT,
 ) -> PackedWeights:
-    """Convert and pack constants in final pipeline tensor-id order."""
+    """Convert and pack constants in final Execution Plan tensor-id order."""
 
     if alignment <= 0 or alignment & (alignment - 1):
         raise ValueError("weight alignment must be a positive power of two")
 
     tensor_ids: dict[str, int] = {}
-    for tensor_id, tensor in enumerate(pipeline.tensors):
+    for tensor_id, tensor in enumerate(execution_plan.tensors):
         if tensor.name in tensor_ids:
-            raise ValueError(f"pipeline tensor name '{tensor.name}' is not unique")
+            raise ValueError(
+                f"execution plan tensor name '{tensor.name}' is not unique"
+            )
         tensor_ids[tensor.name] = tensor_id
 
     missing = sorted(
@@ -80,7 +82,9 @@ def pack_weights(
         if constant.name not in tensor_ids
     )
     if missing:
-        raise ValueError(f"constants have no pipeline tensor ID: {', '.join(missing)}")
+        raise ValueError(
+            f"constants have no Execution Plan tensor ID: {', '.join(missing)}"
+        )
 
     ordered = sorted(
         constants.constants,

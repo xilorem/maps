@@ -11,7 +11,7 @@ import subprocess
 import tempfile
 from typing import Any, Callable
 
-from MAPS.deployment.bundle import write_pipeline_bundle
+from MAPS.deployment.bundle import write_execution_plan_bundle
 from MAPS.hw.chips import magia_mesh
 from MAPS.pipeline import ExecutionContract
 from MAPS.planner.contracts.options import (
@@ -19,7 +19,7 @@ from MAPS.planner.contracts.options import (
     SpatialMappingOptions,
     WorkloadBalancingOptions,
 )
-from MAPS.planner.plan import build_pipeline_bundle
+from MAPS.planner.plan import build_execution_plan_bundle
 
 
 PACKAGE_SCHEMA_VERSION = 1
@@ -302,7 +302,7 @@ def write_deployment_package(
         f"Planning {model.name} for {target} on a "
         f"{mesh_width}x{mesh_height} mesh..."
     )
-    bundle = build_pipeline_bundle(
+    bundle = build_execution_plan_bundle(
         model,
         magia_mesh(width=mesh_width, height=mesh_height),
         PlannerOptions(
@@ -326,10 +326,14 @@ def write_deployment_package(
         intermediates = staging_parent / "intermediates"
         package = staging_parent / "package"
         intermediates.mkdir()
-        pipeline_json = intermediates / "pipeline.json"
-        packed_weights = intermediates / "pipeline.weights.bin"
+        execution_plan_json = intermediates / "execution-plan.json"
+        packed_weights = intermediates / "execution-plan.weights.bin"
         report("Packing constants and serializing the deployment bundle...")
-        write_pipeline_bundle(bundle, pipeline_json, packed_weights)
+        write_execution_plan_bundle(
+            bundle,
+            execution_plan_json,
+            packed_weights,
+        )
         report("Lowering the bundle to MAGIA runtime artifacts...")
         subprocess.run(
             [
@@ -339,7 +343,7 @@ def write_deployment_package(
                 "--maps-magia-output-stem=model",
                 f"--maps-magia-num-tokens={pipeline_token_capacity}",
                 f"--maps-magia-weights-file={packed_weights}",
-                str(pipeline_json),
+                str(execution_plan_json),
                 "-o",
                 str(intermediates / "discarded.mlir"),
             ],

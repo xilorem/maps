@@ -6,11 +6,15 @@ from dataclasses import dataclass
 from hashlib import sha256
 import json
 from pathlib import Path
+from typing import Any
 
 from MAPS.core.constants import ConstantStore, validate_constants
 from MAPS.core.graph import Graph
-from MAPS.pipeline.pipeline import Pipeline
-from MAPS.utils.pipeline_json import pipeline_json_payload
+from MAPS.pipeline.execution_plan import ExecutionPlan
+from MAPS.planner.passes.execution_plan_validation import validate_execution_plan
+from MAPS.planner.validation.contracts import PlannerConstraints
+from MAPS.transitions.contracts import InputTransition, OutputTransition
+from MAPS.utils.execution_plan_json import execution_plan_json_payload
 
 from .weights import PackedWeights, pack_weights
 
@@ -29,24 +33,25 @@ _DTYPE_BYTES = {
 
 @dataclass(frozen=True)
 class DeploymentBundle:
-    pipeline: Pipeline
+    execution_plan: ExecutionPlan
     graph: Graph
     constants: ConstantStore
 
 
 def _static_activation_bytes(bundle: DeploymentBundle) -> int:
     initializer_ids = {
-        tensor_id for tensor_id, tensor in enumerate(bundle.pipeline.tensors)
+        tensor_id
+        for tensor_id, tensor in enumerate(bundle.execution_plan.tensors)
         if tensor.is_initializer
     }
     external_ids = {
-        initialization.tensor_id for initialization in bundle.pipeline.initializations
-    } | {
-        finalization.tensor_id for finalization in bundle.pipeline.finalizations
+        transition.tensor_id
+        for transition in bundle.execution_plan.transitions
+        if isinstance(transition, (InputTransition, OutputTransition))
     }
     return sum(
-        bundle.pipeline.tensors[tensor_id].num_elements
-        * bundle.pipeline.tensors[tensor_id].elem_bytes
+        bundle.execution_plan.tensors[tensor_id].num_elements
+        * bundle.execution_plan.tensors[tensor_id].elem_bytes
         for tensor_id in external_ids - initializer_ids
     )
 
@@ -55,8 +60,8 @@ def _bundle_payload(
     bundle: DeploymentBundle,
     packed: PackedWeights,
     weights_file: str,
-) -> dict[str, object]:
-    payload = pipeline_json_payload(bundle.pipeline)
+) -> dict[str, Any]:
+    payload = execution_plan_json_payload(bundle.execution_plan)
     payload["bundle"] = {
         "schema_version": BUNDLE_SCHEMA_VERSION,
         "weights_file": weights_file,
@@ -77,17 +82,27 @@ def _bundle_payload(
     return payload
 
 
-def write_pipeline_bundle(
+def write_execution_plan_bundle(
     bundle: DeploymentBundle,
     output_json: str | Path,
     output_weights: str | Path,
 ) -> tuple[Path, Path]:
-    """Write deterministic pipeline JSON and packed weights, then reopen both."""
+    """Write deterministic Execution Plan JSON and packed weights, then reopen both."""
 
     validate_constants(bundle.graph, bundle.constants)
-    packed = pack_weights(bundle.pipeline, bundle.constants)
+    report = validate_execution_plan(
+        bundle.execution_plan,
+        PlannerConstraints(),
+    )
+    if not report.is_valid:
+        details = "; ".join(
+            f"{violation.kind}: {violation.message}"
+            for violation in report.violations
+        )
+        raise ValueError(f"deployment bundle has an invalid Execution Plan: {details}")
+    packed = pack_weights(bundle.execution_plan, bundle.constants)
     required_l2 = len(packed.data) + _static_activation_bytes(bundle)
-    capacity = bundle.pipeline.mesh.l2_memory.size
+    capacity = bundle.execution_plan.mesh.l2_memory.size
     if required_l2 > capacity:
         raise ValueError(
             f"deployment bundle requires {required_l2} L2 bytes but mesh provides {capacity}"
@@ -96,7 +111,7 @@ def write_pipeline_bundle(
     json_path = Path(output_json)
     weights_path = Path(output_weights)
     if json_path.resolve() == weights_path.resolve():
-        raise ValueError("pipeline JSON and weights must use different paths")
+        raise ValueError("Execution Plan JSON and weights must use different paths")
     json_path.parent.mkdir(parents=True, exist_ok=True)
     weights_path.parent.mkdir(parents=True, exist_ok=True)
     payload = _bundle_payload(bundle, packed, weights_path.name)
@@ -105,19 +120,23 @@ def write_pipeline_bundle(
         json.dumps(payload, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
-    validate_pipeline_bundle_files(json_path, weights_path, l2_capacity=capacity)
+    validate_execution_plan_bundle_files(
+        json_path,
+        weights_path,
+        l2_capacity=capacity,
+    )
     return json_path, weights_path
 
 
-def validate_pipeline_bundle_files(
-    pipeline_json: str | Path,
+def validate_execution_plan_bundle_files(
+    execution_plan_json: str | Path,
     weights_file: str | Path,
     *,
     l2_capacity: int | None = None,
 ) -> None:
     """Independently validate serialized bundle metadata against its image."""
 
-    json_path = Path(pipeline_json)
+    json_path = Path(execution_plan_json)
     weights_path = Path(weights_file)
     payload = json.loads(json_path.read_text(encoding="utf-8"))
     data = weights_path.read_bytes()
@@ -191,9 +210,9 @@ def validate_pipeline_bundle_files(
             if tensor.get("is_initializer")
         }
         external_ids = {
-            item["tensor_id"] for item in payload.get("initializations", [])
-        } | {
-            item["tensor_id"] for item in payload.get("finalizations", [])
+            item["tensor_id"]
+            for item in payload.get("transitions", [])
+            if item.get("kind") in {"INPUT", "OUTPUT"}
         }
         activation_bytes = 0
         for tensor_id in external_ids - initializer_ids:

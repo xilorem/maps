@@ -11,7 +11,6 @@ from MAPS.importers.onnx.importer import import_onnx_graph, import_onnx_model
 from MAPS.importers.onnx.preprocess import InputShapes
 from MAPS.pipeline.execution import ExecutionContract
 from MAPS.pipeline.execution_plan import ExecutionPlan
-from MAPS.pipeline.pipeline import Pipeline
 from MAPS.planner.contracts.options import (
     PlannerOptions,
     SpatialMappingOptions,
@@ -20,7 +19,6 @@ from MAPS.planner.contracts.options import (
 )
 from MAPS.planner.passes.execution_plan_lowering import lower_execution_plan
 from MAPS.planner.passes.execution_plan_validation import validate_execution_plan
-from MAPS.planner.passes.pipeline_lowering import lower_pipeline
 from MAPS.planner.passes.spatial_mapping import map_spatially
 from MAPS.planner.passes.stage_selection import form_stages
 from MAPS.planner.passes.workload_balancing import balance_workload
@@ -123,7 +121,7 @@ def _plan_decisions(
     return stage_plans, virtual_transitions, placements
 
 
-def build_pipeline(
+def build_execution_plan(
     model_path: str | Path,
     mesh: Mesh,
     print_workload_balancing: bool = False,
@@ -135,7 +133,7 @@ def build_pipeline(
     max_stage_nodes: int = 0,
     num_token_slots: int = 2,
 ) -> ExecutionPlan:
-    """Main planning entry point"""
+    """Import and plan one model as a unified Execution Plan."""
 
     graph = import_onnx_graph(model_path, input_shapes=input_shapes)
     execution_plan = plan_graph(
@@ -161,7 +159,10 @@ def build_pipeline(
     return execution_plan
 
 
-def build_pipeline_bundle(
+build_pipeline = build_execution_plan
+
+
+def build_execution_plan_bundle(
     model_path: str | Path,
     arch: Mesh,
     options: PlannerOptions,
@@ -178,25 +179,38 @@ def build_pipeline_bundle(
         arch,
         options,
     )
-    pipeline = lower_pipeline(
+    execution_plan = lower_execution_plan(
         model.graph,
         arch,
         stage_plans,
         placements,
+        virtual_transitions,
         execution=options.execution,
     )
+    validation = validate_execution_plan(execution_plan, PlannerConstraints())
+    if not validation.is_valid:
+        details = "; ".join(
+            f"{violation.kind}: {violation.message}"
+            for violation in validation.violations
+        )
+        raise ValueError(f"planner produced an invalid Execution Plan: {details}")
     if options.print_pipeline_cost:
         print_pipeline_stage_cost(
-            pipeline,
+            execution_plan,
             stage_plans,
             placements,
             virtual_transitions,
         )
     return DeploymentBundle(
-        pipeline=pipeline,
+        execution_plan=execution_plan,
         graph=model.graph,
         constants=model.constants,
     )
 
 
-__all__ = ["build_pipeline", "build_pipeline_bundle", "plan_graph"]
+__all__ = [
+    "build_execution_plan",
+    "build_execution_plan_bundle",
+    "build_pipeline",
+    "plan_graph",
+]

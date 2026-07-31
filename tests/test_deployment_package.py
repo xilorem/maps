@@ -11,8 +11,13 @@ from MAPS.cli import main
 import MAPS.cli as cli_module
 from MAPS.deployment import (
     validate_deployment_package,
+    write_execution_plan_bundle,
     write_deployment_package,
 )
+from MAPS.hw.chips import magia_mesh
+from MAPS.pipeline import ExecutionContract
+from MAPS.planner.contracts.options import PlannerOptions, StageSelectionOptions
+from MAPS.planner.plan import build_execution_plan_bundle
 import MAPS.deployment.package as package_module
 
 
@@ -150,10 +155,14 @@ def test_write_deployment_package_verifies_before_atomic_publish(
     translator = tmp_path / "maps-translate"
     translator.write_bytes(b"executable")
     output = tmp_path / "published.maps"
-    monkeypatch.setattr(package_module, "build_pipeline_bundle", lambda *args, **kwargs: object())
+    monkeypatch.setattr(
+        package_module,
+        "build_execution_plan_bundle",
+        lambda *args, **kwargs: object(),
+    )
 
-    def fake_write_bundle(bundle, pipeline_json, packed_weights):
-        Path(pipeline_json).write_text("{}")
+    def fake_write_bundle(bundle, execution_plan_json, packed_weights):
+        Path(execution_plan_json).write_text("{}")
         Path(packed_weights).write_bytes(b"MAPS")
 
     def fake_run(arguments, check):
@@ -165,7 +174,11 @@ def test_write_deployment_package_verifies_before_atomic_publish(
         _write_package(Path(package_argument.split("=", maxsplit=1)[1]))
         return subprocess.CompletedProcess(arguments, 0)
 
-    monkeypatch.setattr(package_module, "write_pipeline_bundle", fake_write_bundle)
+    monkeypatch.setattr(
+        package_module,
+        "write_execution_plan_bundle",
+        fake_write_bundle,
+    )
     monkeypatch.setattr(package_module.subprocess, "run", fake_run)
 
     result = write_deployment_package(
@@ -190,10 +203,14 @@ def test_write_deployment_package_leaves_no_output_after_backend_failure(
     translator = tmp_path / "maps-translate"
     translator.write_bytes(b"executable")
     output = tmp_path / "failed.maps"
-    monkeypatch.setattr(package_module, "build_pipeline_bundle", lambda *args, **kwargs: object())
     monkeypatch.setattr(
         package_module,
-        "write_pipeline_bundle",
+        "build_execution_plan_bundle",
+        lambda *args, **kwargs: object(),
+    )
+    monkeypatch.setattr(
+        package_module,
+        "write_execution_plan_bundle",
         lambda bundle, pipeline_json, packed_weights: None,
     )
 
@@ -256,3 +273,118 @@ def test_package_build_command_parses_target_options(
     assert captured["num_token_slots"] == 4
     assert captured["pipeline_token_capacity"] == 2
     assert f"Deployment package: {output}" in capsys.readouterr().out
+
+
+def test_plan_command_writes_an_execution_plan(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured = {}
+
+    def fake_build(model, mesh, **options):
+        captured.update(model=model, mesh=mesh, **options)
+        return object()
+
+    monkeypatch.setattr(cli_module, "build_execution_plan", fake_build)
+    model = tmp_path / "model.onnx"
+    output = tmp_path / "model.execution-plan.json"
+
+    assert main([
+        "plan",
+        str(model),
+        "--mesh",
+        "2x3",
+        "--token-slots",
+        "4",
+        "--max-stage-nodes",
+        "1",
+        "--output",
+        str(output),
+    ]) == 0
+
+    assert captured["model"] == model
+    assert captured["mesh"].width == 2
+    assert captured["mesh"].height == 3
+    assert captured["num_token_slots"] == 4
+    assert captured["max_stage_nodes"] == 1
+    assert captured["output_json_path"] == output
+    assert f"Execution Plan: {output}" in capsys.readouterr().out
+
+
+def test_planner_execution_plan_generates_deterministic_runtime_package(
+    tmp_path: Path,
+) -> None:
+    translator = (
+        Path(__file__).parents[1]
+        / "maps-ir"
+        / "build"
+        / "tools"
+        / "maps-translate"
+        / "maps-translate"
+    )
+    if not translator.is_file():
+        pytest.skip("maps-translate has not been built")
+
+    model = Path(__file__).parents[1] / "examples" / "simple_three_stage.onnx"
+    bundle = build_execution_plan_bundle(
+        model,
+        magia_mesh(width=4, height=4),
+        PlannerOptions(
+            execution=ExecutionContract(num_token_slots=2),
+            stage_selection=StageSelectionOptions(max_stage_nodes=1),
+            print_pipeline_cost=False,
+        ),
+    )
+    serialized = []
+    packages = []
+    for name in ("first", "second"):
+        directory = tmp_path / name
+        execution_plan_json, packed_weights = write_execution_plan_bundle(
+            bundle,
+            directory / "model.execution-plan.json",
+            directory / "model.execution-plan.weights.bin",
+        )
+        payload = json.loads(execution_plan_json.read_text())
+        package = directory / "model.maps"
+        subprocess.run(
+            [
+                str(translator),
+                "--json-to-magia-package",
+                f"--maps-magia-package-dir={package}",
+                "--maps-magia-output-stem=model",
+                f"--maps-magia-weights-file={packed_weights}",
+                str(execution_plan_json),
+                "-o",
+                str(directory / "discarded.mlir"),
+            ],
+            check=True,
+        )
+        validate_deployment_package(package)
+        serialized.append((execution_plan_json.read_bytes(), packed_weights.read_bytes()))
+        packages.append(package)
+
+    assert serialized[0] == serialized[1]
+    assert [transition["kind"] for transition in payload["transitions"]] == [
+        "INPUT",
+        "INTERMEDIATE",
+        "INTERMEDIATE",
+        "OUTPUT",
+    ]
+    assert any(
+        layer_input["source"]["kind"] == "INITIALIZER"
+        for stage in payload["stages"]
+        for layer in stage["layers"]
+        for layer_input in layer["inputs"]
+    )
+    assert all(
+        (packages[0] / artifact).read_bytes()
+        == (packages[1] / artifact).read_bytes()
+        for artifact in (
+            "manifest.json",
+            "model.h",
+            "model_data.c",
+            "model_weights.S",
+            "model.weights.bin",
+        )
+    )

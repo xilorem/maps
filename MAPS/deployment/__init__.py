@@ -2,8 +2,8 @@
 
 from .bundle import (
     DeploymentBundle,
-    validate_pipeline_bundle_files,
-    write_pipeline_bundle,
+    validate_execution_plan_bundle_files,
+    write_execution_plan_bundle,
 )
 from .weights import PackedInitializer, PackedWeights, pack_weights
 from .package import (
@@ -19,7 +19,7 @@ __all__ = [
     "pack_weights",
     "package_summary",
     "validate_deployment_package",
-    "validate_pipeline_bundle_files",
+    "validate_execution_plan_bundle_files",
     "write_deployment_package",
-    "write_pipeline_bundle",
+    "write_execution_plan_bundle",
 ]

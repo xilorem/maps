@@ -6,15 +6,15 @@ from collections import defaultdict
 import re
 
 from MAPS.arch import EndpointKind
-from MAPS.pipeline.pipeline import Pipeline
+from MAPS.pipeline.execution_plan import ExecutionPlan
 
 
-def print_submeshes(pipeline: Pipeline) -> None:
-    """Print one pipeline's submesh placement on the attached NoC."""
+def print_submeshes(execution_plan: ExecutionPlan) -> None:
+    """Print one Execution Plan's submesh placement on the attached NoC."""
 
-    mesh = pipeline.mesh
+    mesh = execution_plan.mesh
     submesh_labels_by_tile_id: dict[int, list[str]] = defaultdict(list)
-    for stage in pipeline.stages:
+    for stage in execution_plan.stages:
         label = str(stage.submesh.submesh_id)
         for tile in stage.submesh.tiles:
             submesh_labels_by_tile_id[tile.tile_id].append(label)
