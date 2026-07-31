@@ -69,7 +69,12 @@ def lower_fp16_convolutions(model: ImportedModel) -> RewriteTransformResult:
             packed_name = (
                 op.w.name
                 if replace_initializer
-                else f"{op.w.name}__conv_to_gemm_packed"
+                else _generated_name(
+                    node.name,
+                    "input_1",
+                    "weight_packed",
+                    op.w.dtype,
+                )
             )
             packed_weight, packed_constant = _pack_weight(
                 op.w,
@@ -92,14 +97,24 @@ def lower_fp16_convolutions(model: ImportedModel) -> RewriteTransformResult:
         matrix_rows = n * output_h * output_w
         matrix_depth = input_channels * kernel_h * kernel_w
         im2col_output = Tensor(
-            name=f"{node.name}__im2col_output",
+            name=_generated_name(
+                node.name,
+                "input_0",
+                "im2col_output",
+                op.x.dtype,
+            ),
             rank=2,
             dims=(matrix_rows, matrix_depth),
             elem_bytes=op.x.elem_bytes,
             dtype=op.x.dtype,
         )
         gemm_output = Tensor(
-            name=f"{node.name}__gemm_output",
+            name=_generated_name(
+                node.name,
+                "output_0",
+                "gemm_result",
+                op.output.dtype,
+            ),
             rank=2,
             dims=(matrix_rows, output_channels),
             elem_bytes=op.output.elem_bytes,
@@ -110,7 +125,12 @@ def lower_fp16_convolutions(model: ImportedModel) -> RewriteTransformResult:
 
         stage_group = f"{node.name}::conv_to_gemm"
         im2col = Node(
-            name=f"{node.name}__im2col",
+            name=_generated_name(
+                node.name,
+                "input_0",
+                "im2col",
+                op.x.dtype,
+            ),
             kind=OpKind.TRANSFORM,
             inputs=(op.x,),
             outputs=(im2col_output,),
@@ -128,7 +148,12 @@ def lower_fp16_convolutions(model: ImportedModel) -> RewriteTransformResult:
             (op.b,) if op.b is not None else ()
         )
         gemm = Node(
-            name=f"{node.name}__gemm",
+            name=_generated_name(
+                node.name,
+                "output_0",
+                "gemm",
+                op.output.dtype,
+            ),
             kind=OpKind.GEMM,
             inputs=gemm_inputs,
             outputs=(gemm_output,),
@@ -141,7 +166,12 @@ def lower_fp16_convolutions(model: ImportedModel) -> RewriteTransformResult:
             attributes={"stage_group_id": stage_group, "conv_step": "gemm"},
         )
         output_reformat = Node(
-            name=f"{node.name}__output_reformat",
+            name=_generated_name(
+                node.name,
+                "output_0",
+                "reformat",
+                op.output.dtype,
+            ),
             kind=OpKind.TRANSFORM,
             inputs=(gemm_output,),
             outputs=(op.output,),
@@ -192,6 +222,15 @@ def _is_fp16_dense_conv(node: Node) -> bool:
         tensor.dtype is TensorDType.FLOAT16
         for tensor in node.inputs + node.outputs
     )
+
+
+def _generated_name(
+    source_node: str,
+    operand_position: str,
+    role: str,
+    target_dtype: TensorDType,
+) -> str:
+    return f"{source_node}__{operand_position}_{role}_{target_dtype.value}"
 
 
 def _pack_weight(

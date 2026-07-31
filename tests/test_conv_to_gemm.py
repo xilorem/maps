@@ -114,9 +114,9 @@ def test_magia_lowers_fp16_conv_to_auditable_redmule_execution(
     assert "bytes-read/bytes-written/core-L1" in diagnostics
 
     assert [node.name for node in bundle.graph.nodes] == [
-        "conv__im2col",
-        "conv__gemm",
-        "conv__output_reformat",
+        "conv__input_0_im2col_float16",
+        "conv__output_0_gemm_float16",
+        "conv__output_0_reformat_float16",
     ]
     im2col, gemm, output_reformat = bundle.graph.nodes
     assert isinstance(im2col.payload, Im2ColPayload)
@@ -148,9 +148,9 @@ def test_magia_lowers_fp16_conv_to_auditable_redmule_execution(
     )
     assert [layer.device_name for layer in layers] == ["core", "redmule", "core"]
     assert [layer.node.name for layer in layers] == [
-        "conv__im2col",
-        "conv__gemm",
-        "conv__output_reformat",
+        "conv__input_0_im2col_float16",
+        "conv__output_0_gemm_float16",
+        "conv__output_0_reformat_float16",
     ]
 
     tile = bundle.execution_plan.mesh.tile(0, 0)
