@@ -1,6 +1,6 @@
 """Source-independent multidirectional broadcasting behavior."""
 
-from maps.planning.layouts import TensorRange, TensorSlice
+from maps.planning.mapping import TensorRange, TensorSlice
 from maps.graph import Tensor
 
 

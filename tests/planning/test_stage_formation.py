@@ -4,7 +4,7 @@ from maps.graph import Graph, Node, OpKind
 from maps.graph import Tensor
 from maps.operations.elementwise import BinaryElementwisePayload, UnaryElementwisePayload
 from maps.planning import StageFormationOptions
-from maps.planning.stage_formation import form_stages
+from maps.planning.stages import form_stages
 
 
 def test_form_stages_defaults_to_singleton_groups() -> None:

@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from maps.hardware import Device, Tile, WorkKind
-from maps.planning.layouts import (
+from maps.planning.mapping import (
     LayoutAxis,
     LayoutAxisMode,
     TensorLayout,
@@ -15,7 +15,7 @@ from maps.planning.layouts import (
     tile_tensor_slice,
     tensor_slice_num_bytes,
 )
-from maps.planning.submesh import Submesh
+from maps.planning.mapping import Submesh
 from maps.graph import Tensor
 from .contracts import OpCostModel, OpPayload, TileWork
 from .elementwise import BinaryElementwisePayload

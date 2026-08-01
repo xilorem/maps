@@ -5,7 +5,6 @@ from __future__ import annotations
 from maps.graph import Graph
 from maps.hardware import Mesh
 
-from .construction import construct_execution_plan
 from .execution_plan import (
     ExecutionContract,
     ExecutionPlan,
@@ -17,6 +16,8 @@ from .execution_plan import (
     LocalInput,
     Stage,
     TransitionSource,
+    construct_execution_plan,
+    print_execution_plan_stage_cost,
 )
 from .options import (
     AllocationOptions,
@@ -24,7 +25,6 @@ from .options import (
     PlanningOptions,
     StageFormationOptions,
 )
-from .reporting import print_execution_plan_stage_cost
 from .validation import (
     ConstraintReport,
     ConstraintViolation,
@@ -49,7 +49,7 @@ def plan(
     from maps.planning.placement import place
     from maps.planning.transitions import build_virtual_transitions
     from maps.planning.allocation import allocate
-    from maps.planning.stage_formation import form_stages
+    from maps.planning.stages import form_stages
 
     options = options or PlanningOptions()
 

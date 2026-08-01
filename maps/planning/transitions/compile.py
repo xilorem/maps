@@ -6,14 +6,15 @@ from typing import cast
 
 from maps.graph import Graph, Node, Tensor
 from maps.hardware import Tile
-from maps.planning.layouts import (
+from maps.planning.mapping import (
     TensorLayout,
     TensorRange,
     TensorSlice,
     TensorSubSlice,
+    tile_tensor_slice,
 )
 from maps.operations.contracts import OpPayload
-from maps.planning.queries import node_output_index, node_output_layouts
+from maps.planning.stages import node_output_index, node_output_layouts
 from maps.planning.stages import StagePlacement, StagePlan
 
 from .contracts import (
@@ -32,7 +33,6 @@ from .contracts import (
     VirtualTransfer,
     VirtualTransition,
 )
-from .remap import tile_owned_slices
 
 
 def build_virtual_transitions(
@@ -349,3 +349,21 @@ def _relative_subslice(
             )
         ),
     )
+
+
+def tile_owned_slices(tensor: Tensor, layout: TensorLayout) -> tuple[tuple[Tile, TensorSlice], ...]:
+    """Return the concrete slice owned by each tile in one submesh."""
+
+    owned: list[tuple[Tile, TensorSlice]] = []
+    for tile in layout.submesh.tiles:
+        owned.append(
+            (
+                tile,
+                tile_tensor_slice(
+                    tensor=tensor,
+                    layout=layout,
+                    tile=tile,
+                ),
+            )
+        )
+    return tuple(owned)

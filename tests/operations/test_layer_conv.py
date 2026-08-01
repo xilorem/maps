@@ -2,8 +2,8 @@ from maps.hardware import L1Memory, Tile, WorkKind
 from maps.target.magia import build_mesh as magia_mesh
 from maps.target.magia import CORE_DEVICE as MAGIA_CORE_DEVICE
 from tests.noc_utils import TEST_SCALAR_DEVICE
-from maps.planning.layouts import TensorRange
-from maps.planning.submesh import Submesh
+from maps.planning.mapping import TensorRange
+from maps.planning.mapping import Submesh
 from maps.graph import Tensor
 from maps.operations.convolution import Conv2DPayload
 from maps.operations.depthwise_convolution import DepthwiseConvPayload

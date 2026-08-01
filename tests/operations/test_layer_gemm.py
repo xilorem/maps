@@ -1,9 +1,9 @@
 from maps.graph import Node, OpKind
 from maps.planning import Layer
-from maps.planning.layouts import LayoutAxis, LayoutAxisMode, TensorLayout, TensorRange, TensorSlice
+from maps.planning.mapping import LayoutAxis, LayoutAxisMode, TensorLayout, TensorRange, TensorSlice
 from maps.target.magia import build_mesh as magia_mesh
 from maps.planning import Stage
-from maps.planning.submesh import Submesh
+from maps.planning.mapping import Submesh
 from maps.graph import Tensor
 from maps.operations.gemm import GemmPayload
 

@@ -4,8 +4,8 @@ from typing import ClassVar
 from maps.hardware import L1Memory, L2Memory, Mesh, WorkKind
 from maps.graph import TensorDType
 from maps.graph import Node, OpKind
-from maps.planning.layouts import TensorLayout, tile_tensor_slice
-from maps.planning.submesh import Submesh
+from maps.planning.mapping import TensorLayout, tile_tensor_slice
+from maps.planning.mapping import Submesh
 from maps.graph import Tensor
 from maps.operations import OpCostModel
 from maps.operations import LayoutRelation

@@ -7,17 +7,17 @@ from collections import deque
 from maps.hardware import Mesh
 from maps.planning.stages import StagePlacement, StagePlan
 from maps.planning.placement.evaluation import PlacementEvaluator
-from maps.planning.placement.models import (
+from maps.planning.placement.evaluation import (
     PlacementEvaluation,
     RepairCandidate,
     TileIOScore,
     VirtualTraffic,
 )
-from maps.planning.placement.ownership import assign_stage_ownerships
-from maps.planning.placement.region_results import placements_from_regions
-from maps.planning.placement.region_scoring import region_anchor_cost, sorted_candidate_tiles
+from maps.planning.placement.regions import assign_stage_ownerships
+from maps.planning.placement.regions import placements_from_regions
+from maps.planning.placement.regions import region_anchor_cost, sorted_candidate_tiles
 from maps.planning.placement.regions import grow_stage_region, local_stage_order, stage_target_point
-from maps.planning.placement.topology import (
+from maps.planning.placement.regions import (
     l2_access_point_tile_ids,
     owner_by_tile_id,
     shared_boundary_length,

@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from maps.graph import Node
 from maps.hardware import Mesh
-from maps.planning.layouts import tensor_slice_num_bytes
-from maps.planning.stages import StagePlacement, StagePlan
-from maps.planning.placement.models import PlacementEvaluation, StageIOBreakdown, TileIOScore
+from maps.planning.mapping import tensor_slice_num_bytes
+from maps.planning.stages import StagePlacement, StagePlan, virtual_submesh
 from maps.planning.transitions import (
     VirtualInputTransition,
     VirtualIntermediateTransition,
@@ -370,3 +370,256 @@ def _output_row_shape(tensor, output_slice) -> tuple[int | None, int]:
         output_slice.dims[-1].length * tensor.elem_bytes,
         output_slice.num_elements // output_slice.dims[-1].length,
     )
+
+
+@dataclass(frozen=True)
+class VirtualTraffic:
+    """Virtual communication summary between already balanced stages.
+
+    Matrices retain virtual tile ids so traffic can guide both physical-region
+    selection and the later virtual-to-physical ownership assignment.
+    """
+
+    stage_comm: dict[tuple[int, int], int]
+    edge_matrices: dict[tuple[int, int], dict[tuple[int, int], int]]
+    input_weights: dict[int, dict[int, int]]
+    output_weights: dict[int, dict[int, int]]
+    l2_read_weights: dict[int, dict[int, int]]
+    l2_write_weights: dict[int, dict[int, int]]
+    communication_degree: dict[int, int]
+    bottleneck_risk: dict[int, int]
+    l2_pressure: dict[int, int]
+
+
+@dataclass(frozen=True)
+class TileIOScore:
+    """Exact physical IO accounting for one tile."""
+
+    tile_id: int
+    stage_id: int | None
+    tile_to_tile_writes: int
+    l2_reads: int
+    l2_writes: int
+    consumer_stage_writes: dict[int, int]
+
+    @property
+    def score(self) -> int:
+        """Return the additive physical IO score for one tile."""
+
+        return self.tile_to_tile_writes + self.l2_reads + self.l2_writes
+
+
+@dataclass(frozen=True)
+class StageIOBreakdown:
+    """Worst physical tile IO components for one placed stage."""
+
+    physical_tile_id: int | None
+    l2_read: int
+    l2_write: int
+    l1_write: int
+
+    @property
+    def total(self) -> int:
+        """Return the additive physical IO score of the worst tile."""
+
+        return self.l1_write + self.l2_read + self.l2_write
+
+
+@dataclass(frozen=True)
+class PlacementEvaluation:
+    """Exact score for a complete ownership-aware Placement."""
+
+    placements: dict[int, StagePlacement]
+    tile_scores: dict[int, TileIOScore]
+    stage_breakdowns: dict[int, StageIOBreakdown]
+    objective: tuple[int, int, int, int]
+    worst_tile_id: int | None
+
+
+@dataclass(frozen=True)
+class RepairCandidate:
+    """A local collection of stages that may improve the current bottleneck."""
+
+    stages: frozenset[int]
+    priority: float
+    reason: str
+
+
+def build_virtual_traffic(
+    virtual_transitions: tuple[VirtualTransition, ...],
+    stage_plans: dict[int, StagePlan],
+) -> VirtualTraffic:
+    """Describe all stage communication before physical tiles are selected.
+
+    Contract:
+        Stage plans must contain final virtual layouts. ``virtual_transitions``
+        must have been compiled from the same complete Stage Plan set. Physical
+        placement is deliberately absent from this analysis.
+
+    Returns:
+        Per-edge virtual-tile byte matrices plus aggregate input, output, L2,
+        communication-degree, and bottleneck-pressure weights.  These values are
+        byte counts, not transport cycles.
+    """
+
+    stage_ids = tuple(stage_plans)
+
+    stage_comm: dict[tuple[int, int], int] = {}
+    edge_matrices: dict[tuple[int, int], dict[tuple[int, int], int]] = {}
+    input_weights = _empty_stage_tile_weights(stage_plans)
+    output_weights = _empty_stage_tile_weights(stage_plans)
+    l2_read_weights = _empty_stage_tile_weights(stage_plans)
+    l2_write_weights = _empty_stage_tile_weights(stage_plans)
+
+    for transition in virtual_transitions:
+        if isinstance(transition, VirtualInputTransition):
+            for destination in transition.destinations:
+                bytes_ = tensor_slice_num_bytes(
+                    transition.tensor, destination.tensor_slice
+                )
+                tile_id = destination.virtual_tile_id
+                input_weights[transition.destination_stage_id][tile_id] += bytes_
+                l2_read_weights[transition.destination_stage_id][tile_id] += bytes_
+        elif isinstance(transition, VirtualIntermediateTransition):
+            edge = (
+                transition.source_stage_id,
+                transition.destination_stage_id,
+            )
+            matrix = edge_matrices.setdefault(edge, {})
+            for transfer in transition.transfers:
+                bytes_ = (
+                    transfer.source_subslice.num_elements
+                    * transition.tensor.elem_bytes
+                )
+                key = (
+                    transfer.source_virtual_tile_id,
+                    transfer.destination_virtual_tile_id,
+                )
+                matrix[key] = matrix.get(key, 0) + bytes_
+                stage_comm[edge] = stage_comm.get(edge, 0) + bytes_
+                output_weights[transition.source_stage_id][
+                    transfer.source_virtual_tile_id
+                ] += bytes_
+                input_weights[transition.destination_stage_id][
+                    transfer.destination_virtual_tile_id
+                ] += bytes_
+        elif isinstance(transition, VirtualOutputTransition):
+            for source in transition.sources:
+                bytes_ = tensor_slice_num_bytes(transition.tensor, source.tensor_slice)
+                tile_id = source.virtual_tile_id
+                output_weights[transition.source_stage_id][tile_id] += bytes_
+                l2_write_weights[transition.source_stage_id][tile_id] += bytes_
+
+    communication_degree = {
+        stage_id: sum(
+            weight
+            for (source_stage_id, destination_stage_id), weight in stage_comm.items()
+            if source_stage_id == stage_id or destination_stage_id == stage_id
+        )
+        for stage_id in stage_ids
+    }
+    bottleneck_risk = {
+        stage_id: max(input_weights[stage_id].values(), default=0)
+        for stage_id in stage_ids
+    }
+    l2_pressure = {
+        stage_id: (
+            sum(l2_read_weights[stage_id].values())
+            + sum(l2_write_weights[stage_id].values())
+        )
+        for stage_id in stage_ids
+    }
+    return VirtualTraffic(
+        stage_comm=stage_comm,
+        edge_matrices=edge_matrices,
+        input_weights=input_weights,
+        output_weights=output_weights,
+        l2_read_weights=l2_read_weights,
+        l2_write_weights=l2_write_weights,
+        communication_degree=communication_degree,
+        bottleneck_risk=bottleneck_risk,
+        l2_pressure=l2_pressure,
+    )
+
+
+def _empty_stage_tile_weights(
+    stage_plans: dict[int, StagePlan],
+) -> dict[int, dict[int, int]]:
+    """Build zero-valued virtual-tile weights for every stage."""
+
+    return {
+        stage_id: {
+            tile.tile_id: 0
+            for tile in virtual_submesh(plan).tiles
+        }
+        for stage_id, plan in stage_plans.items()
+    }
+
+
+def print_placement_details(
+    mesh: Mesh,
+    stage_plans: dict[int, StagePlan],
+    placements: dict[int, StagePlacement],
+    virtual_transitions: tuple[VirtualTransition, ...],
+    label: str = "placement",
+) -> None:
+    """Print physical regions, ownership maps, and exact IO bottlenecks."""
+
+    evaluation = evaluate_placement(
+        mesh,
+        stage_plans,
+        placements,
+        virtual_transitions,
+    )
+    print(f"\n[placement] chosen physical submeshes for {label}:")
+    for stage_id in stage_plans:
+        placement = placements[stage_id]
+        submesh = placement.physical_submesh
+        print(
+            f"  stage={stage_id} name={_stage_name(stage_plans[stage_id].nodes)} "
+            f"bbox=({submesh.x0},{submesh.y0},{submesh.width},{submesh.height}) "
+            f"tiles={sorted(submesh.tile_ids)} "
+            f"virtual_to_physical={dict(sorted(placement.virtual_to_physical.items()))}"
+        )
+    print_placement_grid(mesh, placements)
+    print(f"[placement] stage worst physical-tile IO costs for {label}:")
+    for stage_id in stage_plans:
+        io_cost = evaluation.stage_breakdowns[stage_id]
+        print(
+            f"  stage={stage_id} name={_stage_name(stage_plans[stage_id].nodes)} "
+            f"tile={io_cost.physical_tile_id} l2_read={io_cost.l2_read} "
+            f"l2_write={io_cost.l2_write} l1_write={io_cost.l1_write} "
+            f"total={io_cost.total}"
+        )
+    print(
+        f"[placement] bottleneck for {label} "
+        f"worst_stage_io={max((cost.total for cost in evaluation.stage_breakdowns.values()), default=0)} "
+        f"objective={evaluation.objective}"
+    )
+
+
+def print_placement_grid(
+    mesh: Mesh,
+    placements: dict[int, StagePlacement],
+) -> None:
+    """Print a compact mesh grid showing physical stage ownership."""
+
+    owners = {
+        tile_id: stage_id
+        for stage_id, placement in placements.items()
+        for tile_id in placement.physical_submesh.tile_ids
+    }
+    cell_width = max(1, *(len(str(stage_id)) for stage_id in placements))
+    print("Placement mesh:")
+    for y in range(mesh.height):
+        cells = []
+        for x in range(mesh.width):
+            owner = owners.get(mesh.tile_id(x, y))
+            cells.append(("." if owner is None else str(owner)).rjust(cell_width))
+        print(" ".join(cells))
+
+
+def _stage_name(stage_nodes: tuple[Node, ...]) -> str:
+    """Return a compact selected-stage display name."""
+
+    return "+".join(node.name for node in stage_nodes)

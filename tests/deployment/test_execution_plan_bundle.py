@@ -7,8 +7,8 @@ import pytest
 from maps.hardware import L1Memory, L2Memory, Mesh
 from maps.graph import Constant, ConstantStore, Graph, Node, OpKind, Tensor, TensorDType
 from maps.graph import ImportedModel
-from maps.planning.layouts import TensorRange, TensorSlice
-from maps.planning.submesh import Submesh
+from maps.planning.mapping import TensorRange, TensorSlice
+from maps.planning.mapping import Submesh
 from maps.deployment import (
     DeploymentBundle,
     PackedInitializer,

@@ -4,10 +4,8 @@ import pytest
 
 from maps.hardware import WorkKind
 from maps.graph import OpKind, TensorDType, decompose_graph
-from maps.graph.onnx.graph_parser import parse_graph
+from maps.graph.onnx.parser import onnx_dtype_elem_bytes, parse_graph
 from maps.graph.onnx.operations import ONNX_OPERATION_CONVERTERS
-from maps.graph.onnx.tensor_parser import onnx_dtype_elem_bytes
-from maps.graph.onnx.utils import build_tensor_producer_table
 from maps.operations import SoftmaxPayload
 from maps.operations.collective import AllReducePayload
 from maps.operations.convolution import ConvPayload
@@ -870,27 +868,6 @@ def test_parse_graph_rejects_unmapped_external_operation() -> None:
 
     with pytest.raises(NotImplementedError, match="FakeIdentityTestOp"):
         parse_graph(graph)
-
-
-def test_build_tensor_producer_table_tracks_outputs() -> None:
-    try:
-        from onnx import TensorProto, helper
-    except ImportError:
-        return
-
-    x = helper.make_tensor_value_info("x", TensorProto.FLOAT, [8, 16])
-    w0 = helper.make_tensor_value_info("w0", TensorProto.FLOAT, [16, 12])
-    y0 = helper.make_tensor_value_info("y0", TensorProto.FLOAT, [8, 12])
-    w1 = helper.make_tensor_value_info("w1", TensorProto.FLOAT, [12, 10])
-    y1 = helper.make_tensor_value_info("y1", TensorProto.FLOAT, [8, 10])
-    node0 = helper.make_node("MatMul", inputs=["x", "w0"], outputs=["y0"], name="matmul_0")
-    node1 = helper.make_node("MatMul", inputs=["y0", "w1"], outputs=["y1"], name="matmul_1")
-    graph = helper.make_graph([node0, node1], "toy", [x, w0, w1], [y1], value_info=[y0])
-
-    producers = build_tensor_producer_table(graph)
-
-    assert producers["y0"] == ("matmul_0", 0)
-    assert producers["y1"] == ("matmul_1", 0)
 
 
 def test_parse_graph_builds_node_to_node_and_initializer_edges() -> None:

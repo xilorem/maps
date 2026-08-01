@@ -5,7 +5,7 @@ from collections.abc import Callable
 import pytest
 
 from maps.graph import Graph, Node, OpKind, Tensor, TensorDType
-from maps.graph.onnx.graph_parser import parse_graph
+from maps.graph.onnx.parser import parse_graph
 from maps.graph.onnx.operations import ONNX_OPERATION_CONVERTERS
 from maps.hardware import WorkKind, WorkSignature
 from maps.operations import (
@@ -69,7 +69,7 @@ from maps.operations.reduction import (
 )
 from maps.operations.softmax import SoftmaxPayload
 from maps.operations.split import SplitPayload, StaticSlicePayload, StaticSliceTileWork
-from maps.planning.submesh import Submesh
+from maps.planning.mapping import Submesh
 from maps.target.magia import build_mesh as magia_mesh
 from maps.planning import PlacementOptions, PlanningOptions, plan
 

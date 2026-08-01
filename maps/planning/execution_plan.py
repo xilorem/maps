@@ -2,16 +2,40 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from collections import defaultdict
+from dataclasses import dataclass, field, replace
+import re
+from typing import cast
 
-from maps.planning.layouts import TensorLayout
-from maps.planning.submesh import Submesh
-from maps.planning.transitions.contracts import InputDestination, Transition
-
-if TYPE_CHECKING:
-    from maps.graph import Node, Tensor
-    from maps.hardware import Mesh
+from maps.graph import Graph, Node, Tensor
+from maps.hardware import EndpointKind, Mesh, Tile
+from maps.operations.contracts import OpPayload
+from maps.planning.allocation.candidates import permanent_l1_allocation_bytes
+from maps.planning.allocation.selection import worst_tile_stage_compute
+from maps.planning.mapping import (
+    Submesh,
+    TensorLayout,
+    TensorRange,
+    TensorSlice,
+    tensor_slice_num_bytes,
+    tile_tensor_slice,
+)
+from maps.planning.placement.evaluation import evaluate_placement
+from maps.planning.stages import (
+    StagePlacement,
+    StagePlan,
+    node_output_layouts,
+    required_input_slices,
+    virtual_submesh,
+)
+from maps.planning.transitions import bind_transitions
+from maps.planning.transitions.contracts import (
+    InputDestination,
+    InputTransition,
+    IntermediateTransition,
+    Transition,
+    VirtualTransition,
+)
 
 
 @dataclass(frozen=True)
@@ -181,6 +205,499 @@ class ExecutionPlan:
             raise ValueError("execution plan name must not be empty")
 
 
+@dataclass(frozen=True)
+class ExecutionPlanConstructionContext:
+    """Precomputed identity indexes required during Execution Plan construction.
+
+    Graph Nodes and Tensors are immutable domain objects, but several
+    construction decisions depend on object identity rather than value equality.
+    Building these indexes once makes that rule explicit and prevents each
+    construction component from reconstructing subtly different producer or
+    Stage maps.
+    """
+
+    graph: Graph
+    stage_formation: dict[int, tuple[Node, ...]]
+    node_stage_ids: dict[int, int]
+    node_stage_layer_ids: dict[int, int]
+    node_graph_layer_ids: dict[int, int]
+    tensor_id_by_tensor: dict[object, int]
+    producer_by_tensor: dict[object, Node]
+
+
+def build_construction_context(
+    graph: Graph,
+    stage_plans: dict[int, StagePlan],
+) -> ExecutionPlanConstructionContext:
+    """Index Graph ownership and ordering for consistent construction."""
+
+    stage_formation = _resolve_stage_formation(graph, stage_plans)
+    return ExecutionPlanConstructionContext(
+        graph=graph,
+        stage_formation=stage_formation,
+        node_stage_ids={
+            id(node): stage_id
+            for stage_id, stage_nodes in stage_formation.items()
+            for node in stage_nodes
+        },
+        node_stage_layer_ids={
+            id(node): layer_idx
+            for stage_nodes in stage_formation.values()
+            for layer_idx, node in enumerate(stage_nodes)
+        },
+        node_graph_layer_ids={
+            id(node): layer_id
+            for layer_id, node in enumerate(graph.nodes)
+        },
+        tensor_id_by_tensor={
+            tensor: tensor_id
+            for tensor_id, tensor in enumerate(graph.tensors)
+        },
+        producer_by_tensor={
+            tensor: node
+            for node in graph.nodes
+            for tensor in node.outputs
+        },
+    )
+
+
+def _resolve_stage_formation(
+    graph: Graph,
+    stage_plans: dict[int, StagePlan],
+) -> dict[int, tuple[Node, ...]]:
+    """Validate and recover the selected nodes carried by stage plans."""
+
+    if any(not plan.nodes for plan in stage_plans.values()):
+        raise ValueError("every stage plan must contain its selected nodes")
+    stage_formation = {
+        stage_id: plan.nodes
+        for stage_id, plan in stage_plans.items()
+    }
+    selected_node_ids = [
+        id(node)
+        for nodes in stage_formation.values()
+        for node in nodes
+    ]
+    graph_node_ids = {id(node) for node in graph.nodes}
+    if len(selected_node_ids) != len(set(selected_node_ids)):
+        raise ValueError("stage plans contain a graph node more than once")
+    if set(selected_node_ids) != graph_node_ids:
+        raise ValueError("stage plans must cover every graph node exactly once")
+    return stage_formation
+
+
+def construct_execution_plan(
+    graph: Graph,
+    mesh: Mesh,
+    stage_plans: dict[int, StagePlan],
+    placements: dict[int, StagePlacement],
+    virtual_transitions: tuple[VirtualTransition, ...],
+    *,
+    execution: ExecutionContract = ExecutionContract(),
+) -> ExecutionPlan:
+    """Combine retained decisions into one complete physical Execution Plan."""
+
+    if set(placements) != set(stage_plans):
+        raise ValueError("placements must contain exactly one entry per stage plan")
+
+    context = build_construction_context(graph, stage_plans)
+    transitions = bind_transitions(virtual_transitions, placements)
+    transition_ids = _destination_transition_ids(transitions)
+    initializer_ids = {
+        id(tensor)
+        for tensor in graph.initializers
+    } | {
+        id(tensor)
+        for tensor in graph.tensors
+        if tensor.is_initializer
+    }
+    stages = tuple(
+        _build_stage(
+            stage_id,
+            stage_plans[stage_id],
+            placements[stage_id],
+            context,
+            transition_ids,
+            initializer_ids,
+        )
+        for stage_id in sorted(stage_plans)
+    )
+    return ExecutionPlan(
+        name=graph.name,
+        mesh=mesh,
+        tensors=tuple(
+            replace(tensor, is_initializer=id(tensor) in initializer_ids)
+            for tensor in graph.tensors
+        ),
+        stages=stages,
+        transitions=transitions,
+        execution=execution,
+    )
+
+
+def _destination_transition_ids(
+    transitions: tuple[Transition, ...],
+) -> dict[tuple[int, int], int]:
+    return {
+        (transition.destination_stage_id, transition.destination_input_index): (
+            transition_id
+        )
+        for transition_id, transition in enumerate(transitions)
+        if isinstance(transition, (InputTransition, IntermediateTransition))
+    }
+
+
+def _build_stage(
+    stage_id: int,
+    plan: StagePlan,
+    placement: StagePlacement,
+    context: ExecutionPlanConstructionContext,
+    transition_ids: dict[tuple[int, int], int],
+    initializer_ids: set[int],
+) -> Stage:
+    return Stage(
+        name="+".join(node.name for node in plan.nodes),
+        submesh=placement.physical_submesh,
+        virtual_to_physical=placement.virtual_to_physical,
+        layers=tuple(
+            _build_layer(
+                stage_id,
+                layer_index,
+                node,
+                plan,
+                placement,
+                context,
+                transition_ids,
+                initializer_ids,
+            )
+            for layer_index, node in enumerate(plan.nodes)
+        ),
+    )
+
+
+def _build_layer(
+    stage_id: int,
+    layer_index: int,
+    node: Node,
+    plan: StagePlan,
+    placement: StagePlacement,
+    context: ExecutionPlanConstructionContext,
+    transition_ids: dict[tuple[int, int], int],
+    initializer_ids: set[int],
+) -> Layer:
+    output_layouts = node_output_layouts(plan, node)
+    return Layer(
+        node=node,
+        device_name=plan.device_names[layer_index],
+        inputs=tuple(
+            _build_layer_input(
+                stage_id,
+                layer_index,
+                input_index,
+                tensor,
+                node,
+                output_layouts,
+                placement,
+                context,
+                transition_ids,
+                initializer_ids,
+            )
+            for input_index, tensor in enumerate(node.inputs)
+        ),
+        outputs=tuple(
+            LayerOutput(
+                tensor_id=context.tensor_id_by_tensor[tensor],
+                layout=layout,
+            )
+            for tensor, layout in zip(node.outputs, output_layouts)
+        ),
+    )
+
+
+def _build_layer_input(
+    stage_id: int,
+    layer_index: int,
+    input_index: int,
+    tensor: object,
+    node: Node,
+    output_layouts: tuple,
+    placement: StagePlacement,
+    context: ExecutionPlanConstructionContext,
+    transition_ids: dict[tuple[int, int], int],
+    initializer_ids: set[int],
+) -> LayerInput:
+    tensor_id = context.tensor_id_by_tensor[tensor]
+    if id(tensor) in initializer_ids:
+        destinations = required_input_slices(
+            tensor=tensor,
+            destination_node=node,
+            destination_output_layouts=output_layouts,
+        )
+        return LayerInput.initializer(
+            tensor_id,
+            tuple(
+                InputDestination(
+                    tile_id=placement.physical_tile_id(tile.tile_id),
+                    tensor_slice=tensor_slice,
+                )
+                for tile, tensor_slice in destinations
+            ),
+        )
+
+    producer = context.producer_by_tensor.get(tensor)
+    if producer is not None and context.node_stage_ids[id(producer)] == stage_id:
+        return LayerInput.local(
+            tensor_id,
+            context.node_stage_layer_ids[id(producer)],
+        )
+
+    if layer_index != 0:
+        raise ValueError(
+            "runtime and cross-stage inputs must target the first layer of a stage"
+        )
+    return LayerInput.transition_source(
+        tensor_id,
+        transition_ids[(stage_id, input_index)],
+    )
+
+
+def print_submeshes(execution_plan: ExecutionPlan) -> None:
+    """Print one Execution Plan's Stage placement on the attached NoC."""
+
+    mesh = execution_plan.mesh
+    submesh_labels_by_tile_id: dict[int, list[str]] = defaultdict(list)
+    for stage in execution_plan.stages:
+        label = str(stage.submesh.submesh_id)
+        for tile in stage.submesh.tiles:
+            submesh_labels_by_tile_id[tile.tile_id].append(label)
+
+    labels_by_node_id: dict[int, list[str]] = defaultdict(list)
+    for endpoint in mesh.noc.endpoints:
+        if endpoint.kind is EndpointKind.L1 and endpoint.tile_id is not None:
+            labels = submesh_labels_by_tile_id.get(endpoint.tile_id)
+            if labels:
+                labels_by_node_id[endpoint.node_id].append("/".join(labels))
+        elif endpoint.kind is EndpointKind.L2:
+            labels_by_node_id[endpoint.node_id].append(
+                _compact_l2_label(endpoint.name or "L2")
+            )
+        else:
+            labels_by_node_id[endpoint.node_id].append(endpoint.kind.name)
+
+    max_x = max(node.x for node in mesh.noc.nodes)
+    max_y = max(node.y for node in mesh.noc.nodes)
+    cell_strings: dict[tuple[int, int], str] = {}
+    max_cell_width = 2
+
+    for node in mesh.noc.nodes:
+        labels = labels_by_node_id.get(node.node_id)
+        cell = "/".join(labels) if labels else "."
+        cell_strings[(node.x, node.y)] = cell
+        max_cell_width = max(max_cell_width, len(cell))
+
+    for y in range(max_y + 1):
+        row = " ".join(
+            cell_strings[(x, y)].rjust(max_cell_width)
+            for x in range(max_x + 1)
+        )
+        print(row)
+
+
+def _compact_l2_label(label: str) -> str:
+    match = re.fullmatch(r"l2_(\d+)", label)
+    if match is None:
+        return label
+    return f"L{_base36(int(match.group(1)))}"
+
+
+def _base36(value: int) -> str:
+    digits = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    if value < 36:
+        return digits[value]
+    result = []
+    while value:
+        value, remainder = divmod(value, 36)
+        result.append(digits[remainder])
+    return "".join(reversed(result))
+
+
+def print_execution_plan_stage_cost(
+    execution_plan: ExecutionPlan,
+    stage_plans: dict[int, StagePlan],
+    placements: dict[int, StagePlacement],
+    virtual_transitions: tuple[VirtualTransition, ...],
+) -> None:
+    """Print the combined worst-stage compute and physical IO estimate.
+
+    Compute is evaluated from the final virtual layouts. Physical IO is
+    evaluated from the separate spatial placements and ownership maps. The
+    displayed total is the sum of the greatest stage compute and IO bottlenecks.
+    """
+
+    worst_stage_compute = max(
+        (
+            worst_tile_stage_compute(
+                stage_nodes=plan.nodes,
+                node_output_layouts=plan.node_output_layouts,
+                submesh=virtual_submesh(plan),
+                device_names=plan.device_names,
+            )
+            for plan in stage_plans.values()
+        ),
+        default=0,
+    )
+    evaluation = evaluate_placement(
+        execution_plan.mesh,
+        stage_plans,
+        placements,
+        virtual_transitions,
+    )
+    worst_stage_io = max(
+        (breakdown.total for breakdown in evaluation.stage_breakdowns.values()),
+        default=0,
+    )
+    print(
+        "[planner] execution_plan_stage_cost="
+        f"{worst_stage_compute + worst_stage_io} "
+        f"(worst_compute={worst_stage_compute} worst_io={worst_stage_io})"
+    )
+
+
+def estimate_stage_l1_memory_for_tile(
+    stage: Stage,
+    execution_plan: ExecutionPlan,
+    tile: Tile,
+) -> int:
+    """Estimate the backend's permanent allocation for one stage tile."""
+
+    virtual_tile = virtual_tile_for_stage_tile(stage, execution_plan, tile)
+    allocation_sizes = []
+    for layer in stage.layers:
+        for binding_idx, binding in enumerate(layer.inputs):
+            if isinstance(binding.source, LocalInput):
+                continue
+            tensor = execution_plan.tensors[binding.tensor_id]
+            if isinstance(binding.source, InitializerInput):
+                destination = next(
+                    (
+                        destination
+                        for destination in binding.source.destinations
+                        if destination.tile_id == tile.tile_id
+                    ),
+                    None,
+                )
+                if destination is None:
+                    continue
+                tensor_slice = destination.tensor_slice
+                slot_count = 1
+            else:
+                tensor_slice = infer_input_slice_for_tile(
+                    layer,
+                    binding_idx,
+                    execution_plan,
+                    virtual_tile,
+                )
+                slot_count = execution_plan.execution.num_token_slots
+            allocation_sizes.append(
+                tensor_slice_num_bytes(tensor, tensor_slice) * slot_count
+            )
+        for binding in layer.outputs:
+            tensor = execution_plan.tensors[binding.tensor_id]
+            tensor_slice = tile_tensor_slice(tensor, binding.layout, virtual_tile)
+            allocation_sizes.append(
+                tensor_slice_num_bytes(tensor, tensor_slice)
+                * execution_plan.execution.num_token_slots
+            )
+    return permanent_l1_allocation_bytes(allocation_sizes)
+
+
+def estimate_stage_l2_memory(
+    stage: Stage,
+    execution_plan: ExecutionPlan,
+) -> int:
+    """Estimate L2 storage needed for a stage's external input bindings."""
+
+    l2_memory = 0
+    for layer in stage.layers:
+        for binding_idx, binding in enumerate(layer.inputs):
+            is_runtime_input = (
+                isinstance(binding.source, TransitionSource)
+                and binding.source.transition_id < len(execution_plan.transitions)
+                and isinstance(
+                    execution_plan.transitions[binding.source.transition_id],
+                    InputTransition,
+                )
+            )
+            if not is_runtime_input:
+                continue
+            tensor = execution_plan.tensors[binding.tensor_id]
+            max_binding_bytes = 0
+            for tile in stage.submesh.tiles:
+                virtual_tile = virtual_tile_for_stage_tile(
+                    stage,
+                    execution_plan,
+                    tile,
+                )
+                tensor_slice = infer_input_slice_for_tile(
+                    layer,
+                    binding_idx,
+                    execution_plan,
+                    virtual_tile,
+                )
+                max_binding_bytes = max(
+                    max_binding_bytes,
+                    tensor_slice_num_bytes(tensor, tensor_slice),
+                )
+            l2_memory += max_binding_bytes
+    return l2_memory
+
+
+def infer_input_slice_for_tile(
+    layer: Layer,
+    binding_idx: int,
+    execution_plan: ExecutionPlan,
+    tile: Tile,
+) -> TensorSlice:
+    """Infer an input slice from tile work, falling back to the full tensor."""
+
+    tensor = execution_plan.tensors[layer.inputs[binding_idx].tensor_id]
+    node = layer.node
+    if node.payload is not None and layer.outputs:
+        output_layouts = tuple(output.layout for output in layer.outputs)
+        tile_work = cast(OpPayload, node.payload).build_tile_work(
+            output_layouts=output_layouts,
+            tile=tile,
+        )
+        for reference in tile_work.input_slices:
+            if tensor == reference.tensor:
+                return reference.tensor_slice
+    return _default_tensor_slice(tensor)
+
+
+def virtual_tile_for_stage_tile(
+    stage: Stage,
+    execution_plan: ExecutionPlan,
+    tile: Tile,
+) -> Tile:
+    """Translate one physical stage tile to the virtual layout tile."""
+
+    if not stage.physical_to_virtual:
+        return tile
+    return execution_plan.mesh.tile_by_id(stage.physical_to_virtual[tile.tile_id])
+
+
+def _default_tensor_slice(tensor: Tensor) -> TensorSlice:
+    """Return a slice covering an entire tensor."""
+
+    return TensorSlice(
+        rank=tensor.rank,
+        dims=tuple(
+            TensorRange(start=0, length=dimension)
+            for dimension in tensor.dims
+        ),
+    )
+
+
 __all__ = [
     "ExecutionContract",
     "ExecutionPlan",
@@ -192,4 +709,9 @@ __all__ = [
     "LocalInput",
     "Stage",
     "TransitionSource",
+    "construct_execution_plan",
+    "estimate_stage_l1_memory_for_tile",
+    "estimate_stage_l2_memory",
+    "print_execution_plan_stage_cost",
+    "print_submeshes",
 ]

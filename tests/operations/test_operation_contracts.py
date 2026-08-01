@@ -1,7 +1,7 @@
 import pytest
 
 from maps.hardware import WorkKind
-from maps.planning.layouts import TensorRange, TensorSlice
+from maps.planning.mapping import TensorRange, TensorSlice
 from maps.graph import Tensor
 from maps.operations import CompositeOpPayload
 from maps.operations.convolution import ConvPayload

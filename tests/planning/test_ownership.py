@@ -1,6 +1,6 @@
 import pytest
 
-from maps.planning.layouts import (
+from maps.planning.mapping import (
     LayoutAxis,
     LayoutAxisMode,
     TensorLayout,
@@ -11,7 +11,7 @@ from maps.planning.layouts import (
     tile_tensor_slice,
 )
 from maps.target.magia import build_mesh as magia_mesh
-from maps.planning.submesh import Submesh
+from maps.planning.mapping import Submesh
 from maps.graph import Tensor
 
 

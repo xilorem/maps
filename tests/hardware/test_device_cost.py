@@ -6,7 +6,7 @@ from maps.target.magia import REDMULE_DEVICE as MAGIA_REDMULE_DEVICE
 from maps.target.magia import build_mesh as magia_mesh
 from maps.target.n300d import MATRIX_DEVICE as TENSIX_MATRIX_DEVICE
 from maps.target.n300d import build_mesh as wormhole_n300d_mesh
-from maps.planning.layouts import TensorRange, TensorSlice
+from maps.planning.mapping import TensorRange, TensorSlice
 from maps.graph import TensorDType
 from maps.graph import Tensor
 from maps.operations.elementwise import ElementwiseCostModel

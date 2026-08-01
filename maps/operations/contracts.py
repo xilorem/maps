@@ -6,13 +6,13 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from maps.planning.layouts import (
+from maps.planning.mapping import (
     LayoutAxis,
     LayoutAxisMode,
     TensorLayout,
     TensorSliceRef,
 )
-from maps.planning.submesh import Submesh
+from maps.planning.mapping import Submesh
 from maps.graph import Tensor
 from maps.hardware import Device, Tile
 

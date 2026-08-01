@@ -5,17 +5,27 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from .constants import Constant, ConstantStore, validate_constants
-from .dtype import TensorDType, dtype_elem_bytes
-from .graph import Edge, Graph, Node, OpKind
-from .model import ImportedModel, validate_imported_model
-from .tensor import TENSOR_MAX_DIMS, Tensor
+from .model import (
+    Constant,
+    ConstantStore,
+    Edge,
+    Graph,
+    ImportedModel,
+    Node,
+    OpKind,
+    TENSOR_MAX_DIMS,
+    Tensor,
+    TensorDType,
+    dtype_elem_bytes,
+    validate_constants,
+    validate_imported_model,
+)
 
 if TYPE_CHECKING:
     from onnx import ModelProto
 
-    from .onnx.preprocess import InputShapes
-    from .rewrites import GraphRewrite, GraphRewriteEffect
+    from .onnx.importer import InputShapes
+    from .rewrite import GraphRewrite, GraphRewriteEffect
 
 
 def import_onnx_graph(
@@ -54,13 +64,13 @@ def prepare_onnx_model(
 
 
 def decompose_graph(graph: Graph) -> Graph:
-    from .decompose import decompose_graph as decompose
+    from .rewrite import decompose_graph as decompose
 
     return decompose(graph)
 
 
 def run_graph_rewrites(model: ImportedModel) -> ImportedModel:
-    from .rewrites import run_graph_rewrites as run_rewrites
+    from .rewrite import run_graph_rewrites as run_rewrites
 
     return run_rewrites(model)
 
@@ -68,7 +78,7 @@ def run_graph_rewrites(model: ImportedModel) -> ImportedModel:
 def run_graph_rewrites_with_effects(
     model: ImportedModel,
 ) -> tuple[ImportedModel, tuple[GraphRewriteEffect, ...]]:
-    from .rewrites import run_graph_rewrites_with_effects as run_rewrites
+    from .rewrite import run_graph_rewrites_with_effects as run_rewrites
 
     return run_rewrites(model)
 
@@ -77,9 +87,9 @@ def __getattr__(name: str):
     """Load type-like rewrite contracts without coupling the Graph model."""
 
     if name in {"GraphRewrite", "GraphRewriteEffect"}:
-        from . import rewrites
+        from . import rewrite
 
-        return getattr(rewrites, name)
+        return getattr(rewrite, name)
     raise AttributeError(name)
 
 

@@ -24,9 +24,20 @@ from maps.operations.reduction import GlobalAveragePoolPayload, ReduceSumPayload
 from maps.operations.softmax import SoftmaxPayload
 from maps.operations.split import SplitPayload
 
-from .tensor_parser import onnx_tensor_dtype
-
 STATIC_INPUT_VALUES = "_static_input_values"
+
+_ONNX_DTYPES: dict[int, TensorDType] = {
+    1: TensorDType.FLOAT32,
+    2: TensorDType.UINT8,
+    6: TensorDType.INT32,
+    7: TensorDType.INT64,
+    9: TensorDType.BOOL,
+    10: TensorDType.FLOAT16,
+}
+
+
+def onnx_tensor_dtype(dtype: int) -> TensorDType | None:
+    return _ONNX_DTYPES.get(dtype)
 
 
 @dataclass(frozen=True)

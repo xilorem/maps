@@ -10,7 +10,7 @@ from typing import Any
 
 from maps.graph import TensorDType
 from maps.hardware import Mesh
-from maps.planning.submesh import Submesh
+from maps.planning.mapping import Submesh
 from maps.planning import (
     ExecutionPlan,
     InitializerInput,

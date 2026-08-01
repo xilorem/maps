@@ -6,8 +6,8 @@ import pytest
 
 from maps.hardware import L1Memory, L2Memory, Mesh, Tile
 from maps.graph import Edge, Graph, Node, OpKind
-from maps.planning.layouts import TensorLayout
-from maps.planning.submesh import Submesh
+from maps.planning.mapping import TensorLayout
+from maps.planning.mapping import Submesh
 from maps.graph import TensorDType
 from maps.graph import Tensor
 from maps.operations import OpCostModel
@@ -20,12 +20,12 @@ from maps.planning.allocation.candidates import (
     StageCandidate,
     StageCandidateAnalyzer,
 )
-from maps.planning.allocation.metrics import (
+from maps.planning.allocation.selection import (
     SelectionEvaluation,
     StageMetricBreakdown,
 )
-from maps.planning.allocation.memory import permanent_l1_allocation_for_tile
-from maps.planning.stage_formation import form_stages
+from maps.planning.allocation.candidates import permanent_l1_allocation_for_tile
+from maps.planning.stages import form_stages
 from tests.noc_utils import rectangular_test_noc, rectangular_test_tiles
 
 

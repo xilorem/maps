@@ -23,7 +23,7 @@ from .mesh import (
     NOC_WIDE_CHANNEL_WIDTH_BYTES,
     build_mesh,
 )
-from .specialization import PRECISION_LOWERING_RECIPES, specialize
+from .specialize import PRECISION_LOWERING_RECIPES, specialize
 
 __all__ = [
     "CORE_DEVICE",

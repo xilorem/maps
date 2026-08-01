@@ -11,8 +11,8 @@ from maps.graph import (
 from maps.graph import Edge
 from maps.target.magia import build_mesh as magia_mesh
 from maps.operations.cast import CastPayload
-from maps.planning.layouts import LayoutAxisMode
-from maps.planning.submesh import Submesh
+from maps.planning.mapping import LayoutAxisMode
+from maps.planning.mapping import Submesh
 from maps.planning import PlacementOptions, PlanningOptions, plan
 
 from maps.deployment.serialization import execution_plan_json_payload

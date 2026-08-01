@@ -1,6 +1,6 @@
 from maps.hardware import WorkKind
-from maps.planning.layouts import TensorRange
-from maps.planning.submesh import Submesh
+from maps.planning.mapping import TensorRange
+from maps.planning.mapping import Submesh
 from maps.graph import Tensor
 from maps.target.magia import build_mesh as magia_mesh
 from maps.operations.rearrangement import ReshapePayload, TransposePayload

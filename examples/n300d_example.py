@@ -20,7 +20,7 @@ from maps.planning import (
     validate_execution_plan,
 )
 from maps.deployment.serialization import write_execution_plan_json
-from maps.planning.reporting import print_submeshes
+from maps.planning.execution_plan import print_submeshes
 
 DEFAULT_MODEL_PATH = PROJECT_ROOT / "examples" / "simple_three_stage.onnx"
 

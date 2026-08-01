@@ -4,15 +4,18 @@ from __future__ import annotations
 
 from maps.hardware import Mesh
 from maps.planning.stages import StagePlacement, StagePlan
-from maps.planning.placement.diagnostics import (
+from maps.planning.placement.evaluation import (
+    PlacementEvaluator,
+    build_virtual_traffic,
     print_placement_grid,
     print_placement_details,
 )
-from maps.planning.placement.evaluation import PlacementEvaluator
-from maps.planning.placement.ownership import assign_stage_ownerships, stage_order
-from maps.planning.placement.regions import build_initial_stage_placements
+from maps.planning.placement.regions import (
+    assign_stage_ownerships,
+    build_initial_stage_placements,
+    stage_order,
+)
 from maps.planning.placement.repair import improve_placement
-from maps.planning.placement.traffic import build_virtual_traffic
 from maps.planning.transitions import VirtualTransition
 
 

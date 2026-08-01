@@ -2,16 +2,18 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from maps.hardware import Mesh
 from maps.graph import Graph, Node
-from maps.planning.stages import StageFormation
-from maps.planning.allocation.candidates import StageCandidate, StageCandidateAnalyzer
-from maps.planning.allocation.context import AllocationContext
-from maps.planning.allocation.metrics import (
-    SelectionEvaluation,
-    evaluate_candidate_selection,
-    selection_objective,
+from maps.planning.stages import (
+    StageFormation,
+    StagePlan,
+    validate_stage_formation,
+    virtual_submesh,
 )
+from maps.planning.allocation.candidates import StageCandidate, StageCandidateAnalyzer
+from maps.planning.transitions import build_virtual_transitions
 
 
 def seed_stage_candidates(
@@ -360,3 +362,300 @@ def _format_metrics(metrics: dict[int, float]) -> str:
         f"{stage_id}: {metric}"
         for stage_id, metric in metrics.items()
     ) + "}"
+
+
+@dataclass(frozen=True)
+class AllocationContext:
+    """Validated inputs shared by Stage Candidate Allocation."""
+
+    graph: Graph
+    stage_formation: StageFormation
+    initializer_tensors: frozenset
+
+
+def build_allocation_context(
+    graph: Graph,
+    stage_formation: StageFormation,
+) -> AllocationContext:
+    """Validate Stage coverage and retain intrinsic Allocation inputs."""
+
+    resolved_selection = validate_stage_formation(graph, stage_formation)
+    initializer_tensors = frozenset(graph.initializers)
+    return AllocationContext(
+        graph=graph,
+        stage_formation=resolved_selection,
+        initializer_tensors=initializer_tensors,
+    )
+
+
+@dataclass(frozen=True)
+class StageMetricBreakdown:
+    """Canonical intrinsic and communication costs for one selected Stage."""
+
+    compute_cycles: int
+    communication_cycles: int
+    weighted_bottleneck: float
+
+
+@dataclass(frozen=True)
+class SelectionEvaluation:
+    """Reusable global evaluation of one complete candidate selection."""
+
+    stage_breakdowns: dict[int, StageMetricBreakdown]
+
+    @property
+    def metrics(self) -> dict[int, float]:
+        """Return the weighted bottleneck used to order each Stage."""
+
+        return {
+            stage_id: breakdown.weighted_bottleneck
+            for stage_id, breakdown in self.stage_breakdowns.items()
+        }
+
+
+def evaluate_candidate_selection(
+    candidates: dict[int, StageCandidate],
+    mesh: Mesh,
+    compute_weight: float,
+    communication_weight: float,
+    graph: Graph,
+) -> SelectionEvaluation:
+    """Evaluate one complete Stage Candidate selection."""
+
+    plans = {
+        stage_id: candidate.plan
+        for stage_id, candidate in candidates.items()
+    }
+    virtual_communication = _virtual_communication_cycles(graph, mesh, plans)
+    return SelectionEvaluation(
+        stage_breakdowns={
+            stage_id: StageMetricBreakdown(
+                compute_cycles=candidate.stage_compute,
+                communication_cycles=max(
+                    virtual_communication[stage_id].values(),
+                    default=0,
+                ),
+                weighted_bottleneck=max(
+                    compute_weight * candidate.stage_compute,
+                    communication_weight
+                    * max(virtual_communication[stage_id].values(), default=0),
+                ),
+            )
+            for stage_id, candidate in candidates.items()
+        }
+    )
+
+
+def _virtual_communication_cycles(
+    graph: Graph,
+    mesh: Mesh,
+    plans: dict[int, StagePlan],
+) -> dict[int, dict[int, int]]:
+    """Estimate producer-side virtual-tile communication cycles."""
+
+    # Virtual traffic is a pre-placement analysis shared by Allocation estimation
+    # and Placement; it does not depend on physical mapping decisions.
+    from maps.planning.placement.evaluation import build_virtual_traffic
+
+    virtual_transitions = build_virtual_transitions(graph, plans)
+    traffic = build_virtual_traffic(virtual_transitions, plans)
+    communication = {
+        stage_id: {
+            tile.tile_id: 0
+            for tile in virtual_submesh(plan).tiles
+        }
+        for stage_id, plan in plans.items()
+    }
+
+    for stage_id, plan in plans.items():
+        for virtual_tile in virtual_submesh(plan).tiles:
+            tile_id = virtual_tile.tile_id
+            l2_bytes = (
+                traffic.l2_read_weights[stage_id][tile_id]
+                + traffic.l2_write_weights[stage_id][tile_id]
+            )
+            if l2_bytes:
+                communication[stage_id][tile_id] += _ceil_div(
+                    l2_bytes,
+                    min(virtual_tile.memory.bandwidth, mesh.l2_memory.bandwidth),
+                )
+
+    for (source_stage_id, _), matrix in traffic.edge_matrices.items():
+        for (source_tile_id, destination_tile_id), bytes_ in matrix.items():
+            source_tile = mesh.tile_by_id(source_tile_id)
+            destination_tile = mesh.tile_by_id(destination_tile_id)
+            communication[source_stage_id][source_tile_id] += _ceil_div(
+                bytes_,
+                min(source_tile.memory.bandwidth, destination_tile.memory.bandwidth),
+            )
+    return communication
+
+
+def selection_objective(metrics: dict[int, float]) -> tuple[float, ...]:
+    """Order stage metrics so candidates compare worst bottlenecks first."""
+
+    return tuple(sorted(metrics.values(), reverse=True))
+
+
+def worst_tile_stage_compute(
+    stage_nodes: tuple[Node, ...],
+    node_output_layouts: tuple[tuple, ...],
+    submesh,
+    device_names: tuple[str, ...],
+) -> int:
+    """Return the greatest accumulated compute cost on any stage tile."""
+
+    return max(
+        (
+            sum(
+                _node_compute_cycles(
+                    node,
+                    output_layouts,
+                    tile,
+                    device_names[node_index],
+                )
+                for node_index, (node, output_layouts) in enumerate(
+                    zip(stage_nodes, node_output_layouts)
+                )
+            )
+            for tile in submesh.tiles
+        ),
+        default=0,
+    )
+
+
+def _node_compute_cycles(
+    node: Node,
+    output_layouts: tuple,
+    tile,
+    device_name: str,
+) -> int:
+    """Estimate compute cost for one node on one virtual tile."""
+
+    tile_work = node.payload.build_tile_work(output_layouts=output_layouts, tile=tile)
+    cost_model = node.payload.cost_model
+    compute_cost = cost_model.cost(
+        tile_work,
+        tile,
+        tile.device_by_name(device_name),
+    )
+    return int(compute_cost) + int(
+        cost_model.placement_cost(node=node, output_layouts=output_layouts)
+    )
+
+
+def _ceil_div(numerator: int, denominator: int) -> int:
+    """Return positive integer ceiling division."""
+
+    if denominator <= 0:
+        raise ValueError("denominator must be > 0")
+    return (numerator + denominator - 1) // denominator
+
+
+def print_stage_metric_breakdown(
+    enabled: bool,
+    stage_formation: StageFormation,
+    evaluation: SelectionEvaluation,
+) -> None:
+    """Print the canonical final compute and communication bottlenecks."""
+
+    if not enabled:
+        return
+    print("[allocation] final_stage_metric_breakdown:")
+    for stage_id, stage_nodes in stage_formation.items():
+        breakdown = evaluation.stage_breakdowns[stage_id]
+        print(
+            f"  stage={stage_id} nodes={_stage_label(stage_nodes)} "
+            f"compute={breakdown.compute_cycles} "
+            f"communication={breakdown.communication_cycles}"
+        )
+        for label in dict.fromkeys(
+            getattr(node.payload.cost_model, "diagnostic_label", None)
+            for node in stage_nodes
+        ):
+            if label is not None:
+                print(f"    cost_diagnostic={label}")
+
+
+def allocate(
+    graph: Graph,
+    mesh: Mesh,
+    stage_formation: StageFormation,
+    debug: bool = False,
+    compute_weight: float = 1.0,
+    communication_weight: float = 1.0,
+    num_token_slots: int = 2,
+) -> dict[int, StagePlan]:
+    """Choose virtual tile allocations and tensor layouts for all stages.
+
+    Contract:
+        ``stage_formation`` must cover every graph node exactly once.
+        ``compute_weight`` and ``communication_weight`` weight their respective
+        costs when comparing feasible allocations; they do not relax memory
+        constraints.
+
+    Behavior:
+        The pass validates and classifies the graph, seeds each stage with its
+        smallest L1-feasible tile count, greedily spends remaining mesh tiles to
+        improve the ordered global bottleneck, then chooses the best logical
+        layout for every final allocation.
+
+    Returns:
+        A stage-id mapping of virtual ``StagePlan`` objects.  Their layouts are
+        final, but they contain no required physical placement decision.
+
+    Raises:
+        ValueError: If Stage formation is invalid or no complete L1-feasible
+            allocation fits on the mesh.
+    """
+
+    context = build_allocation_context(graph, stage_formation)
+    analyzer = StageCandidateAnalyzer(
+        context.stage_formation,
+        mesh,
+        context.initializer_tensors,
+        num_token_slots,
+    )
+
+    candidates = seed_stage_candidates(
+        context,
+        mesh,
+        analyzer,
+        debug,
+    )
+
+    candidates, evaluation = grow_stage_candidates(
+        context,
+        mesh,
+        candidates,
+        analyzer,
+        compute_weight=compute_weight,
+        communication_weight=communication_weight,
+        debug=debug,
+    )
+    plans = {
+        stage_id: candidate.plan
+        for stage_id, candidate in candidates.items()
+    }
+
+    if debug:
+        print(
+            "[allocation] "
+            f"final_tile_counts="
+            f"{ {stage_id: plan.tile_count for stage_id, plan in plans.items()} }"
+        )
+        print(
+            "[allocation] "
+            f"final_logical_shapes="
+            f"{ {stage_id: plan.logical_shape for stage_id, plan in plans.items()} }"
+        )
+
+    print_stage_metric_breakdown(
+        enabled=debug,
+        stage_formation=context.stage_formation,
+        evaluation=evaluation,
+    )
+    return plans
+
+
+__all__ = ["allocate"]

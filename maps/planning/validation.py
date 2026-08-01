@@ -11,8 +11,8 @@ from maps.planning.execution_plan import (
     LocalInput,
     TransitionSource,
 )
-from maps.planning.layouts import TensorSlice, TensorSubSlice
-from maps.planning.memory import (
+from maps.planning.mapping import TensorSlice, TensorSubSlice
+from maps.planning.execution_plan import (
     estimate_stage_l1_memory_for_tile,
     estimate_stage_l2_memory,
 )

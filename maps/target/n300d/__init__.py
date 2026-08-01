@@ -26,7 +26,7 @@ from .mesh import (
     TILE_NOC_COORDS,
     build_mesh,
 )
-from .specialization import specialize
+from .specialize import specialize
 
 __all__ = [
     "DEVICE_ASSIGNMENT",

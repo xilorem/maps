@@ -2,8 +2,8 @@ from maps.hardware import WorkKind
 from maps.target.magia import build_mesh as magia_mesh
 from maps.target.magia import SPATZ_DEVICE
 from maps.graph import TensorDType
-from maps.planning.layouts import LayoutAxis, LayoutAxisMode, TensorLayout
-from maps.planning.submesh import Submesh
+from maps.planning.mapping import LayoutAxis, LayoutAxisMode, TensorLayout
+from maps.planning.mapping import Submesh
 from maps.graph import Tensor
 from maps.operations.elementwise import ElementwiseCostModel
 from maps.operations.elementwise import (

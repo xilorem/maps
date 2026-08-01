@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import TypeAlias
 
 from maps.graph import Tensor
-from maps.planning.layouts import TensorSlice, TensorSubSlice
+from maps.planning.mapping import TensorSlice, TensorSubSlice
 
 
 @dataclass(frozen=True)

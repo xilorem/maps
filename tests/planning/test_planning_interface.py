@@ -27,14 +27,14 @@ from maps.planning import (
     plan,
     validate_execution_plan,
 )
-from maps.planning.construction import construct_execution_plan
-from maps.planning.memory import estimate_stage_l1_memory_for_tile
-from maps.planning.reporting import print_execution_plan_stage_cost
+from maps.planning.execution_plan import construct_execution_plan
+from maps.planning.execution_plan import estimate_stage_l1_memory_for_tile
+from maps.planning.execution_plan import print_execution_plan_stage_cost
 from maps.planning.allocation import allocate
-from maps.planning.layouts import TensorLayout
+from maps.planning.mapping import TensorLayout
 from maps.planning.placement import place
-from maps.planning.submesh import Submesh
-from maps.planning.stage_formation import form_stages
+from maps.planning.mapping import Submesh
+from maps.planning.stages import form_stages
 from maps.planning.stages import StagePlan
 from maps.planning.transitions import (
     InputTransition,
@@ -50,16 +50,16 @@ from tests.target.test_precision_lowering import _gemm_model
 def test_planning_owns_stage_formation_and_allocation_contracts() -> None:
     assert StageFormationOptions.__module__ == "maps.planning.options"
     assert AllocationOptions.__module__ == "maps.planning.options"
-    assert form_stages.__module__ == "maps.planning.stage_formation"
-    assert allocate.__module__ == "maps.planning.allocation"
+    assert form_stages.__module__ == "maps.planning.stages"
+    assert allocate.__module__ == "maps.planning.allocation.selection"
     assert StagePlan.__module__ == "maps.planning.stages"
 
 
 def test_planning_owns_transitions_placement_and_layout_contracts() -> None:
     assert build_virtual_transitions.__module__ == "maps.planning.transitions.compile"
     assert place.__module__ == "maps.planning.placement"
-    assert TensorLayout.__module__ == "maps.planning.layouts"
-    assert Submesh.__module__ == "maps.planning.submesh"
+    assert TensorLayout.__module__ == "maps.planning.mapping"
+    assert Submesh.__module__ == "maps.planning.mapping"
 
 
 def test_planning_owns_execution_plan_construction_and_validation() -> None:
@@ -72,13 +72,13 @@ def test_planning_owns_execution_plan_construction_and_validation() -> None:
     assert InitializerInput.__module__ == "maps.planning.execution_plan"
     assert TransitionSource.__module__ == "maps.planning.execution_plan"
     assert LocalInput.__module__ == "maps.planning.execution_plan"
-    assert construct_execution_plan.__module__ == "maps.planning.construction"
+    assert construct_execution_plan.__module__ == "maps.planning.execution_plan"
     assert PlanningConstraints.__module__ == "maps.planning.validation"
     assert ConstraintViolation.__module__ == "maps.planning.validation"
     assert ConstraintReport.__module__ == "maps.planning.validation"
     assert validate_execution_plan.__module__ == "maps.planning.validation"
-    assert estimate_stage_l1_memory_for_tile.__module__ == "maps.planning.memory"
-    assert print_execution_plan_stage_cost.__module__ == "maps.planning.reporting"
+    assert estimate_stage_l1_memory_for_tile.__module__ == "maps.planning.execution_plan"
+    assert print_execution_plan_stage_cost.__module__ == "maps.planning.execution_plan"
 
 
 def test_planning_has_no_downstream_deployment_dependencies() -> None:

@@ -4,7 +4,7 @@ import pytest
 
 from maps.hardware import Tile
 from maps.graph import Graph, Node, OpKind
-from maps.planning.layouts import (
+from maps.planning.mapping import (
     LayoutAxis,
     LayoutAxisMode,
     TensorLayout,
@@ -13,12 +13,12 @@ from maps.planning.layouts import (
     TensorSliceRef,
     tile_tensor_slice,
 )
-from maps.planning.submesh import Submesh
+from maps.planning.mapping import Submesh
 from maps.graph import Tensor
 from maps.target.magia import build_mesh as magia_mesh
 from maps.operations import OperationPayload
 from maps.planning.stages import StagePlacement, StagePlan
-from maps.planning.placement.traffic import build_virtual_traffic
+from maps.planning.placement.evaluation import build_virtual_traffic
 from maps.planning.transitions import (
     InputTransition,
     IntermediateTransition,

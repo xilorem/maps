@@ -1,16 +1,16 @@
 from maps.hardware import L2Memory, Mesh
 from maps.graph import Edge, Graph, Node, OpKind
-from maps.planning.submesh import Submesh
+from maps.planning.mapping import Submesh
 from maps.graph import Tensor
 from maps.operations.gemm import GemmPayload
 from maps.planning.stages import StagePlacement, StagePlan, virtual_submesh
 from maps.planning.placement import place
 from maps.planning.placement.evaluation import PlacementEvaluator, evaluate_placement
-from maps.planning.placement.ownership import assign_stage_ownerships
+from maps.planning.placement.regions import assign_stage_ownerships
 import maps.planning.placement.repair as placement_repair
-import maps.planning.placement.topology as placement_topology
-from maps.planning.placement.models import VirtualTraffic
-from maps.planning.placement.traffic import build_virtual_traffic
+import maps.planning.placement.regions as placement_topology
+from maps.planning.placement.evaluation import VirtualTraffic
+from maps.planning.placement.evaluation import build_virtual_traffic
 from maps.planning.transitions import VirtualIntermediateTransition, build_virtual_transitions
 from tests.noc_utils import rectangular_test_noc, rectangular_test_tiles
 

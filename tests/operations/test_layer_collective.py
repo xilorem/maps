@@ -1,9 +1,9 @@
 from maps.target.magia import build_mesh as magia_mesh
 from maps.graph import TensorDType
 from maps.graph import Node, OpKind
-from maps.planning.submesh import Submesh
+from maps.planning.mapping import Submesh
 from maps.graph import Tensor
-from maps.planning.allocation.cost import cost_estimator, placement_cost_estimator
+from maps.planning.allocation.candidates import cost_estimator, placement_cost_estimator
 from maps.operations.collective import AllReducePayload
 
 

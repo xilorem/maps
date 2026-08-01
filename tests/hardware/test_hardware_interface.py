@@ -16,7 +16,7 @@ from maps.hardware import (
     WorkKind,
     WorkSignature,
 )
-from maps.hardware.reporting import print_mesh
+from maps.hardware.mesh import print_mesh
 
 
 def test_hardware_interface_owns_reusable_physical_contracts() -> None:
@@ -29,7 +29,7 @@ def test_hardware_interface_owns_reusable_physical_contracts() -> None:
     assert WorkKind.__module__.startswith("maps.hardware")
     assert WorkSignature.__module__.startswith("maps.hardware")
     assert FixedDeviceAssignment.__module__.startswith("maps.hardware")
-    assert print_mesh.__module__ == "maps.hardware.reporting"
+    assert print_mesh.__module__ == "maps.hardware.mesh"
 
 
 def test_mesh_contract_contains_no_target_specialization_policy() -> None:

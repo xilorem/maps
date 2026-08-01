@@ -22,7 +22,7 @@ from maps.planning import (
     plan,
     validate_execution_plan,
 )
-from maps.planning.reporting import print_submeshes
+from maps.planning.execution_plan import print_submeshes
 
 DEFAULT_MODEL_PATH = PROJECT_ROOT / "examples" / "simple_three_stage.onnx"
 

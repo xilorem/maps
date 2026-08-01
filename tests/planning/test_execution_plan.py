@@ -3,7 +3,7 @@ from pathlib import Path
 
 from maps.graph import TensorDType
 from maps.graph import Edge, Graph, Node, OpKind
-from maps.planning.submesh import Submesh
+from maps.planning.mapping import Submesh
 from maps.graph import Tensor
 from maps.target.magia import build_mesh as magia_mesh
 from maps.operations.gemm import GemmPayload
@@ -19,10 +19,10 @@ from maps.planning import (
     TransitionSource,
     validate_execution_plan,
 )
-from maps.planning.construction import construct_execution_plan
-from maps.planning.memory import estimate_stage_l1_memory_for_tile
+from maps.planning.execution_plan import construct_execution_plan
+from maps.planning.execution_plan import estimate_stage_l1_memory_for_tile
 from maps.planning.stages import StagePlacement, StagePlan
-from maps.planning.allocation.memory import permanent_l1_allocation_for_tile
+from maps.planning.allocation.candidates import permanent_l1_allocation_for_tile
 from maps.planning.transitions import (
     InputTransition,
     IntermediateTransition,
@@ -264,7 +264,7 @@ def test_construct_execution_plan_unifies_communication_and_initializer_residenc
 
 def test_execution_plan_validation_rejects_transition_endpoint_mismatches() -> None:
     from maps.hardware import L2Memory, Mesh
-    from maps.planning.layouts import TensorRange, TensorSlice
+    from maps.planning.mapping import TensorRange, TensorSlice
     from maps.planning.transitions import InputDestination
     from tests.noc_utils import rectangular_test_noc, rectangular_test_tiles
 
@@ -393,7 +393,7 @@ def test_execution_plan_validation_rejects_transition_endpoint_mismatches() -> N
 
 def test_execution_plan_validation_rejects_mismatched_transfer_regions() -> None:
     from maps.hardware import L2Memory, Mesh
-    from maps.planning.layouts import (
+    from maps.planning.mapping import (
         LayoutAxis,
         LayoutAxisMode,
         TensorLayout,

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 from maps.hardware import Tile, WorkKind
 from maps.graph import Node, OpKind, Tensor
-from maps.planning.layouts import (
+from maps.planning.mapping import (
     LayoutAxis,
     LayoutAxisMode,
     TensorLayout,
@@ -15,7 +15,7 @@ from maps.planning.layouts import (
     TensorSliceRef,
     tile_tensor_slice,
 )
-from maps.planning.submesh import Submesh
+from maps.planning.mapping import Submesh
 from .contracts import (
     CompositeOpPayload,
     LayoutRelation,

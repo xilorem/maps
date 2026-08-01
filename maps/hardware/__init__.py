@@ -15,7 +15,7 @@ from .device import (
     same_dtype_signatures,
 )
 from .memory import L1Memory, L2Memory
-from .mesh import Mesh
+from .mesh import Mesh, print_mesh
 from .noc import (
     EndpointKind,
     NoC,
@@ -28,7 +28,6 @@ from .noc import (
     TrafficKind,
     TrafficPolicy,
 )
-from .reporting import print_mesh
 from .tile import Tile
 
 __all__ = [
