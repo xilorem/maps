@@ -13,6 +13,7 @@ from maps.planning.mapping import (
     TensorLayout,
     TensorSlice,
     TensorSliceRef,
+    partial_axis_to_shard,
     tile_tensor_slice,
 )
 from maps.planning.mapping import Submesh
@@ -119,15 +120,10 @@ class ReductionPayload(OpPayload):
         )
 
     def _input_layout_from_output_layout(self, output_layout: TensorLayout) -> TensorLayout:
-        def input_axis(axis: LayoutAxis) -> LayoutAxis:
-            if axis.mode is LayoutAxisMode.PARTIAL:
-                return LayoutAxis(LayoutAxisMode.SHARD, tensor_axis=axis.tensor_axis)
-            return axis
-
         return TensorLayout(
             submesh=output_layout.submesh,
-            mesh_x=input_axis(output_layout.mesh_x),
-            mesh_y=input_axis(output_layout.mesh_y),
+            mesh_x=partial_axis_to_shard(output_layout.mesh_x),
+            mesh_y=partial_axis_to_shard(output_layout.mesh_y),
             logical_width=output_layout.logical_width,
             logical_height=output_layout.logical_height,
         )

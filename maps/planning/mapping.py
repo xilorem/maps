@@ -34,6 +34,14 @@ class LayoutAxis:
             raise ValueError("tensor_axis out of range for tensor rank")
 
 
+def partial_axis_to_shard(axis: LayoutAxis) -> LayoutAxis:
+    """Return the input ownership that produced one Partial Value axis."""
+
+    if axis.mode is LayoutAxisMode.PARTIAL:
+        return LayoutAxis(LayoutAxisMode.SHARD, tensor_axis=axis.tensor_axis)
+    return axis
+
+
 @dataclass(frozen=True)
 class TensorLayout:
     """Distribution policy for one tensor on one submesh."""

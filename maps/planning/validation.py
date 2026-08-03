@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from maps.hardware import WorkSignature
+from maps.hardware import WorkKind, WorkSignature
 from maps.operations.collective import AllReducePayload
 from maps.planning.execution_plan import (
+    CollectiveGroup,
     ExecutionPlan,
     InitializerInput,
     LocalInput,
@@ -17,9 +18,8 @@ from maps.planning.mapping import (
     TensorLayout,
     TensorSlice,
     TensorSubSlice,
-    tensor_slice_num_bytes,
-    tile_tensor_slice,
 )
+from maps.planning.stages import derive_virtual_collective_groups
 from maps.planning.execution_plan import (
     estimate_stage_l1_memory_for_tile,
     estimate_stage_l2_memory,
@@ -299,6 +299,17 @@ def _validate_collective_groups(
                 f"stage {stage_id} layer {layer_index} is not a collective",
             )
         return
+    expected_work_kind = {
+        "sum": WorkKind.ALL_REDUCE_SUM,
+        "max": WorkKind.ALL_REDUCE_MAX,
+    }[layer.node.payload.reduction]
+    if layer.node.payload.work_kind is not expected_work_kind:
+        append_violation(
+            violations,
+            "collective_work_kind_collision",
+            f"stage {stage_id} layer {layer_index} reduction "
+            f"{layer.node.payload.reduction} uses {layer.node.payload.work_kind.name}",
+        )
     if not layer.collective_groups:
         append_violation(
             violations,
@@ -325,35 +336,66 @@ def _validate_collective_groups(
             "collective_group_binding_invalid",
             f"stage {stage_id} layer {layer_index} includes tiles outside its Submesh",
         )
+    expected_groups = _expected_physical_collective_groups(
+        stage_id,
+        layer_index,
+        execution_plan,
+    )
+    if expected_groups is not None and layer.collective_groups != expected_groups:
+        append_violation(
+            violations,
+            "collective_group_binding_invalid",
+            f"stage {stage_id} layer {layer_index} groups do not match its "
+            "ownership-derived physical binding",
+        )
     if not layer.outputs:
         return
     output = layer.outputs[0]
-    if output.tensor_id >= len(execution_plan.tensors):
-        return
-    tensor = execution_plan.tensors[output.tensor_id]
-    expected = {
-        tile.tile_id
-        for tile in stage.submesh.tiles
-        if tensor_slice_num_bytes(
-            tensor,
-            tile_tensor_slice(tensor, output.layout, tile),
-        )
-        > 0
-    }
-    if set(participant_ids) != expected:
-        append_violation(
-            violations,
-            "collective_group_coverage_invalid",
-            f"stage {stage_id} layer {layer_index} participants "
-            f"{sorted(set(participant_ids))} do not cover non-empty work "
-            f"{sorted(expected)}",
-        )
     if _layout_is_partial(output.layout):
         append_violation(
             violations,
             "collective_output_remains_partial",
             f"stage {stage_id} layer {layer_index} does not resolve its Partial Value",
         )
+
+
+def _expected_physical_collective_groups(
+    stage_id: int,
+    layer_index: int,
+    execution_plan: ExecutionPlan,
+) -> tuple[CollectiveGroup, ...] | None:
+    stage = execution_plan.stages[stage_id]
+    layer = stage.layers[layer_index]
+    if not layer.inputs or not isinstance(layer.inputs[0].source, LocalInput):
+        return None
+    source = layer.inputs[0].source
+    if source.layer_idx < 0 or source.layer_idx >= len(stage.layers):
+        return None
+    producer_output = next(
+        (
+            output
+            for output in stage.layers[source.layer_idx].outputs
+            if output.tensor_id == source.tensor_id
+        ),
+        None,
+    )
+    if producer_output is None or source.tensor_id >= len(execution_plan.tensors):
+        return None
+    virtual_groups = derive_virtual_collective_groups(
+        execution_plan.tensors[source.tensor_id],
+        producer_output.layout,
+    )
+    return tuple(
+        CollectiveGroup(
+            tuple(
+                sorted(
+                    stage.virtual_to_physical.get(tile_id, tile_id)
+                    for tile_id in virtual_group.virtual_tile_ids
+                )
+            )
+        )
+        for virtual_group in virtual_groups
+    )
 
 
 def _validate_layer_device(

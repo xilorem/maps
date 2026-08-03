@@ -8,6 +8,7 @@ from maps.graph import (
     ConstantStore,
     Edge,
     Graph,
+    GraphRewriteEffect,
     ImportedModel,
     Node,
     OpKind,
@@ -15,9 +16,11 @@ from maps.graph import (
     TensorDType,
     run_graph_rewrites_with_effects,
 )
-from maps.hardware import FixedDeviceAssignment
+from maps.hardware import FixedDeviceAssignment, WorkKind
 from maps.operations.elementwise import UnaryElementwisePayload
 from maps.operations.collective import AllReducePayload
+from maps.operations.normalization import GroupNormalizationPayload
+from maps.operations.reduction import GlobalAveragePoolPayload, ReduceSumPayload
 from maps.operations.softmax import SoftmaxPayload
 from maps.planning import (
     AllocationOptions,
@@ -57,9 +60,15 @@ from maps.planning.transitions import (
 )
 from maps.deployment import build_deployment_bundle
 from maps.deployment.serialization import execution_plan_json_payload
-from maps.target import SpecializationOptions, magia, n300d
+from maps.target import SpecializationOptions, SpecializationResult, magia, n300d
 
 from tests.target.test_precision_lowering import _gemm_model
+
+
+class _CollidingAllReducePayload(AllReducePayload):
+    @property
+    def work_kind(self) -> WorkKind:
+        return WorkKind.GROUP_REDUCE
 
 
 def test_planning_owns_stage_formation_and_allocation_contracts() -> None:
@@ -113,7 +122,13 @@ def test_planning_has_no_downstream_deployment_dependencies() -> None:
     }
 
 
-def test_magia_fuses_operations_around_decomposed_softmax_with_provenance() -> None:
+@pytest.fixture
+def fused_softmax_planning() -> tuple[
+    SpecializationResult,
+    tuple[GraphRewriteEffect, ...],
+    dict[int, StagePlan],
+    ExecutionPlan,
+]:
     x = Tensor("x", 2, (4, 8), 2, dtype=TensorDType.FLOAT16)
     produced = Tensor("produced", 2, (4, 8), 2, dtype=TensorDType.FLOAT16)
     normalized = Tensor("normalized", 2, (4, 8), 2, dtype=TensorDType.FLOAT16)
@@ -164,6 +179,23 @@ def test_magia_fuses_operations_around_decomposed_softmax_with_provenance() -> N
         mesh,
         stage_formation=stage_formation,
     )
+    execution_plan = plan(
+        specialized.model.graph,
+        mesh,
+        PlanningOptions(
+            placement=PlacementOptions(print_placement=False),
+            print_execution_plan_cost=False,
+        ),
+    )
+    return specialized, rewrite_effects, virtual_plans, execution_plan
+
+
+def test_magia_fuses_operations_around_decomposed_softmax_with_provenance(
+    fused_softmax_planning,
+) -> None:
+    specialized, rewrite_effects, virtual_plans, execution_plan = (
+        fused_softmax_planning
+    )
     virtual_collective_groups = tuple(
         groups
         for stage_plan in virtual_plans.values()
@@ -176,14 +208,6 @@ def test_magia_fuses_operations_around_decomposed_softmax_with_provenance() -> N
     assert len(virtual_collective_groups) == 2
     assert all(groups for groups in virtual_collective_groups)
 
-    execution_plan = plan(
-        specialized.model.graph,
-        mesh,
-        PlanningOptions(
-            placement=PlacementOptions(print_placement=False),
-            print_execution_plan_cost=False,
-        ),
-    )
     bundle = build_deployment_bundle(
         specialized,
         execution_plan,
@@ -243,6 +267,11 @@ def test_magia_fuses_operations_around_decomposed_softmax_with_provenance() -> N
         "stage_operation_limit_exceeded",
     )
 
+
+def test_validation_rejects_overlapping_collective_groups(
+    fused_softmax_planning,
+) -> None:
+    execution_plan = fused_softmax_planning[-1]
     collective_index = next(
         index
         for index, layer in enumerate(execution_plan.stages[0].layers)
@@ -272,6 +301,84 @@ def test_magia_fuses_operations_around_decomposed_softmax_with_provenance() -> N
         ).violations
     }
 
+
+def test_validation_rejects_inconsistent_collective_group_binding(
+    fused_softmax_planning,
+) -> None:
+    execution_plan = fused_softmax_planning[-1]
+    collective_index = next(
+        index
+        for index, layer in enumerate(execution_plan.stages[0].layers)
+        if isinstance(layer.node.payload, AllReducePayload)
+    )
+    collective = execution_plan.stages[0].layers[collective_index]
+    tile_ids = tuple(sorted(execution_plan.stages[0].submesh.tile_ids))
+    regrouped = (
+        tuple(CollectiveGroup((tile_id,)) for tile_id in tile_ids)
+        if len(collective.collective_groups) == 1
+        else (CollectiveGroup(tile_ids),)
+    )
+    layers = list(execution_plan.stages[0].layers)
+    layers[collective_index] = replace(collective, collective_groups=regrouped)
+    invalid_plan = replace(
+        execution_plan,
+        stages=(replace(execution_plan.stages[0], layers=tuple(layers)),),
+    )
+
+    assert "collective_group_binding_invalid" in {
+        violation.kind
+        for violation in validate_execution_plan(
+            invalid_plan,
+            PlanningConstraints(),
+        ).violations
+    }
+
+
+def test_validation_accepts_nonidentity_physical_collective_binding(
+    fused_softmax_planning,
+) -> None:
+    specialized = fused_softmax_planning[0]
+    mesh = magia.build_mesh(width=3, height=1)
+    execution_plan = plan(
+        specialized.model.graph,
+        mesh,
+        PlanningOptions(
+            stage_formation=StageFormationOptions(max_stage_operations=1),
+            placement=PlacementOptions(print_placement=False),
+            print_execution_plan_cost=False,
+        ),
+    )
+    collective_stage = next(
+        stage
+        for stage in execution_plan.stages
+        if any(
+            isinstance(layer.node.payload, AllReducePayload)
+            for layer in stage.layers
+        )
+    )
+
+    assert any(
+        virtual_tile_id != physical_tile_id
+        for virtual_tile_id, physical_tile_id in (
+            collective_stage.virtual_to_physical.items()
+        )
+    )
+    assert validate_execution_plan(
+        execution_plan,
+        PlanningConstraints(),
+    ).is_valid
+
+
+def test_validation_rejects_unresolved_partial_collective_output(
+    fused_softmax_planning,
+) -> None:
+    execution_plan = fused_softmax_planning[-1]
+    collective_index = next(
+        index
+        for index, layer in enumerate(execution_plan.stages[0].layers)
+        if isinstance(layer.node.payload, AllReducePayload)
+    )
+    collective = execution_plan.stages[0].layers[collective_index]
     partial_layers = list(execution_plan.stages[0].layers)
     partial_output = collective.outputs[0]
     partial_layers[collective_index] = replace(
@@ -296,6 +403,11 @@ def test_magia_fuses_operations_around_decomposed_softmax_with_provenance() -> N
         "partial_value_consumed_by_ordinary_layer",
     } <= {violation.kind for violation in partial_report.violations}
 
+
+def test_validation_rejects_partial_value_transition_escape(
+    fused_softmax_planning,
+) -> None:
+    execution_plan = fused_softmax_planning[-1]
     escaping_layers = list(execution_plan.stages[0].layers)
     final_layer = escaping_layers[-1]
     final_output = final_layer.outputs[0]
@@ -322,6 +434,153 @@ def test_magia_fuses_operations_around_decomposed_softmax_with_provenance() -> N
             PlanningConstraints(),
         ).violations
     }
+
+
+def test_validation_rejects_collective_work_kind_collision(
+    fused_softmax_planning,
+) -> None:
+    execution_plan = fused_softmax_planning[-1]
+    layers = list(execution_plan.stages[0].layers)
+    collective_index = next(
+        index
+        for index, layer in enumerate(layers)
+        if isinstance(layer.node.payload, AllReducePayload)
+    )
+    collective = layers[collective_index]
+    payload = collective.node.payload
+    layers[collective_index] = replace(
+        collective,
+        node=replace(
+            collective.node,
+            payload=_CollidingAllReducePayload(
+                payload.op_name,
+                payload.x,
+                payload.output,
+                payload.reduction,
+            ),
+        ),
+    )
+    invalid_plan = replace(
+        execution_plan,
+        stages=(replace(execution_plan.stages[0], layers=tuple(layers)),),
+    )
+
+    assert "collective_work_kind_collision" in {
+        violation.kind
+        for violation in validate_execution_plan(
+            invalid_plan,
+            PlanningConstraints(),
+        ).violations
+    }
+
+
+def _plan_collective_graph(graph: Graph) -> ExecutionPlan:
+    model, _ = run_graph_rewrites_with_effects(
+        ImportedModel(graph, ConstantStore(()))
+    )
+    mesh = magia.build_mesh(width=2, height=1)
+    specialized = magia.specialize(
+        model,
+        mesh,
+        SpecializationOptions(enable_precision_lowering=False),
+    )
+    return plan(
+        specialized.model.graph,
+        mesh,
+        PlanningOptions(
+            placement=PlacementOptions(print_placement=False),
+            print_execution_plan_cost=False,
+        ),
+    )
+
+
+def _reduce_sum_graph() -> Graph:
+    x = Tensor("x", 2, (4, 8), 2, dtype=TensorDType.FLOAT16)
+    output = Tensor("output", 2, (4, 1), 2, dtype=TensorDType.FLOAT16)
+    node = Node(
+        "reduce_sum",
+        OpKind.REDUCTION,
+        (x,),
+        (output,),
+        ReduceSumPayload(x, output, axis=1),
+    )
+    return Graph(
+        "reduce_sum",
+        tensors=(x, output),
+        nodes=(node,),
+        inputs=(x,),
+        outputs=(output,),
+    )
+
+
+def _global_average_pool_graph() -> Graph:
+    x = Tensor("x", 4, (1, 2, 4, 8), 2, dtype=TensorDType.FLOAT16)
+    output = Tensor("output", 4, (1, 2, 1, 1), 2, dtype=TensorDType.FLOAT16)
+    node = Node(
+        "global_average_pool",
+        OpKind.REDUCTION,
+        (x,),
+        (output,),
+        GlobalAveragePoolPayload(x, output),
+    )
+    return Graph(
+        "global_average_pool",
+        tensors=(x, output),
+        nodes=(node,),
+        inputs=(x,),
+        outputs=(output,),
+    )
+
+
+def _group_normalization_graph() -> Graph:
+    x = Tensor("x", 4, (1, 4, 2, 2), 2, dtype=TensorDType.FLOAT16)
+    scale = Tensor("scale", 1, (4,), 2, dtype=TensorDType.FLOAT16)
+    bias = Tensor("bias", 1, (4,), 2, dtype=TensorDType.FLOAT16)
+    output = Tensor("output", 4, x.dims, 2, dtype=TensorDType.FLOAT16)
+    node = Node(
+        "group_normalization",
+        OpKind.CUSTOM,
+        (x, scale, bias),
+        (output,),
+        GroupNormalizationPayload(x, scale, bias, output, num_groups=2),
+    )
+    return Graph(
+        "group_normalization",
+        tensors=(x, scale, bias, output),
+        nodes=(node,),
+        inputs=(x, scale, bias),
+        outputs=(output,),
+    )
+
+
+@pytest.mark.parametrize(
+    "graph",
+    (_reduce_sum_graph(), _global_average_pool_graph(), _group_normalization_graph()),
+    ids=("reduce_sum", "global_average_pool", "group_normalization"),
+)
+def test_composite_reductions_use_complete_collective_groups_through_planning(
+    graph: Graph,
+) -> None:
+    execution_plan = _plan_collective_graph(graph)
+    collective_layers = tuple(
+        layer
+        for stage in execution_plan.stages
+        for layer in stage.layers
+        if isinstance(layer.node.payload, AllReducePayload)
+    )
+
+    assert collective_layers
+    assert all(layer.collective_groups for layer in collective_layers)
+    assert all(
+        output.layout.mesh_x.mode is not LayoutAxisMode.PARTIAL
+        and output.layout.mesh_y.mode is not LayoutAxisMode.PARTIAL
+        for layer in collective_layers
+        for output in layer.outputs
+    )
+    assert validate_execution_plan(
+        execution_plan,
+        PlanningConstraints(),
+    ).is_valid
 
 
 @pytest.mark.parametrize(

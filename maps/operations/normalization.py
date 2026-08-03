@@ -13,6 +13,7 @@ from maps.planning.mapping import (
     TensorRange,
     TensorSlice,
     TensorSliceRef,
+    partial_axis_to_shard,
     tile_tensor_slice,
 )
 from maps.planning.mapping import Submesh
@@ -102,15 +103,10 @@ class GroupReducePayload(OpPayload):
         tile: Tile,
     ) -> GroupReduceTileWork:
         output_layout = self.single_output_layout(output_layouts)
-        def sharded(axis: LayoutAxis) -> LayoutAxis:
-            if axis.mode is LayoutAxisMode.PARTIAL:
-                return LayoutAxis(LayoutAxisMode.SHARD, tensor_axis=axis.tensor_axis)
-            return axis
-
         input_layout = TensorLayout(
             submesh=output_layout.submesh,
-            mesh_x=sharded(output_layout.mesh_x),
-            mesh_y=sharded(output_layout.mesh_y),
+            mesh_x=partial_axis_to_shard(output_layout.mesh_x),
+            mesh_y=partial_axis_to_shard(output_layout.mesh_y),
             logical_width=output_layout.logical_width,
             logical_height=output_layout.logical_height,
         )
