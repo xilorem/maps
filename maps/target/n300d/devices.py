@@ -2,6 +2,7 @@
 
 from maps.graph import TensorDType
 from maps.hardware import (
+    CollectiveCost,
     DMADevice,
     DMAJob,
     DeviceKind,
@@ -98,6 +99,16 @@ VECTOR_DEVICE = VectorDevice(
     throughput={work_kind: 1 for work_kind in _LOCAL_WORK},
     capabilities=_LOCAL_CAPABILITIES,
     vector_length=32,
+    collective_costs={
+        WorkKind.ALL_REDUCE_MAX: CollectiveCost(
+            participant_rounds=1,
+            hop_cycles=1,
+        ),
+        WorkKind.ALL_REDUCE_SUM: CollectiveCost(
+            participant_rounds=1,
+            hop_cycles=1,
+        ),
+    },
 )
 MATRIX_DEVICE = MatrixDevice(
     name="tensix_matrix",

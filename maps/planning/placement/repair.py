@@ -10,7 +10,7 @@ from maps.planning.placement.evaluation import PlacementEvaluator
 from maps.planning.placement.evaluation import (
     PlacementEvaluation,
     RepairCandidate,
-    TileIOScore,
+    TilePlacementScore,
     VirtualTraffic,
 )
 from maps.planning.placement.regions import assign_stage_ownerships
@@ -241,7 +241,7 @@ def choose_repair_regions(
     placements: dict[int, StagePlacement],
     traffic: VirtualTraffic,
     evaluation: PlacementEvaluation,
-    worst_tile: TileIOScore,
+    worst_tile: TilePlacementScore,
 ) -> list[RepairCandidate]:
     """Rank local repairs using bottleneck blame and physical blockers."""
 

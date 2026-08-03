@@ -8,7 +8,7 @@ from maps.graph import Node
 from maps.hardware import Mesh
 from maps.planning.mapping import tensor_slice_num_bytes
 from maps.planning.stages import StagePlacement, StagePlan, virtual_submesh
-from maps.planning.stage_latency import estimate_stage_latency
+from maps.planning.stage_latency import estimate_physical_stage_latency
 from maps.planning.transitions import (
     VirtualInputTransition,
     VirtualIntermediateTransition,
@@ -95,7 +95,7 @@ class PlacementEvaluator:
         self,
         placements: dict[int, StagePlacement],
         stage_ids: frozenset[int],
-    ) -> dict[int, TileIOScore]:
+    ) -> dict[int, TilePlacementScore]:
         tile_writes = {
             tile_id: 0
             for stage_id in stage_ids
@@ -159,7 +159,7 @@ class PlacementEvaluator:
             for stage_id in stage_ids
         }
         return {
-            tile_id: TileIOScore(
+            tile_id: TilePlacementScore(
                 tile_id=tile_id,
                 stage_id=stage_id,
                 tile_to_tile_writes=tile_writes[tile_id],
@@ -182,17 +182,7 @@ class PlacementEvaluator:
     ) -> int:
         if not any(plan.virtual_collective_groups):
             return 0
-        return estimate_stage_latency(
-            stage_nodes=plan.nodes,
-            node_output_layouts=plan.node_output_layouts,
-            virtual_tiles=virtual_submesh(plan).tiles,
-            device_names=plan.device_names,
-            virtual_collective_groups=plan.virtual_collective_groups,
-            physical_tiles_by_virtual_id={
-                virtual_id: self._mesh.tile_by_id(physical_id)
-                for virtual_id, physical_id in placement.virtual_to_physical.items()
-            },
-        )
+        return estimate_physical_stage_latency(plan, self._mesh, placement)
 
 
 def evaluate_placement(
@@ -313,15 +303,20 @@ def _compile_transfers(
 
 def _placement_evaluation(
     placements: dict[int, StagePlacement],
-    tile_scores: dict[int, TileIOScore],
+    tile_scores: dict[int, TilePlacementScore],
 ) -> PlacementEvaluation:
-    objective = tile_score_objective(tile_scores)
     worst_tile_id = max(
         tile_scores,
         key=lambda tile_id: (tile_scores[tile_id].score, -tile_id),
         default=None,
     )
     stage_breakdowns = _stage_breakdowns(placements, tile_scores)
+    objective = selection_objective(
+        {
+            stage_id: breakdown.weighted_bottleneck
+            for stage_id, breakdown in stage_breakdowns.items()
+        }
+    )
     return PlacementEvaluation(
         placements=placements,
         tile_scores=tile_scores,
@@ -331,28 +326,16 @@ def _placement_evaluation(
     )
 
 
-def tile_score_objective(
-    tile_scores: dict[int, TileIOScore],
-    k: int = 5,
-) -> tuple[float, float, float, float]:
-    """Return deterministic max-first aggregate Placement objectives."""
+def selection_objective(metrics: dict[int, float]) -> tuple[float, ...]:
+    """Match Allocation's deterministic worst-Stage-first comparison."""
 
-    scores = sorted(
-        (score.score for score in tile_scores.values()),
-        reverse=True,
-    )
-    return (
-        scores[0] if scores else 0,
-        scores[1] if len(scores) > 1 else 0,
-        sum(scores[:k]),
-        sum(scores),
-    )
+    return tuple(sorted(metrics.values(), reverse=True))
 
 
 def _stage_breakdowns(
     placements: dict[int, StagePlacement],
-    tile_scores: dict[int, TileIOScore],
-) -> dict[int, StageIOBreakdown]:
+    tile_scores: dict[int, TilePlacementScore],
+) -> dict[int, StagePlacementBreakdown]:
     """Select the worst physical tile in every stage."""
 
     breakdowns = {}
@@ -363,10 +346,10 @@ def _stage_breakdowns(
             default=None,
         )
         if worst_tile is None:
-            breakdowns[stage_id] = StageIOBreakdown(None, 0, 0, 0, 0, 0)
+            breakdowns[stage_id] = StagePlacementBreakdown(None, 0, 0, 0, 0, 0)
             continue
         score = tile_scores[worst_tile]
-        breakdowns[stage_id] = StageIOBreakdown(
+        breakdowns[stage_id] = StagePlacementBreakdown(
             physical_tile_id=worst_tile,
             l2_read=score.l2_reads,
             l2_write=score.l2_writes,
@@ -432,8 +415,8 @@ class VirtualTraffic:
 
 
 @dataclass(frozen=True)
-class TileIOScore:
-    """Exact physical IO accounting for one tile."""
+class TilePlacementScore:
+    """Exact physical placement score for one tile."""
 
     tile_id: int
     stage_id: int | None
@@ -457,8 +440,8 @@ class TileIOScore:
 
 
 @dataclass(frozen=True)
-class StageIOBreakdown:
-    """Worst physical tile IO components for one placed stage."""
+class StagePlacementBreakdown:
+    """Latency and worst-tile communication for one placed Stage."""
 
     physical_tile_id: int | None
     l2_read: int
@@ -479,9 +462,9 @@ class PlacementEvaluation:
     """Exact score for a complete ownership-aware Placement."""
 
     placements: dict[int, StagePlacement]
-    tile_scores: dict[int, TileIOScore]
-    stage_breakdowns: dict[int, StageIOBreakdown]
-    objective: tuple[float, float, float, float]
+    tile_scores: dict[int, TilePlacementScore]
+    stage_breakdowns: dict[int, StagePlacementBreakdown]
+    objective: tuple[float, ...]
     worst_tile_id: int | None
 
 

@@ -166,7 +166,9 @@ class StageCandidateAnalyzer:
                     scratch_l1_bytes=max(
                         (
                             tile.device_by_name(device_names[node_index])
-                            .temporary_l1_bytes(node_tile_work[node_index][tile_index])
+                            .temporary_l1_bytes(
+                                WorkSignature.from_node(stage_nodes[node_index])
+                            )
                             for node_index in range(len(stage_nodes))
                         ),
                         default=0,
@@ -179,6 +181,7 @@ class StageCandidateAnalyzer:
                 for fact, tile in zip(tile_facts, submesh.tiles)
             ):
                 continue
+            collective_groups = _stage_collective_groups(stage_nodes, layouts)
             candidate = StageCandidate(
                 plan=StagePlan(
                     stage_id=stage_id,
@@ -187,10 +190,7 @@ class StageCandidateAnalyzer:
                     nodes=stage_nodes,
                     node_output_layouts=layouts,
                     device_names=device_names,
-                    virtual_collective_groups=_stage_collective_groups(
-                        stage_nodes,
-                        layouts,
-                    ),
+                    virtual_collective_groups=collective_groups,
                 ),
                 tile_facts=tile_facts,
                 stage_latency=estimate_stage_latency(
@@ -198,10 +198,7 @@ class StageCandidateAnalyzer:
                     node_output_layouts=layouts,
                     virtual_tiles=submesh.tiles,
                     device_names=device_names,
-                    virtual_collective_groups=_stage_collective_groups(
-                        stage_nodes,
-                        layouts,
-                    ),
+                    virtual_collective_groups=collective_groups,
                     node_tile_work=node_tile_work,
                 ),
             )

@@ -404,6 +404,7 @@ def test_collective_stage_placement_prefers_nearer_physical_participants(
     assert adjacent.stage_breakdowns[0].stage_latency < (
         distant.stage_breakdowns[0].stage_latency
     )
+    assert len(adjacent.objective) == 1
     assert adjacent.objective < distant.objective
 
 

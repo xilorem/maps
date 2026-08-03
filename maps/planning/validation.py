@@ -171,13 +171,14 @@ def _validate_stage(
         )
 
     collective_bindings_valid = True
+    device_bindings_valid = True
     for layer_index, layer in enumerate(stage.layers):
-        _validate_layer_device(
+        device_bindings_valid = _validate_layer_device(
             violations,
             stage_id,
             layer_index,
             execution_plan,
-        )
+        ) and device_bindings_valid
         collective_bindings_valid = _validate_collective_groups(
             violations,
             stage_id,
@@ -233,6 +234,7 @@ def _validate_stage(
         constraints.enforce_l1_capacity
         and tensor_bindings_valid
         and collective_bindings_valid
+        and device_bindings_valid
     ):
         for tile in stage.submesh.tiles:
             required_memory = estimate_stage_l1_memory_for_tile(
@@ -432,7 +434,7 @@ def _validate_layer_device(
     stage_id: int,
     layer_index: int,
     execution_plan: ExecutionPlan,
-) -> None:
+) -> bool:
     stage = execution_plan.stages[stage_id]
     layer = stage.layers[layer_index]
     try:
@@ -444,7 +446,7 @@ def _validate_layer_device(
             f"stage {stage_id} layer {layer_index} cannot validate its Device "
             f"Assignment: {exc}",
         )
-        return
+        return False
     if layer.device_name is None:
         append_violation(
             violations,
@@ -452,7 +454,7 @@ def _validate_layer_device(
             f"stage {stage_id} layer {layer_index} node {layer.node.name} with "
             f"{signature} has no retained Device name",
         )
-        return
+        return False
     for tile in stage.submesh.tiles:
         configured_name = tile.device_assignment.assignments.get(signature)
         try:
@@ -463,7 +465,7 @@ def _validate_layer_device(
                 "layer_device_assignment_invalid",
                 f"stage {stage_id} layer {layer_index} node {layer.node.name}: {exc}",
             )
-            return
+            return False
         if configured_name != layer.device_name or not device.supports(signature):
             append_violation(
                 violations,
@@ -473,7 +475,8 @@ def _validate_layer_device(
                 f"but configured assignment is {configured_name!r} and the Device "
                 f"capability match is {device.supports(signature)}",
             )
-            return
+            return False
+    return True
 
 
 def _validate_initializer_input(

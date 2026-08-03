@@ -1,6 +1,7 @@
 """Reusable physical hardware and tile-execution contracts."""
 
 from .device import (
+    CollectiveCost,
     DMADevice,
     DMAJob,
     Device,
@@ -31,6 +32,7 @@ from .noc import (
 from .tile import Tile
 
 __all__ = [
+    "CollectiveCost",
     "DMADevice",
     "DMAJob",
     "Device",

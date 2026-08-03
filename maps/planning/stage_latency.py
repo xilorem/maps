@@ -5,16 +5,22 @@ from __future__ import annotations
 from typing import cast
 
 from maps.graph import Node
-from maps.hardware import Tile
+from maps.hardware import Mesh, Tile
 from maps.operations.collective import AllReducePayload
 from maps.operations.contracts import OpPayload, TileWork
-from maps.planning.stages import VirtualCollectiveGroup
+from maps.planning.mapping import TensorLayout
+from maps.planning.stages import (
+    StagePlacement,
+    StagePlan,
+    VirtualCollectiveGroup,
+    virtual_submesh,
+)
 
 
 def estimate_stage_latency(
     *,
     stage_nodes: tuple[Node, ...],
-    node_output_layouts: tuple[tuple, ...],
+    node_output_layouts: tuple[tuple[TensorLayout, ...], ...],
     virtual_tiles: tuple[Tile, ...],
     device_names: tuple[str, ...],
     virtual_collective_groups: tuple[
@@ -84,4 +90,24 @@ def estimate_stage_latency(
     return latency + max(phase_cycles.values(), default=0)
 
 
-__all__ = ["estimate_stage_latency"]
+def estimate_physical_stage_latency(
+    plan: StagePlan,
+    mesh: Mesh,
+    placement: StagePlacement,
+) -> int:
+    """Bind one Stage Plan to physical participants and estimate its latency."""
+
+    return estimate_stage_latency(
+        stage_nodes=plan.nodes,
+        node_output_layouts=plan.node_output_layouts,
+        virtual_tiles=virtual_submesh(plan).tiles,
+        device_names=plan.device_names,
+        virtual_collective_groups=plan.virtual_collective_groups,
+        physical_tiles_by_virtual_id={
+            virtual_id: mesh.tile_by_id(physical_id)
+            for virtual_id, physical_id in placement.virtual_to_physical.items()
+        },
+    )
+
+
+__all__ = ["estimate_physical_stage_latency", "estimate_stage_latency"]

@@ -1,5 +1,6 @@
 from maps.graph import TensorDType
 from maps.hardware import (
+    CollectiveCost,
     DMADevice,
     DMAJob,
     Device,
@@ -28,6 +29,16 @@ TEST_SCALAR_DEVICE = ScalarDevice(
         (1, 2, 3, 5),
         (TensorDType.FLOAT16, TensorDType.FLOAT32),
     ),
+    collective_costs={
+        WorkKind.ALL_REDUCE_MAX: CollectiveCost(
+            participant_rounds=1,
+            hop_cycles=1,
+        ),
+        WorkKind.ALL_REDUCE_SUM: CollectiveCost(
+            participant_rounds=1,
+            hop_cycles=1,
+        ),
+    },
 )
 TEST_IDMA_READ_DEVICE = DMADevice(
     name="idma_read",

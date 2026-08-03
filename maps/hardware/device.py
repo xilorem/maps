@@ -96,6 +96,43 @@ class WorkSignature:
         )
 
 
+@dataclass(frozen=True)
+class CollectiveCost:
+    """Target-selected cost assumptions for one SDK collective implementation."""
+
+    participant_rounds: int
+    hop_cycles: int
+
+    def __post_init__(self) -> None:
+        if self.participant_rounds <= 0:
+            raise ValueError("participant_rounds must be > 0")
+        if self.hop_cycles < 0:
+            raise ValueError("hop_cycles must be >= 0")
+
+    def cycles(
+        self,
+        work: Any,
+        participants: tuple[Any, ...],
+        device: Device,
+    ) -> int:
+        """Price the concrete participant group using target-owned assumptions."""
+
+        if len(participants) <= 1:
+            return 0
+        transfer_cycles = device._throughput_cycles(
+            work.work_kind,
+            work.output_slices[0].tensor_slice.num_elements
+            * self.participant_rounds
+            * (len(participants) - 1),
+        )
+        diameter = max(
+            abs(left.x - right.x) + abs(left.y - right.y)
+            for left in participants
+            for right in participants
+        )
+        return transfer_cycles + self.hop_cycles * diameter
+
+
 def same_dtype_signatures(
     work_kinds: tuple[WorkKind, ...],
     input_counts: tuple[int, ...],
@@ -133,6 +170,7 @@ class Device:
     throughput: dict[WorkKind, float]
     startup_cycles: int = 0
     capabilities: frozenset[WorkSignature] = frozenset()
+    collective_costs: Mapping[WorkKind, CollectiveCost] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if type(self) is Device:
@@ -149,6 +187,11 @@ class Device:
             raise ValueError("device throughput values must be > 0")
         object.__setattr__(self, "throughput", dict(self.throughput))
         object.__setattr__(self, "capabilities", frozenset(self.capabilities))
+        object.__setattr__(
+            self,
+            "collective_costs",
+            MappingProxyType(dict(self.collective_costs)),
+        )
 
     def supports(self, signature: WorkSignature) -> bool:
         """Return whether this Device declares the exact typed capability."""
@@ -163,31 +206,20 @@ class Device:
         work: Any,
         participants: tuple[Any, ...],
     ) -> int:
-        """Estimate one synchronous collective supplied by this Device.
+        """Estimate one synchronous collective supplied by this Device."""
 
-        The default model is a topology-sensitive, non-rooted exchange. Targets
-        may override it when their SDK implementation uses another protocol.
-        """
+        try:
+            implementation_cost = self.collective_costs[work.work_kind]
+        except KeyError as exc:
+            raise ValueError(
+                f"device {self.name} has no collective cost for {work.work_kind.name}"
+            ) from exc
+        return implementation_cost.cycles(work, participants, self)
 
-        if len(participants) <= 1:
-            return 0
-        work_kind = work.work_kind
-        transfer_cycles = self._throughput_cycles(
-            work_kind,
-            work.output_slices[0].tensor_slice.num_elements
-            * (len(participants) - 1),
-        )
-        diameter = max(
-            abs(left.x - right.x) + abs(left.y - right.y)
-            for left in participants
-            for right in participants
-        )
-        return transfer_cycles + diameter
-
-    def temporary_l1_bytes(self, work: Any) -> int:
+    def temporary_l1_bytes(self, signature: WorkSignature) -> int:
         """Return reusable per-tile scratch required by this implementation."""
 
-        del work
+        del signature
         return 0
 
     def _throughput_cycles(self, work_kind: WorkKind, amount: int) -> int:

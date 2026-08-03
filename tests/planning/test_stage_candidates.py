@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 from typing import ClassVar
 
+import pytest
+
 from maps.hardware import (
     DeviceKind,
     FixedDeviceAssignment,
@@ -12,7 +14,7 @@ from maps.hardware import (
     WorkSignature,
 )
 from maps.graph import TensorDType
-from maps.graph import Node, OpKind
+from maps.graph import Graph, Node, OpKind
 from maps.planning.mapping import (
     LayoutAxis,
     LayoutAxisMode,
@@ -28,6 +30,7 @@ from maps.operations.elementwise import ElementwiseTileWork, UnaryElementwisePay
 from maps.operations.collective import AllReducePayload
 import maps.planning.allocation.candidates as candidates_module
 from maps.planning.allocation.candidates import StageCandidateAnalyzer
+from maps.planning.allocation import allocate
 from tests.noc_utils import rectangular_test_noc, rectangular_test_tiles
 
 
@@ -145,8 +148,8 @@ class _CollectiveTestDevice(ScalarDevice):
         del work
         return 0 if len(participants) == 1 else 7
 
-    def temporary_l1_bytes(self, work) -> int:
-        del work
+    def temporary_l1_bytes(self, signature) -> int:
+        del signature
         return 48
 
 
@@ -324,23 +327,7 @@ def test_stage_latency_flushes_opposite_tile_stragglers_at_collective_barrier() 
 
 
 def test_stage_candidate_reserves_largest_operation_scratch_once() -> None:
-    x = Tensor("x", 1, (8,), 2, dtype=TensorDType.FLOAT16)
-    intermediate = Tensor("intermediate", 1, (8,), 2, dtype=TensorDType.FLOAT16)
-    output = Tensor("output", 1, (8,), 2, dtype=TensorDType.FLOAT16)
-    first = Node(
-        "first",
-        OpKind.CUSTOM,
-        inputs=(x,),
-        outputs=(intermediate,),
-        payload=_FixedCostPayload(x, intermediate, (1, 1), 0),
-    )
-    second = Node(
-        "second",
-        OpKind.CUSTOM,
-        inputs=(intermediate,),
-        outputs=(output,),
-        payload=_FixedCostPayload(intermediate, output, (1, 1), 0),
-    )
+    first, second = _scratch_stage_nodes()
     feasible = StageCandidateAnalyzer(
         {0: (first, second)},
         _collective_mesh(l1_size=96),
@@ -358,6 +345,52 @@ def test_stage_candidate_reserves_largest_operation_scratch_once() -> None:
         for fact in feasible.tile_facts
     ) == ((48, 48, 96), (48, 48, 96))
     assert infeasible is None
+
+
+def test_operation_scratch_infeasibility_fails_allocation_without_splitting() -> None:
+    first, second = _scratch_stage_nodes()
+    graph = Graph(
+        "scratch",
+        tensors=tuple(
+            dict.fromkeys(first.inputs + first.outputs + second.outputs)
+        ),
+        nodes=(first, second),
+        inputs=first.inputs,
+        outputs=second.outputs,
+    )
+    stage_formation = {0: (first, second)}
+
+    with pytest.raises(ValueError, match="scratch_operation"):
+        allocate(
+            graph,
+            _collective_mesh(l1_size=95),
+            stage_formation,
+        )
+
+    assert stage_formation == {0: (first, second)}
+
+
+def _scratch_stage_nodes() -> tuple[Node, Node]:
+    x = Tensor("x", 1, (8,), 2, dtype=TensorDType.FLOAT16)
+    intermediate = Tensor("intermediate", 1, (8,), 2, dtype=TensorDType.FLOAT16)
+    output = Tensor("output", 1, (8,), 2, dtype=TensorDType.FLOAT16)
+    first = Node(
+        "first",
+        OpKind.CUSTOM,
+        inputs=(x,),
+        outputs=(intermediate,),
+        payload=_FixedCostPayload(x, intermediate, (1, 1), 0),
+        source_operation="scratch_operation",
+    )
+    second = Node(
+        "second",
+        OpKind.CUSTOM,
+        inputs=(intermediate,),
+        outputs=(output,),
+        payload=_FixedCostPayload(intermediate, output, (1, 1), 0),
+        source_operation="scratch_operation",
+    )
+    return first, second
 
 
 def test_equal_latency_shapes_prefer_smaller_logical_height() -> None:

@@ -9,6 +9,7 @@ from typing import Any
 
 from maps.graph import TensorDType
 from maps.hardware import (
+    CollectiveCost,
     DMADevice,
     DMAJob,
     DeviceKind,
@@ -127,6 +128,16 @@ CORE_DEVICE = ScalarDevice(
         WorkKind.OUTPUT_REFORMAT: 1,
     },
     capabilities=_CORE_CAPABILITIES,
+    collective_costs={
+        WorkKind.ALL_REDUCE_MAX: CollectiveCost(
+            participant_rounds=1,
+            hop_cycles=1,
+        ),
+        WorkKind.ALL_REDUCE_SUM: CollectiveCost(
+            participant_rounds=1,
+            hop_cycles=1,
+        ),
+    },
 )
 REDMULE_DEVICE = SystolicDevice(
     name="redmule",

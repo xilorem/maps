@@ -53,7 +53,7 @@ class StagePlan:
     tile_count: int
     logical_shape: tuple[int, int]
     nodes: tuple[Node, ...]
-    node_output_layouts: tuple[tuple, ...]
+    node_output_layouts: tuple[tuple[TensorLayout, ...], ...]
     device_names: tuple[str, ...]
     virtual_collective_groups: tuple[
         tuple[VirtualCollectiveGroup, ...], ...
