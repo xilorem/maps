@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, Mapping, cast
 
 if TYPE_CHECKING:
     from maps.graph import Node, TensorDType
+    from maps.hardware.tile import Tile
 
 
 class DeviceKind(Enum):
@@ -111,19 +112,22 @@ class CollectiveCost:
 
     def cycles(
         self,
-        work: Any,
-        participants: tuple[Any, ...],
-        device: Device,
+        work_kind: WorkKind,
+        element_count: int,
+        participants: tuple[Tile, ...],
+        elements_per_cycle: float,
+        startup_cycles: int,
     ) -> int:
         """Price the concrete participant group using target-owned assumptions."""
 
         if len(participants) <= 1:
             return 0
-        transfer_cycles = device._throughput_cycles(
-            work.work_kind,
-            work.output_slices[0].tensor_slice.num_elements
+        del work_kind
+        transfer_cycles = startup_cycles + ceil(
+            element_count
             * self.participant_rounds
-            * (len(participants) - 1),
+            * (len(participants) - 1)
+            / elements_per_cycle
         )
         diameter = max(
             abs(left.x - right.x) + abs(left.y - right.y)
@@ -203,18 +207,25 @@ class Device:
 
     def collective_cycles(
         self,
-        work: Any,
-        participants: tuple[Any, ...],
+        work_kind: WorkKind,
+        element_count: int,
+        participants: tuple[Tile, ...],
     ) -> int:
         """Estimate one synchronous collective supplied by this Device."""
 
         try:
-            implementation_cost = self.collective_costs[work.work_kind]
+            implementation_cost = self.collective_costs[work_kind]
         except KeyError as exc:
             raise ValueError(
-                f"device {self.name} has no collective cost for {work.work_kind.name}"
+                f"device {self.name} has no collective cost for {work_kind.name}"
             ) from exc
-        return implementation_cost.cycles(work, participants, self)
+        return implementation_cost.cycles(
+            work_kind,
+            element_count,
+            participants,
+            self.throughput[work_kind],
+            self.startup_cycles,
+        )
 
     def temporary_l1_bytes(self, signature: WorkSignature) -> int:
         """Return reusable per-tile scratch required by this implementation."""

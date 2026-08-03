@@ -138,4 +138,10 @@ class AllReduceCostModel(OpCostModel):
         participants: tuple[Tile, ...],
     ) -> int:
         del tile
-        return assigned_device.collective_cycles(tile_work, participants)
+        if not isinstance(tile_work, CollectiveTileWork):
+            raise TypeError("all-reduce cost requires Collective Tile Work")
+        return assigned_device.collective_cycles(
+            tile_work.work_kind,
+            tile_work.output_slice.num_elements,
+            participants,
+        )

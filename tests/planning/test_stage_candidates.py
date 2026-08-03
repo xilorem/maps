@@ -144,8 +144,8 @@ class _InverseSliceCostPayload(UnaryElementwisePayload):
 
 @dataclass(frozen=True)
 class _CollectiveTestDevice(ScalarDevice):
-    def collective_cycles(self, work, participants) -> int:
-        del work
+    def collective_cycles(self, work_kind, element_count, participants) -> int:
+        del work_kind, element_count
         return 0 if len(participants) == 1 else 7
 
     def temporary_l1_bytes(self, signature) -> int:
@@ -324,6 +324,107 @@ def test_stage_latency_flushes_opposite_tile_stragglers_at_collective_barrier() 
 
     assert candidate is not None
     assert candidate.stage_latency == 25
+
+
+def test_singleton_collective_adds_no_cross_tile_latency() -> None:
+    x = Tensor("x", 1, (8,), 2, dtype=TensorDType.FLOAT16)
+    partial = Tensor("partial", 1, (8,), 2, dtype=TensorDType.FLOAT16)
+    reduced = Tensor("reduced", 1, (8,), 2, dtype=TensorDType.FLOAT16)
+    output = Tensor("output", 1, (8,), 2, dtype=TensorDType.FLOAT16)
+    first = Node(
+        "first",
+        OpKind.CUSTOM,
+        inputs=(x,),
+        outputs=(partial,),
+        payload=_PartialFixedCostPayload(x, partial, (9,), 0),
+    )
+    collective = Node(
+        "collective",
+        OpKind.CUSTOM,
+        inputs=(partial,),
+        outputs=(reduced,),
+        payload=AllReducePayload("collective", partial, reduced, "sum"),
+    )
+    second = Node(
+        "second",
+        OpKind.CUSTOM,
+        inputs=(reduced,),
+        outputs=(output,),
+        payload=_FixedCostPayload(reduced, output, (1,), 0),
+    )
+
+    candidate = StageCandidateAnalyzer(
+        {0: (first, collective, second)},
+        _collective_mesh(),
+        frozenset(),
+    ).candidate(0, 1)
+
+    assert candidate is not None
+    assert candidate.stage_latency == 10
+
+
+def test_multiple_collectives_create_multiple_latency_phase_boundaries() -> None:
+    first_input = Tensor("first_input", 1, (8,), 2, dtype=TensorDType.FLOAT16)
+    first_partial = Tensor("first_partial", 1, (8,), 2, dtype=TensorDType.FLOAT16)
+    first_reduced = Tensor("first_reduced", 1, (8,), 2, dtype=TensorDType.FLOAT16)
+    second_input = Tensor("second_input", 1, (8,), 2, dtype=TensorDType.FLOAT16)
+    second_partial = Tensor("second_partial", 1, (8,), 2, dtype=TensorDType.FLOAT16)
+    second_reduced = Tensor("second_reduced", 1, (8,), 2, dtype=TensorDType.FLOAT16)
+    output = Tensor("output", 1, (8,), 2, dtype=TensorDType.FLOAT16)
+    first = Node(
+        "first",
+        OpKind.CUSTOM,
+        inputs=(first_input,),
+        outputs=(first_partial,),
+        payload=_PartialFixedCostPayload(first_input, first_partial, (9, 1), 0),
+    )
+    first_collective = Node(
+        "first_collective",
+        OpKind.CUSTOM,
+        inputs=(first_partial,),
+        outputs=(first_reduced,),
+        payload=AllReducePayload(
+            "first_collective",
+            first_partial,
+            first_reduced,
+            "sum",
+        ),
+    )
+    second = Node(
+        "second",
+        OpKind.CUSTOM,
+        inputs=(second_input,),
+        outputs=(second_partial,),
+        payload=_PartialFixedCostPayload(second_input, second_partial, (1, 9), 0),
+    )
+    second_collective = Node(
+        "second_collective",
+        OpKind.CUSTOM,
+        inputs=(second_partial,),
+        outputs=(second_reduced,),
+        payload=AllReducePayload(
+            "second_collective",
+            second_partial,
+            second_reduced,
+            "sum",
+        ),
+    )
+    final = Node(
+        "final",
+        OpKind.CUSTOM,
+        inputs=(second_reduced,),
+        outputs=(output,),
+        payload=_FixedCostPayload(second_reduced, output, (9, 1), 0),
+    )
+
+    candidate = StageCandidateAnalyzer(
+        {0: (first, first_collective, second, second_collective, final)},
+        _collective_mesh(),
+        frozenset(),
+    ).candidate(0, 2)
+
+    assert candidate is not None
+    assert candidate.stage_latency == 41
 
 
 def test_stage_candidate_reserves_largest_operation_scratch_once() -> None:
