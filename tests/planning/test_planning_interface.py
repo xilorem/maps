@@ -369,6 +369,33 @@ def test_validation_accepts_nonidentity_physical_collective_binding(
     ).is_valid
 
 
+def test_validation_reports_incomplete_and_nonbijective_collective_bindings(
+    fused_softmax_planning,
+) -> None:
+    execution_plan = fused_softmax_planning[-1]
+    stage = execution_plan.stages[0]
+    virtual_tile_ids = tuple(sorted(stage.virtual_to_physical))
+    incomplete = dict(stage.virtual_to_physical)
+    incomplete.pop(virtual_tile_ids[-1])
+    duplicate = {
+        virtual_tile_id: min(stage.submesh.tile_ids)
+        for virtual_tile_id in virtual_tile_ids
+    }
+
+    for binding in (incomplete, duplicate):
+        invalid_plan = replace(
+            execution_plan,
+            stages=(replace(stage, virtual_to_physical=binding),),
+        )
+        assert "collective_group_binding_invalid" in {
+            violation.kind
+            for violation in validate_execution_plan(
+                invalid_plan,
+                PlanningConstraints(),
+            ).violations
+        }
+
+
 def test_validation_rejects_unresolved_partial_collective_output(
     fused_softmax_planning,
 ) -> None:

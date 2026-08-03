@@ -17,6 +17,12 @@ from .contracts import OpCostModel, OpPayload, TileWork, sharded_layout
 from .contracts import LayoutRelation
 
 
+ALL_REDUCE_WORK_KINDS = {
+    "sum": WorkKind.ALL_REDUCE_SUM,
+    "max": WorkKind.ALL_REDUCE_MAX,
+}
+
+
 @dataclass(frozen=True)
 class CollectiveTileWork(TileWork):
     """Concrete collective slices associated with one tile."""
@@ -45,10 +51,7 @@ class AllReducePayload(OpPayload):
     reduction: str
     @property
     def work_kind(self) -> WorkKind:
-        return {
-            "sum": WorkKind.ALL_REDUCE_SUM,
-            "max": WorkKind.ALL_REDUCE_MAX,
-        }[self.reduction]
+        return ALL_REDUCE_WORK_KINDS[self.reduction]
 
     def __post_init__(self) -> None:
         if self.reduction not in {"sum", "max"}:

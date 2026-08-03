@@ -4,13 +4,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from maps.hardware import WorkKind, WorkSignature
-from maps.operations.collective import AllReducePayload
+from maps.hardware import WorkSignature
+from maps.operations.collective import ALL_REDUCE_WORK_KINDS, AllReducePayload
 from maps.planning.execution_plan import (
     CollectiveGroup,
     ExecutionPlan,
     InitializerInput,
+    Layer,
     LocalInput,
+    Stage,
     TransitionSource,
 )
 from maps.planning.mapping import (
@@ -168,6 +170,7 @@ def _validate_stage(
             f"stage {stage_id}: {exc}",
         )
 
+    collective_bindings_valid = True
     for layer_index, layer in enumerate(stage.layers):
         _validate_layer_device(
             violations,
@@ -175,12 +178,12 @@ def _validate_stage(
             layer_index,
             execution_plan,
         )
-        _validate_collective_groups(
+        collective_bindings_valid = _validate_collective_groups(
             violations,
             stage_id,
             layer_index,
             execution_plan,
-        )
+        ) and collective_bindings_valid
         for input_index, layer_input in enumerate(layer.inputs):
             source = layer_input.source
             if isinstance(source, InitializerInput):
@@ -226,7 +229,11 @@ def _validate_stage(
                     "uses a source outside the Execution Plan contract",
                 )
 
-    if constraints.enforce_l1_capacity and tensor_bindings_valid:
+    if (
+        constraints.enforce_l1_capacity
+        and tensor_bindings_valid
+        and collective_bindings_valid
+    ):
         for tile in stage.submesh.tiles:
             required_memory = estimate_stage_l1_memory_for_tile(
                 stage,
@@ -240,7 +247,7 @@ def _validate_stage(
                     f"stage {stage_id} requires {required_memory} L1 memory but "
                     f"tile {tile.tile_id} only provides {tile.memory.size}",
                 )
-    return tensor_bindings_valid
+    return tensor_bindings_valid and collective_bindings_valid
 
 
 def _layout_is_partial(layout: TensorLayout) -> bool:
@@ -287,28 +294,25 @@ def _validate_collective_groups(
     stage_id: int,
     layer_index: int,
     execution_plan: ExecutionPlan,
-) -> None:
+) -> bool:
     stage = execution_plan.stages[stage_id]
     layer = stage.layers[layer_index]
-    is_collective = isinstance(layer.node.payload, AllReducePayload)
-    if not is_collective:
+    payload = layer.node.payload
+    if not isinstance(payload, AllReducePayload):
         if layer.collective_groups:
             append_violation(
                 violations,
                 "collective_groups_on_ordinary_layer",
                 f"stage {stage_id} layer {layer_index} is not a collective",
             )
-        return
-    expected_work_kind = {
-        "sum": WorkKind.ALL_REDUCE_SUM,
-        "max": WorkKind.ALL_REDUCE_MAX,
-    }[layer.node.payload.reduction]
-    if layer.node.payload.work_kind is not expected_work_kind:
+        return True
+    expected_work_kind = ALL_REDUCE_WORK_KINDS[payload.reduction]
+    if payload.work_kind is not expected_work_kind:
         append_violation(
             violations,
             "collective_work_kind_collision",
             f"stage {stage_id} layer {layer_index} reduction "
-            f"{layer.node.payload.reduction} uses {layer.node.payload.work_kind.name}",
+            f"{payload.reduction} uses {payload.work_kind.name}",
         )
     if not layer.collective_groups:
         append_violation(
@@ -316,7 +320,7 @@ def _validate_collective_groups(
             "collective_groups_missing",
             f"stage {stage_id} layer {layer_index} has no Collective Groups",
         )
-        return
+        return False
 
     participant_ids = tuple(
         tile_id
@@ -336,10 +340,22 @@ def _validate_collective_groups(
             "collective_group_binding_invalid",
             f"stage {stage_id} layer {layer_index} includes tiles outside its Submesh",
         )
-    expected_groups = _expected_physical_collective_groups(
-        stage_id,
-        layer_index,
-        execution_plan,
+    binding_is_valid = _collective_binding_is_complete(layer, stage)
+    if not binding_is_valid:
+        append_violation(
+            violations,
+            "collective_group_binding_invalid",
+            f"stage {stage_id} layer {layer_index} virtual-to-physical binding "
+            "is not a complete bijection",
+        )
+    expected_groups = (
+        _expected_physical_collective_groups(
+            stage_id,
+            layer_index,
+            execution_plan,
+        )
+        if binding_is_valid
+        else None
     )
     if expected_groups is not None and layer.collective_groups != expected_groups:
         append_violation(
@@ -349,7 +365,7 @@ def _validate_collective_groups(
             "ownership-derived physical binding",
         )
     if not layer.outputs:
-        return
+        return binding_is_valid
     output = layer.outputs[0]
     if _layout_is_partial(output.layout):
         append_violation(
@@ -357,6 +373,19 @@ def _validate_collective_groups(
             "collective_output_remains_partial",
             f"stage {stage_id} layer {layer_index} does not resolve its Partial Value",
         )
+    return binding_is_valid
+
+
+def _collective_binding_is_complete(layer: Layer, stage: Stage) -> bool:
+    if not layer.outputs:
+        return False
+    virtual_tile_ids = set(layer.outputs[0].layout.submesh.tile_ids)
+    physical_tile_ids = set(stage.submesh.tile_ids)
+    return (
+        set(stage.virtual_to_physical) == virtual_tile_ids
+        and set(stage.virtual_to_physical.values()) == physical_tile_ids
+        and len(stage.virtual_to_physical) == len(physical_tile_ids)
+    )
 
 
 def _expected_physical_collective_groups(
@@ -389,7 +418,7 @@ def _expected_physical_collective_groups(
         CollectiveGroup(
             tuple(
                 sorted(
-                    stage.virtual_to_physical.get(tile_id, tile_id)
+                    stage.virtual_to_physical[tile_id]
                     for tile_id in virtual_group.virtual_tile_ids
                 )
             )
