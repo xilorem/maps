@@ -151,15 +151,12 @@ def test_compiles_input_intermediate_and_output_transitions() -> None:
     assert input_transition.tensor is runtime_input
     assert input_transition.tensor_id == 0
     assert input_transition.destination_stage_id == 0
-    assert input_transition.destination_input_index == 0
     assert tuple(destination.virtual_tile_id for destination in input_transition.destinations) == (0, 1)
 
     intermediate_transition = transitions[1]
     assert isinstance(intermediate_transition, VirtualIntermediateTransition)
     assert intermediate_transition.source_stage_id == 0
-    assert intermediate_transition.source_output_index == 0
     assert intermediate_transition.destination_stage_id == 1
-    assert intermediate_transition.destination_input_index == 0
     assert tuple(
         (transfer.source_virtual_tile_id, transfer.destination_virtual_tile_id)
         for transfer in intermediate_transition.transfers
@@ -170,7 +167,6 @@ def test_compiles_input_intermediate_and_output_transitions() -> None:
     assert output_transition.tensor is output
     assert output_transition.tensor_id == 3
     assert output_transition.source_stage_id == 1
-    assert output_transition.source_output_index == 0
     assert tuple(source.virtual_tile_id for source in output_transition.sources) == (0, 1)
     assert all(transition.tensor is not initializer for transition in transitions)
 
@@ -289,7 +285,7 @@ def test_same_stage_dependencies_produce_no_virtual_transition() -> None:
     assert build_virtual_transitions(graph, plans) == ()
 
 
-def test_repeated_tensor_inputs_keep_their_positional_demands() -> None:
+def test_repeated_tensor_inputs_compile_one_bounding_stage_residency() -> None:
     mesh = magia_mesh(width=1, height=1)
     virtual = Submesh(mesh=mesh, submesh_id=0, tile_ids={0})
     source = Tensor("source", 1, (4,), 2)
@@ -315,15 +311,13 @@ def test_repeated_tensor_inputs_keep_their_positional_demands() -> None:
 
     transitions = build_virtual_transitions(graph, plans)
 
-    assert tuple(
-        transition.destination_input_index
-        for transition in transitions
-        if isinstance(transition, VirtualIntermediateTransition)
-    ) == (0, 1)
+    assert len(transitions) == 1
     assert isinstance(transitions[0], VirtualIntermediateTransition)
-    assert isinstance(transitions[1], VirtualIntermediateTransition)
-    assert transitions[0].transfers[0].destination_subslice.parent == first_half
-    assert transitions[1].transfers[0].destination_subslice.parent == second_half
+    assert len(transitions[0].transfers) == 1
+    assert transitions[0].transfers[0].destination_subslice.parent == TensorSlice(
+        1,
+        (TensorRange(0, 4),),
+    )
 
 
 def test_input_and_output_transition_order_is_deterministic() -> None:
@@ -358,11 +352,11 @@ def test_input_and_output_transition_order_is_deterministic() -> None:
     assert tuple(
         (
             transition.destination_stage_id,
-            transition.destination_input_index,
+            transition.tensor,
         )
         for transition in transitions
         if isinstance(transition, VirtualInputTransition)
-    ) == ((1, 0), (1, 1), (2, 0))
+    ) == ((1, input1), (1, input0), (2, input0))
     assert tuple(
         transition.tensor
         for transition in transitions
@@ -450,11 +444,9 @@ def test_binding_changes_only_tile_endpoints_and_preserves_positions() -> None:
     assert (
         input_transition.tensor_id,
         input_transition.destination_stage_id,
-        input_transition.destination_input_index,
     ) == (
         virtual_input.tensor_id,
         virtual_input.destination_stage_id,
-        virtual_input.destination_input_index,
     )
     assert tuple(
         destination.tile_id
@@ -486,11 +478,9 @@ def test_binding_changes_only_tile_endpoints_and_preserves_positions() -> None:
     assert (
         output.tensor_id,
         output.source_stage_id,
-        output.source_output_index,
     ) == (
         virtual_output.tensor_id,
         virtual_output.source_stage_id,
-        virtual_output.source_output_index,
     )
     assert tuple(source.tile_id for source in output.sources) == (1, 0)
     assert tuple(source.tensor_slice for source in output.sources) == tuple(

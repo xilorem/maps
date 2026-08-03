@@ -9,7 +9,13 @@ from maps.hardware import Mesh, Tile, WorkSignature
 from maps.graph import Node
 from maps.graph import Tensor
 from maps.operations.contracts import OpPayload, TileWork, find_layout_relation
-from maps.planning.mapping import TensorLayout, TensorSlice, tile_tensor_slice
+from maps.planning.mapping import (
+    TensorLayout,
+    TensorSlice,
+    bounding_tensor_slice,
+    tensor_slice_num_bytes,
+    tile_tensor_slice,
+)
 from maps.planning.stages import StagePlan, StageFormation
 
 
@@ -405,22 +411,47 @@ def permanent_l1_allocation_for_tile_work(
 ) -> int:
     """Return permanent L1 bytes from already constructed Layer Tile Work."""
 
-    produced_tensors = set()
+    produced_tensors = {
+        reference.tensor
+        for work in tile_work
+        for reference in work.output_slices
+    }
+    resident_slices: dict[Tensor, list[TensorSlice]] = {}
+    for work in tile_work:
+        for reference in work.input_slices:
+            if (
+                reference.tensor not in produced_tensors
+                and not _is_initializer(reference.tensor, initializer_tensors)
+            ):
+                resident_slices.setdefault(reference.tensor, []).append(
+                    reference.tensor_slice
+                )
+    resident_bounds = {
+        tensor: bounding_tensor_slice(tuple(slices))
+        for tensor, slices in resident_slices.items()
+    }
+    allocated_resident_tensors: set[Tensor] = set()
     allocation_sizes = []
     for work in tile_work:
         for reference in work.input_slices:
             if reference.tensor in produced_tensors:
                 continue
-            slot_count = (
-                1
-                if _is_initializer(reference.tensor, initializer_tensors)
-                else num_token_slots
+            if _is_initializer(reference.tensor, initializer_tensors):
+                allocation_sizes.append(reference.num_bytes)
+                continue
+            if reference.tensor in allocated_resident_tensors:
+                continue
+            allocated_resident_tensors.add(reference.tensor)
+            allocation_sizes.append(
+                tensor_slice_num_bytes(
+                    reference.tensor,
+                    resident_bounds[reference.tensor],
+                )
+                * num_token_slots
             )
-            allocation_sizes.append(reference.num_bytes * slot_count)
 
         for reference in work.output_slices:
             allocation_sizes.append(reference.num_bytes * num_token_slots)
-            produced_tensors.add(reference.tensor)
 
     return permanent_l1_allocation_bytes(allocation_sizes)
 

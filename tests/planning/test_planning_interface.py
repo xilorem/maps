@@ -4,9 +4,20 @@ from pathlib import Path
 
 import pytest
 
-from maps.graph import Edge, Graph, Node, OpKind, Tensor
+from maps.graph import (
+    ConstantStore,
+    Edge,
+    Graph,
+    ImportedModel,
+    Node,
+    OpKind,
+    Tensor,
+    TensorDType,
+    run_graph_rewrites_with_effects,
+)
 from maps.hardware import FixedDeviceAssignment
 from maps.operations.elementwise import UnaryElementwisePayload
+from maps.operations.softmax import SoftmaxPayload
 from maps.planning import (
     AllocationOptions,
     ConstraintReport,
@@ -42,6 +53,8 @@ from maps.planning.transitions import (
     OutputTransition,
     build_virtual_transitions,
 )
+from maps.deployment import build_deployment_bundle
+from maps.deployment.serialization import execution_plan_json_payload
 from maps.target import SpecializationOptions, magia, n300d
 
 from tests.target.test_precision_lowering import _gemm_model
@@ -98,6 +111,98 @@ def test_planning_has_no_downstream_deployment_dependencies() -> None:
     }
 
 
+def test_magia_fuses_operations_around_decomposed_softmax_with_provenance() -> None:
+    x = Tensor("x", 2, (4, 8), 2, dtype=TensorDType.FLOAT16)
+    produced = Tensor("produced", 2, (4, 8), 2, dtype=TensorDType.FLOAT16)
+    normalized = Tensor("normalized", 2, (4, 8), 2, dtype=TensorDType.FLOAT16)
+    output = Tensor("output", 2, (4, 8), 2, dtype=TensorDType.FLOAT16)
+    producer = Node(
+        "producer",
+        OpKind.ELEMENTWISE,
+        inputs=(x,),
+        outputs=(produced,),
+        payload=UnaryElementwisePayload("Relu", x, produced),
+    )
+    softmax = Node(
+        "softmax",
+        OpKind.CUSTOM,
+        inputs=(produced,),
+        outputs=(normalized,),
+        payload=SoftmaxPayload(produced, normalized, axis=1),
+    )
+    consumer = Node(
+        "consumer",
+        OpKind.ELEMENTWISE,
+        inputs=(normalized,),
+        outputs=(output,),
+        payload=UnaryElementwisePayload("Neg", normalized, output),
+    )
+    model, rewrite_effects = run_graph_rewrites_with_effects(
+        ImportedModel(
+            Graph(
+                "fused_softmax",
+                tensors=(x, produced, normalized, output),
+                nodes=(producer, softmax, consumer),
+                inputs=(x,),
+                outputs=(output,),
+            ),
+            ConstantStore(()),
+        )
+    )
+    mesh = magia.build_mesh(width=2, height=1)
+    specialized = magia.specialize(
+        model,
+        mesh,
+        SpecializationOptions(enable_precision_lowering=False),
+    )
+
+    execution_plan = plan(
+        specialized.model.graph,
+        mesh,
+        PlanningOptions(
+            placement=PlacementOptions(print_placement=False),
+            print_execution_plan_cost=False,
+        ),
+    )
+    bundle = build_deployment_bundle(
+        specialized,
+        execution_plan,
+        graph_rewrite_effects=rewrite_effects,
+    )
+
+    assert bundle.execution_plan is execution_plan
+    assert tuple(
+        event.source_node for event in bundle.rewrite_report.events
+    ) == ("softmax",)
+    assert len(execution_plan.stages) == 1
+    assert tuple(
+        layer.source_operation
+        for layer in execution_plan.stages[0].layers
+    ) == ("producer", *("softmax",) * 7, "consumer")
+    payload = execution_plan_json_payload(execution_plan)
+    assert execution_plan_json_payload(execution_plan) == payload
+    assert tuple(
+        layer["source_operation"]
+        for layer in payload["stages"][0]["layers"]
+    ) == ("producer", *("softmax",) * 7, "consumer")
+    assert all(
+        "destination_input_index" not in transition
+        and "source_output_index" not in transition
+        for transition in payload["transitions"]
+    )
+    assert validate_execution_plan(
+        execution_plan,
+        PlanningConstraints(max_stage_operations=3),
+    ).is_valid
+    limited = validate_execution_plan(
+        execution_plan,
+        PlanningConstraints(max_stage_operations=2),
+    )
+    assert tuple(violation.kind for violation in limited.violations) == (
+        "stage_operation_limit_exceeded",
+    )
+
+
 @pytest.mark.parametrize(
     (
         "target",
@@ -116,14 +221,12 @@ def test_planning_has_no_downstream_deployment_dependencies() -> None:
                 ((24, 32), ((0, 24), (1, 32))),
             ),
             (
-                ("input", 0, 0, 0, ((16, ((0, 2), (0, 3))),)),
+                ("input", 0, 0, ((16, ((0, 2), (0, 3))),)),
                 (
                     "intermediate",
                     3,
                     0,
-                    0,
                     1,
-                    0,
                     (
                         (16, 24, ((0, 2), (0, 3)), ((0, 2), (0, 3))),
                         (16, 32, ((0, 2), (0, 3)), ((0, 2), (0, 3))),
@@ -133,7 +236,6 @@ def test_planning_has_no_downstream_deployment_dependencies() -> None:
                     "output",
                     2,
                     1,
-                    0,
                     (
                         (24, ((0, 2), (0, 2))),
                         (32, ((0, 2), (2, 2))),
@@ -147,8 +249,8 @@ def test_planning_has_no_downstream_deployment_dependencies() -> None:
             "tensix_matrix",
             (((27,), ((0, 27),)),),
             (
-                ("input", 0, 0, 0, ((27, ((0, 2), (0, 3))),)),
-                ("output", 2, 0, 0, ((27, ((0, 2), (0, 4))),)),
+                ("input", 0, 0, ((27, ((0, 2), (0, 3))),)),
+                ("output", 2, 0, ((27, ((0, 2), (0, 4))),)),
             ),
         ),
     ),
@@ -211,7 +313,6 @@ def _physical_transition_summary(transition) -> tuple:
             "input",
             transition.tensor_id,
             transition.destination_stage_id,
-            transition.destination_input_index,
             tuple(
                 (destination.tile_id, _slice_dims(destination.tensor_slice))
                 for destination in transition.destinations
@@ -222,9 +323,7 @@ def _physical_transition_summary(transition) -> tuple:
             "intermediate",
             transition.tensor_id,
             transition.source_stage_id,
-            transition.source_output_index,
             transition.destination_stage_id,
-            transition.destination_input_index,
             tuple(
                 (
                     transfer.source_tile_id,
@@ -240,7 +339,6 @@ def _physical_transition_summary(transition) -> tuple:
         "output",
         transition.tensor_id,
         transition.source_stage_id,
-        transition.source_output_index,
         tuple(
             (source.tile_id, _slice_dims(source.tensor_slice))
             for source in transition.sources

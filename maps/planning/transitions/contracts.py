@@ -54,7 +54,6 @@ class VirtualInputTransition:
     tensor: Tensor
     tensor_id: int
     destination_stage_id: int
-    destination_input_index: int
     destinations: tuple[VirtualInputDestination, ...] = field(default_factory=tuple)
 
 
@@ -62,7 +61,6 @@ class VirtualInputTransition:
 class InputTransition:
     tensor_id: int
     destination_stage_id: int
-    destination_input_index: int
     destinations: tuple[InputDestination, ...] = field(default_factory=tuple)
 
 
@@ -71,9 +69,7 @@ class VirtualIntermediateTransition:
     tensor: Tensor
     tensor_id: int
     source_stage_id: int
-    source_output_index: int
     destination_stage_id: int
-    destination_input_index: int
     transfers: tuple[VirtualTransfer, ...] = field(default_factory=tuple)
 
 
@@ -81,9 +77,7 @@ class VirtualIntermediateTransition:
 class IntermediateTransition:
     tensor_id: int
     source_stage_id: int
-    source_output_index: int
     destination_stage_id: int
-    destination_input_index: int
     transfers: tuple[Transfer, ...] = field(default_factory=tuple)
 
 
@@ -92,7 +86,6 @@ class VirtualOutputTransition:
     tensor: Tensor
     tensor_id: int
     source_stage_id: int
-    source_output_index: int
     sources: tuple[VirtualOutputSource, ...] = field(default_factory=tuple)
 
 
@@ -100,7 +93,6 @@ class VirtualOutputTransition:
 class OutputTransition:
     tensor_id: int
     source_stage_id: int
-    source_output_index: int
     sources: tuple[OutputSource, ...] = field(default_factory=tuple)
 
 

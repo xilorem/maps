@@ -46,10 +46,7 @@ def test_group_normalization_decomposes_like_softmax_with_collectives() -> None:
     assert isinstance(nodes[1].payload, GroupReducePayload)
     assert isinstance(nodes[3].payload, AllReducePayload)
     assert isinstance(nodes[-1].payload, GroupNormalizeFromMomentsPayload)
-    assert all(
-        item.attributes["stage_group_id"] == "group_norm::group_norm"
-        for item in nodes
-    )
+    assert all("stage_group_id" not in item.attributes for item in nodes)
     assert nodes[-1].payload.element_count_per_group == 8
 
 

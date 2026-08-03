@@ -84,6 +84,18 @@ class ReductionPayload(OpPayload):
     def cost_model(self) -> OpCostModel:
         return ReductionCostModel(work_kind=self.work_kind)
 
+    @property
+    def layout_relations(self) -> tuple[LayoutRelation, ...]:
+        return (
+            LayoutRelation(
+                input_index=0,
+                output_index=0,
+                input_axis_for_output_axis=tuple(range(self.x.rank)),
+                guarantees_slice_containment=True,
+                replicated_output_axes=frozenset((self.axis,)),
+            ),
+        )
+
     def output_layouts(
         self,
         submesh: Submesh,
@@ -228,8 +240,7 @@ class ReduceSumPayload(CompositeOpPayload):
             )
 
         local = _tensor_like(f"{node.name}__local", self.output)
-        stage_group_id = f"{node.name}::reduce_sum"
-        attributes = {**node.attributes, "stage_group_id": stage_group_id}
+        attributes = dict(node.attributes)
         return (local,), (
             _reduction_node(
                 name=f"{node.name}__local",
@@ -281,8 +292,7 @@ class GlobalAveragePoolPayload(CompositeOpPayload):
             2,
         )
         spatial_sum = _tensor_like(f"{node.name}__spatial_sum", spatial_sum_local)
-        stage_group_id = f"{node.name}::global_average_pool"
-        attributes = {**node.attributes, "stage_group_id": stage_group_id}
+        attributes = dict(node.attributes)
         tensors = (width_sum_local, width_sum, spatial_sum_local, spatial_sum)
         nodes = (
             _reduction_node(

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Callable
 
 from .model import (
@@ -122,6 +122,17 @@ def decompose_graph_with_sources(
             continue
 
         new_tensors, lowered_nodes = node.payload.decompose(node)
+        if not lowered_nodes:
+            raise ValueError(
+                f"operation decomposition for '{node.name}' produced no Layers"
+            )
+        lowered_nodes = tuple(
+            replace(
+                lowered_node,
+                source_operation=node.source_operation,
+            )
+            for lowered_node in lowered_nodes
+        )
         for tensor in new_tensors:
             if tensor.name in tensors:
                 raise ValueError(f"tensor '{tensor.name}' is already present in graph metadata")

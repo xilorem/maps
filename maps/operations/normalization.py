@@ -299,7 +299,6 @@ def decompose_group_normalization_node(
         raise TypeError("expected GroupNormalizationPayload")
     op = node.payload
     attributes = dict(node.attributes)
-    attributes["stage_group_id"] = f"{node.name}::group_norm"
 
     squared = _same_shape_tensor(f"{node.name}__squared", op.x)
     sum_local = _stats_tensor(f"{node.name}__sum_local", op)

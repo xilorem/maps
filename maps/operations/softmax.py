@@ -46,14 +46,7 @@ def decompose_softmax_node(node: Node) -> tuple[tuple[Tensor, ...], tuple[Node, 
     output = op.output
     axis = op.axis
 
-    max_attributes = {
-        **node.attributes,
-        "stage_group_id": f"{node.name}::softmax:max",
-    }
-    normalization_attributes = {
-        **node.attributes,
-        "stage_group_id": f"{node.name}::softmax:normalize",
-    }
+    attributes = dict(node.attributes)
 
     max_local = _reduced_tensor(f"{node.name}__max_local", x, axis)
     collective_axis = _collective_axis_for_softmax(x, axis)
@@ -72,7 +65,7 @@ def decompose_softmax_node(node: Node) -> tuple[tuple[Tensor, ...], tuple[Node, 
                 axis=axis,
                 work_kind=WorkKind.REDUCE_MAX,
             ),
-            attributes={**max_attributes, "softmax_step": "reduce_max"},
+            attributes={**attributes, "softmax_step": "reduce_max"},
         )
     ]
 
@@ -92,7 +85,7 @@ def decompose_softmax_node(node: Node) -> tuple[tuple[Tensor, ...], tuple[Node, 
                     reduction="max",
                     collective_axis=collective_axis,
                 ),
-                attributes={**max_attributes, "softmax_step": "allreduce_max"},
+                attributes={**attributes, "softmax_step": "allreduce_max"},
             )
         )
         max_value = max_global
@@ -115,7 +108,7 @@ def decompose_softmax_node(node: Node) -> tuple[tuple[Tensor, ...], tuple[Node, 
                     output=shifted,
                     work_kind=WorkKind.SUB,
                 ),
-                attributes={**normalization_attributes, "softmax_step": "sub"},
+                attributes={**attributes, "softmax_step": "sub"},
             ),
             Node(
                 name=f"{node.name}__exp",
@@ -128,7 +121,7 @@ def decompose_softmax_node(node: Node) -> tuple[tuple[Tensor, ...], tuple[Node, 
                     output=exp,
                     work_kind=WorkKind.EXP,
                 ),
-                attributes={**normalization_attributes, "softmax_step": "exp"},
+                attributes={**attributes, "softmax_step": "exp"},
             ),
             Node(
                 name=f"{node.name}__reduce_sum",
@@ -142,7 +135,7 @@ def decompose_softmax_node(node: Node) -> tuple[tuple[Tensor, ...], tuple[Node, 
                     axis=axis,
                     work_kind=WorkKind.REDUCE_SUM,
                 ),
-                attributes={**normalization_attributes, "softmax_step": "reduce_sum"},
+                attributes={**attributes, "softmax_step": "reduce_sum"},
             ),
         )
     )
@@ -165,7 +158,7 @@ def decompose_softmax_node(node: Node) -> tuple[tuple[Tensor, ...], tuple[Node, 
                     collective_axis=collective_axis,
                 ),
                 attributes={
-                    **normalization_attributes,
+                    **attributes,
                     "softmax_step": "allreduce_sum",
                 },
             )
@@ -185,7 +178,7 @@ def decompose_softmax_node(node: Node) -> tuple[tuple[Tensor, ...], tuple[Node, 
                 output=output,
                 work_kind=WorkKind.DIV,
             ),
-            attributes={**normalization_attributes, "softmax_step": "div"},
+            attributes={**attributes, "softmax_step": "div"},
         )
     )
 

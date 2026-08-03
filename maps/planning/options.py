@@ -11,11 +11,11 @@ from maps.planning.execution_plan import ExecutionContract
 class StageFormationOptions:
     """Control deterministic formation of graph Nodes into Stages."""
 
-    max_stage_nodes: int = 0
+    max_stage_operations: int = 0
 
     def __post_init__(self) -> None:
-        if self.max_stage_nodes < 0:
-            raise ValueError("max_stage_nodes must be >= 0")
+        if self.max_stage_operations < 0:
+            raise ValueError("max_stage_operations must be >= 0")
 
 
 @dataclass(frozen=True)

@@ -106,6 +106,32 @@ def tensor_slice_num_bytes(tensor: Tensor, tensor_slice: TensorSlice) -> int:
     return tensor_slice.num_elements * tensor.elem_bytes
 
 
+def bounding_tensor_slice(slices: tuple[TensorSlice, ...]) -> TensorSlice:
+    """Return the smallest rectangular Tensor Slice containing all inputs."""
+
+    first = slices[0]
+    return TensorSlice(
+        rank=first.rank,
+        dims=tuple(
+            TensorRange(
+                start=min(tensor_slice.dims[axis].start for tensor_slice in slices),
+                length=(
+                    max(
+                        tensor_slice.dims[axis].start
+                        + tensor_slice.dims[axis].length
+                        for tensor_slice in slices
+                    )
+                    - min(
+                        tensor_slice.dims[axis].start
+                        for tensor_slice in slices
+                    )
+                ),
+            )
+            for axis in range(first.rank)
+        ),
+    )
+
+
 @dataclass(frozen=True)
 class TensorSubSlice:
     """One concrete multi-dimensional subslice relative to a parent slice."""

@@ -286,7 +286,7 @@ def test_planner_execution_plan_generates_deterministic_runtime_package(
             mesh,
             PlanningOptions(
                 execution=ExecutionContract(num_token_slots=2),
-                stage_formation=StageFormationOptions(max_stage_nodes=1),
+                stage_formation=StageFormationOptions(max_stage_operations=1),
                 print_execution_plan_cost=False,
             ),
         ),

@@ -215,7 +215,6 @@ def lower_convolutions(model: ImportedModel) -> RewriteTransformResult:
         add_generated_tensor(im2col_output, tensors)
         add_generated_tensor(gemm_output, tensors)
 
-        stage_group = f"{node.name}::conv_to_gemm"
         im2col = Node(
             name=_generated_name(
                 node.name,
@@ -234,7 +233,8 @@ def lower_convolutions(model: ImportedModel) -> RewriteTransformResult:
                 pads=op.pads,
                 dilations=op.dilations,
             ),
-            attributes={"stage_group_id": stage_group, "conv_step": "im2col"},
+            attributes={"conv_step": "im2col"},
+            source_operation=node.source_operation,
         )
         gemm_inputs = (im2col_output, packed_weight) + (
             (op.b,) if op.b is not None else ()
@@ -255,7 +255,8 @@ def lower_convolutions(model: ImportedModel) -> RewriteTransformResult:
                 y=op.b,
                 output=gemm_output,
             ),
-            attributes={"stage_group_id": stage_group, "conv_step": "gemm"},
+            attributes={"conv_step": "gemm"},
+            source_operation=node.source_operation,
         )
         output_reformat = Node(
             name=_generated_name(
@@ -268,10 +269,8 @@ def lower_convolutions(model: ImportedModel) -> RewriteTransformResult:
             inputs=(gemm_output,),
             outputs=(op.output,),
             payload=OutputReformatPayload(x=gemm_output, output=op.output),
-            attributes={
-                "stage_group_id": stage_group,
-                "conv_step": "output_reformat",
-            },
+            attributes={"conv_step": "output_reformat"},
+            source_operation=node.source_operation,
         )
         replacements = (im2col, gemm, output_reformat)
         for replacement in replacements:
@@ -479,7 +478,7 @@ def precision_lower_model(
                 inputs=(tensor,),
                 outputs=(cast_tensor,),
                 payload=CastPayload(x=tensor, output=cast_tensor),
-                attributes=_stage_group_attributes(node),
+                source_operation=_decomposed_source_operation(node),
             )
             reserve_generated_node_name(cast_node.name, node_names)
             add_generated_tensor(cast_tensor, tensors)
@@ -514,6 +513,7 @@ def precision_lower_model(
                 transpose_w=node.payload.transpose_w,
             ),
             attributes=node.attributes,
+            source_operation=node.source_operation,
         )
         if WorkSignature.from_node(lowered_gemm) != recipe.target_signature:
             raise ValueError(
@@ -538,7 +538,7 @@ def precision_lower_model(
                 inputs=(target_output,),
                 outputs=(output,),
                 payload=CastPayload(x=target_output, output=output),
-                attributes=_stage_group_attributes(node),
+                source_operation=_decomposed_source_operation(node),
             )
             reserve_generated_node_name(restore_node.name, node_names)
             replacement_nodes.append(restore_node)
@@ -574,10 +574,10 @@ def precision_lower_model(
     )
 
 
-def _stage_group_attributes(node: Node) -> dict[str, object]:
-    if "stage_group_id" not in node.attributes:
-        return {}
-    return {"stage_group_id": node.attributes["stage_group_id"]}
+def _decomposed_source_operation(node: Node) -> str | None:
+    if node.source_operation == node.name:
+        return None
+    return node.source_operation
 
 
 def _require_assignment(

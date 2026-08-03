@@ -34,7 +34,7 @@ def seed_stage_candidates(
         raise ValueError(
             f"deterministic Stage formation produced {len(stage_ids)} stages for "
             f"a {mesh.num_tiles}-tile target; every stage requires at least one "
-            "tile. Lower stage_formation.max_stage_nodes to a value other than 1 "
+            "tile. Raise stage_formation.max_stage_operations above 1 "
             "only if it enables more compatible coalescing, or select another "
             "target. Allocation does not split or rewrite formed Stages."
         )
@@ -230,12 +230,11 @@ def initial_candidate_for_stage(
         return candidate
     raise ValueError(
         f"stage {stage_id} nodes={tuple(node.name for node in stage_nodes)} "
-        f"canonical_node_count={len(stage_nodes)} "
-        f"contains_explicit_group={any('stage_group_id' in node.attributes for node in stage_nodes)} "
+        f"source_operations={tuple(dict.fromkeys(node.source_operation for node in stage_nodes))} "
         f"has no L1-feasible layout on mesh {mesh.shape}; "
         f"attempted_tile_counts=1..{mesh.num_tiles} "
         "layout_families=all_rectangular_factorizations. The caller can lower "
-        "stage_formation.max_stage_nodes or select another target."
+        "stage_formation.max_stage_operations or select another target."
     )
 
 

@@ -17,6 +17,7 @@ from maps.planning.mapping import (
     TensorLayout,
     TensorRange,
     TensorSlice,
+    bounding_tensor_slice,
     tensor_slice_num_bytes,
     tile_tensor_slice,
 )
@@ -143,6 +144,13 @@ class Layer:
     inputs: tuple[LayerInput, ...] = field(default_factory=tuple)
     outputs: tuple[LayerOutput, ...] = field(default_factory=tuple)
     device_name: str | None = None
+    source_operation: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.source_operation is None:
+            object.__setattr__(self, "source_operation", self.node.source_operation)
+        elif self.source_operation != self.node.source_operation:
+            raise ValueError("Layer source_operation must match its Graph Node")
 
     def validate_tensors(self, tensors: tuple[Tensor, ...]) -> None:
         """Validate bound Tensor ids and output layout compatibility."""
@@ -339,9 +347,7 @@ def _destination_transition_ids(
     transitions: tuple[Transition, ...],
 ) -> dict[tuple[int, int], int]:
     return {
-        (transition.destination_stage_id, transition.destination_input_index): (
-            transition_id
-        )
+        (transition.destination_stage_id, transition.tensor_id): transition_id
         for transition_id, transition in enumerate(transitions)
         if isinstance(transition, (InputTransition, IntermediateTransition))
     }
@@ -389,6 +395,7 @@ def _build_layer(
     return Layer(
         node=node,
         device_name=plan.device_names[layer_index],
+        source_operation=node.source_operation,
         inputs=tuple(
             _build_layer_input(
                 stage_id,
@@ -451,13 +458,9 @@ def _build_layer_input(
             context.node_stage_layer_ids[id(producer)],
         )
 
-    if layer_index != 0:
-        raise ValueError(
-            "runtime and cross-stage inputs must target the first layer of a stage"
-        )
     return LayerInput.transition_source(
         tensor_id,
-        transition_ids[(stage_id, input_index)],
+        transition_ids[(stage_id, tensor_id)],
     )
 
 
@@ -571,6 +574,23 @@ def estimate_stage_l1_memory_for_tile(
     """Estimate the backend's permanent allocation for one stage tile."""
 
     virtual_tile = virtual_tile_for_stage_tile(stage, execution_plan, tile)
+    resident_slices: dict[int, list[TensorSlice]] = {}
+    for layer in stage.layers:
+        for binding_idx, binding in enumerate(layer.inputs):
+            if isinstance(binding.source, TransitionSource):
+                resident_slices.setdefault(binding.tensor_id, []).append(
+                    infer_input_slice_for_tile(
+                        layer,
+                        binding_idx,
+                        execution_plan,
+                        virtual_tile,
+                    )
+                )
+    resident_bounds = {
+        tensor_id: bounding_tensor_slice(tuple(slices))
+        for tensor_id, slices in resident_slices.items()
+    }
+    allocated_resident_tensors: set[int] = set()
     allocation_sizes = []
     for layer in stage.layers:
         for binding_idx, binding in enumerate(layer.inputs):
@@ -591,12 +611,10 @@ def estimate_stage_l1_memory_for_tile(
                 tensor_slice = destination.tensor_slice
                 slot_count = 1
             else:
-                tensor_slice = infer_input_slice_for_tile(
-                    layer,
-                    binding_idx,
-                    execution_plan,
-                    virtual_tile,
-                )
+                if binding.tensor_id in allocated_resident_tensors:
+                    continue
+                allocated_resident_tensors.add(binding.tensor_id)
+                tensor_slice = resident_bounds[binding.tensor_id]
                 slot_count = execution_plan.execution.num_token_slots
             allocation_sizes.append(
                 tensor_slice_num_bytes(tensor, tensor_slice) * slot_count
@@ -617,7 +635,7 @@ def estimate_stage_l2_memory(
 ) -> int:
     """Estimate L2 storage needed for a stage's external input bindings."""
 
-    l2_memory = 0
+    runtime_bindings: dict[int, list[tuple[Layer, int]]] = {}
     for layer in stage.layers:
         for binding_idx, binding in enumerate(layer.inputs):
             is_runtime_input = (
@@ -630,25 +648,40 @@ def estimate_stage_l2_memory(
             )
             if not is_runtime_input:
                 continue
-            tensor = execution_plan.tensors[binding.tensor_id]
-            max_binding_bytes = 0
-            for tile in stage.submesh.tiles:
+            runtime_bindings.setdefault(
+                cast(TransitionSource, binding.source).transition_id,
+                [],
+            ).append((layer, binding_idx))
+
+    l2_memory = 0
+    for bindings in runtime_bindings.values():
+        tensor_id = bindings[0][0].inputs[bindings[0][1]].tensor_id
+        tensor = execution_plan.tensors[tensor_id]
+        max_binding_bytes = 0
+        for tile in stage.submesh.tiles:
+            slices = []
+            for layer, binding_idx in bindings:
                 virtual_tile = virtual_tile_for_stage_tile(
                     stage,
                     execution_plan,
                     tile,
                 )
-                tensor_slice = infer_input_slice_for_tile(
-                    layer,
-                    binding_idx,
-                    execution_plan,
-                    virtual_tile,
+                slices.append(
+                    infer_input_slice_for_tile(
+                        layer,
+                        binding_idx,
+                        execution_plan,
+                        virtual_tile,
+                    )
                 )
-                max_binding_bytes = max(
-                    max_binding_bytes,
-                    tensor_slice_num_bytes(tensor, tensor_slice),
-                )
-            l2_memory += max_binding_bytes
+            max_binding_bytes = max(
+                max_binding_bytes,
+                tensor_slice_num_bytes(
+                    tensor,
+                    bounding_tensor_slice(tuple(slices)),
+                ),
+            )
+        l2_memory += max_binding_bytes
     return l2_memory
 
 

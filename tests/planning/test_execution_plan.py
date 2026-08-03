@@ -7,6 +7,7 @@ from maps.planning.mapping import Submesh
 from maps.graph import Tensor
 from maps.target.magia import build_mesh as magia_mesh
 from maps.operations.gemm import GemmPayload
+from maps.operations.elementwise import BinaryElementwisePayload, UnaryElementwisePayload
 from maps.planning import (
     ExecutionPlan,
     InitializerInput,
@@ -21,6 +22,7 @@ from maps.planning import (
 )
 from maps.planning.execution_plan import construct_execution_plan
 from maps.planning.execution_plan import estimate_stage_l1_memory_for_tile
+from maps.planning.execution_plan import estimate_stage_l2_memory
 from maps.planning.stages import StagePlacement, StagePlan
 from maps.planning.allocation.candidates import permanent_l1_allocation_for_tile
 from maps.planning.transitions import (
@@ -52,6 +54,87 @@ def _placement(
             )
         },
     )
+
+
+def test_stage_tensor_residency_is_shared_and_internal_outputs_can_leave() -> None:
+    mesh = magia_mesh(width=1, height=1)
+    virtual = Submesh(mesh=mesh, submesh_id=0, tile_ids=frozenset((0,)))
+    x = Tensor("x", 1, (4,), 2, dtype=TensorDType.FLOAT16)
+    middle = Tensor("middle", 1, (4,), 2, dtype=TensorDType.FLOAT16)
+    output = Tensor("output", 1, (4,), 2, dtype=TensorDType.FLOAT16)
+    first_payload = UnaryElementwisePayload("Relu", x, middle)
+    second_payload = BinaryElementwisePayload("Add", middle, x, output)
+    first = Node(
+        "first",
+        OpKind.ELEMENTWISE,
+        inputs=(x,),
+        outputs=(middle,),
+        payload=first_payload,
+    )
+    second = Node(
+        "second",
+        OpKind.ELEMENTWISE,
+        inputs=(middle, x),
+        outputs=(output,),
+        payload=second_payload,
+    )
+    graph = Graph(
+        "resident",
+        tensors=(x, middle, output),
+        nodes=(first, second),
+        inputs=(x,),
+        outputs=(middle, output),
+    )
+    plan = StagePlan(
+        stage_id=0,
+        tile_count=1,
+        logical_shape=(1, 1),
+        nodes=(first, second),
+        node_output_layouts=(
+            first_payload.output_layouts(virtual, (1, 1)),
+            second_payload.output_layouts(virtual, (1, 1)),
+        ),
+        device_names=("spatz", "spatz"),
+    )
+    transitions = build_virtual_transitions(graph, {0: plan})
+
+    execution_plan = construct_execution_plan(
+        graph,
+        mesh,
+        {0: plan},
+        {0: _placement(0, virtual, virtual)},
+        transitions,
+    )
+
+    input_sources = (
+        execution_plan.stages[0].layers[0].inputs[0].source,
+        execution_plan.stages[0].layers[1].inputs[1].source,
+    )
+    assert all(isinstance(source, TransitionSource) for source in input_sources)
+    assert {source.transition_id for source in input_sources} == {0}
+    assert tuple(type(transition) for transition in execution_plan.transitions) == (
+        InputTransition,
+        OutputTransition,
+        OutputTransition,
+    )
+    assert execution_plan.transitions[1].tensor_id == 1
+    assert estimate_stage_l1_memory_for_tile(
+        execution_plan.stages[0],
+        execution_plan,
+        mesh.tiles[0],
+    ) == 48
+    assert permanent_l1_allocation_for_tile(
+        plan.nodes,
+        plan.node_output_layouts,
+        mesh.tiles[0],
+        frozenset(),
+    ) == 48
+    assert estimate_stage_l2_memory(
+        execution_plan.stages[0],
+        execution_plan,
+    ) == 8
+    report = validate_execution_plan(execution_plan, PlanningConstraints())
+    assert report.is_valid, report.violations
 
 
 def test_construct_execution_plan_unifies_communication_and_initializer_residency(
@@ -229,23 +312,19 @@ def test_construct_execution_plan_unifies_communication_and_initializer_residenc
         "kind",
         "tensor_id",
         "destination_stage_id",
-        "destination_input_index",
         "destinations",
     }
     assert set(payload["transitions"][1]) == {
         "kind",
         "tensor_id",
         "source_stage_id",
-        "source_output_index",
         "destination_stage_id",
-        "destination_input_index",
         "transfers",
     }
     assert set(payload["transitions"][2]) == {
         "kind",
         "tensor_id",
         "source_stage_id",
-        "source_output_index",
         "sources",
     }
     serialized = str(payload["transitions"])
@@ -285,7 +364,6 @@ def test_execution_plan_validation_rejects_transition_endpoint_mismatches() -> N
     transition = InputTransition(
         tensor_id=0,
         destination_stage_id=0,
-        destination_input_index=0,
         destinations=(),
     )
     execution_plan = ExecutionPlan(
@@ -375,10 +453,6 @@ def test_execution_plan_validation_rejects_transition_endpoint_mismatches() -> N
             replace(transition, destination_stage_id=-1),
             "transition_destination_stage_out_of_range",
         ),
-        (
-            replace(transition, destination_input_index=-1),
-            "transition_destination_input_out_of_range",
-        ),
     )
     for invalid_reference, expected_violation in negative_reference_cases:
         negative_report = validate_execution_plan(
@@ -444,9 +518,7 @@ def test_execution_plan_validation_rejects_mismatched_transfer_regions() -> None
     transition = IntermediateTransition(
         tensor_id=0,
         source_stage_id=0,
-        source_output_index=0,
         destination_stage_id=1,
-        destination_input_index=0,
         transfers=(
             Transfer(
                 source_tile_id=0,
@@ -490,7 +562,6 @@ def test_execution_plan_validation_rejects_mismatched_transfer_regions() -> None
                 replace(
                     transition,
                     source_stage_id=-1,
-                    source_output_index=-1,
                 ),
             ),
         ),

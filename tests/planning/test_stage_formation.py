@@ -25,19 +25,19 @@ def test_form_stages_defaults_to_singleton_groups() -> None:
     }
 
 
-def test_form_stages_groups_nodes_with_same_explicit_stage_group_id() -> None:
+def test_form_stages_keeps_one_source_operation_indivisible() -> None:
     intermediate = Tensor("intermediate", 1, (8,), 2)
     node0 = Node(
         name="reduce_max",
         kind=OpKind.REDUCTION,
         outputs=(intermediate,),
-        attributes={"stage_group_id": "softmax_0"},
+        source_operation="softmax_0",
     )
     node1 = Node(
         name="allreduce_max",
         kind=OpKind.CUSTOM,
         inputs=(intermediate,),
-        attributes={"stage_group_id": "softmax_0"},
+        source_operation="softmax_0",
     )
     node2 = Node(name="next_stage", kind=OpKind.CUSTOM)
     graph = Graph(
@@ -51,6 +51,29 @@ def test_form_stages_groups_nodes_with_same_explicit_stage_group_id() -> None:
         0: (node0, node1),
         1: (node2,),
     }
+
+
+def test_stage_operation_limit_counts_source_operations_not_layers() -> None:
+    partial = Tensor("partial", 1, (1,), 2)
+    first = Node(
+        "softmax__reduce",
+        OpKind.REDUCTION,
+        outputs=(partial,),
+        source_operation="softmax",
+    )
+    second = Node(
+        "softmax__normalize",
+        OpKind.ELEMENTWISE,
+        inputs=(partial,),
+        source_operation="softmax",
+    )
+    following = Node("following", OpKind.CUSTOM)
+    graph = Graph("semantic_limit", nodes=(first, second, following))
+
+    assert form_stages(
+        graph,
+        StageFormationOptions(max_stage_operations=1),
+    ) == {0: (first, second), 1: (following,)}
 
 
 def test_form_stages_coalesces_exact_elementwise_chain_left_to_right() -> None:
@@ -84,15 +107,15 @@ def test_form_stages_coalesces_exact_elementwise_chain_left_to_right() -> None:
     assert form_stages(graph) == {0: (first, second, third)}
     assert form_stages(
         graph,
-        StageFormationOptions(max_stage_nodes=2),
+        StageFormationOptions(max_stage_operations=2),
     ) == {0: (first, second), 1: (third,)}
     assert form_stages(
         graph,
-        StageFormationOptions(max_stage_nodes=1),
+        StageFormationOptions(max_stage_operations=1),
     ) == {0: (first,), 1: (second,), 2: (third,)}
 
 
-def test_form_stages_does_not_put_runtime_input_on_internal_layer() -> None:
+def test_form_stages_allows_runtime_input_on_later_layer() -> None:
     x = Tensor("x", 1, (8,), 2)
     runtime_input = Tensor("runtime_input", 1, (8,), 2)
     middle = Tensor("middle", 1, (8,), 2)
@@ -117,10 +140,10 @@ def test_form_stages_does_not_put_runtime_input_on_internal_layer() -> None:
         inputs=(x, runtime_input),
     )
 
-    assert form_stages(graph) == {0: (first,), 1: (second,)}
+    assert form_stages(graph) == {0: (first, second)}
 
 
-def test_form_stages_rejects_explicit_internal_runtime_input() -> None:
+def test_mandatory_group_allows_runtime_input_on_later_layer() -> None:
     x = Tensor("x", 1, (8,), 2)
     runtime_input = Tensor("runtime_input", 1, (8,), 2)
     middle = Tensor("middle", 1, (8,), 2)
@@ -131,7 +154,7 @@ def test_form_stages_rejects_explicit_internal_runtime_input() -> None:
         inputs=(x,),
         outputs=(middle,),
         payload=UnaryElementwisePayload("Relu", x, middle),
-        attributes={"stage_group_id": "explicit"},
+        source_operation="combined",
     )
     second = Node(
         "second",
@@ -139,7 +162,7 @@ def test_form_stages_rejects_explicit_internal_runtime_input() -> None:
         inputs=(middle, runtime_input),
         outputs=(output,),
         payload=BinaryElementwisePayload("Add", middle, runtime_input, output),
-        attributes={"stage_group_id": "explicit"},
+        source_operation="combined",
     )
     graph = Graph(
         "explicit_internal_runtime_input",
@@ -147,16 +170,10 @@ def test_form_stages_rejects_explicit_internal_runtime_input() -> None:
         inputs=(x, runtime_input),
     )
 
-    try:
-        form_stages(graph)
-    except ValueError as exc:
-        assert "explicit stage group 'explicit'" in str(exc)
-        assert "Runtime Input runtime_input reaches internal Layer second" in str(exc)
-    else:
-        raise AssertionError("expected invalid explicit stage group to fail")
+    assert form_stages(graph) == {0: (first, second)}
 
 
-def test_form_stages_rejects_explicit_internal_cross_stage_input() -> None:
+def test_mandatory_group_allows_cross_stage_input_on_later_layer() -> None:
     x = Tensor("x", 1, (8,), 2)
     external_value = Tensor("external_value", 1, (8,), 2)
     middle = Tensor("middle", 1, (8,), 2)
@@ -174,7 +191,7 @@ def test_form_stages_rejects_explicit_internal_cross_stage_input() -> None:
         inputs=(x,),
         outputs=(middle,),
         payload=UnaryElementwisePayload("Exp", x, middle),
-        attributes={"stage_group_id": "explicit"},
+        source_operation="combined",
     )
     second = Node(
         "second",
@@ -182,7 +199,7 @@ def test_form_stages_rejects_explicit_internal_cross_stage_input() -> None:
         inputs=(middle, external_value),
         outputs=(output,),
         payload=BinaryElementwisePayload("Add", middle, external_value, output),
-        attributes={"stage_group_id": "explicit"},
+        source_operation="combined",
     )
     graph = Graph(
         "explicit_internal_cross_stage_input",
@@ -190,13 +207,10 @@ def test_form_stages_rejects_explicit_internal_cross_stage_input() -> None:
         inputs=(x,),
     )
 
-    try:
-        form_stages(graph)
-    except ValueError as exc:
-        assert "explicit stage group 'explicit'" in str(exc)
-        assert "cross-stage input external_value reaches internal Layer second" in str(exc)
-    else:
-        raise AssertionError("expected invalid explicit stage group to fail")
+    assert form_stages(
+        graph,
+        StageFormationOptions(max_stage_operations=1),
+    ) == {0: (producer,), 1: (first, second)}
 
 
 def test_form_stages_does_not_put_cross_stage_input_on_internal_layer() -> None:
@@ -238,7 +252,7 @@ def test_form_stages_does_not_put_cross_stage_input_on_internal_layer() -> None:
     }
 
 
-def test_form_stages_does_not_put_graph_output_on_internal_layer() -> None:
+def test_form_stages_allows_graph_output_from_earlier_layer() -> None:
     x = Tensor("x", 1, (8,), 2)
     graph_output = Tensor("graph_output", 1, (8,), 2)
     output = Tensor("output", 1, (8,), 2)
@@ -263,10 +277,10 @@ def test_form_stages_does_not_put_graph_output_on_internal_layer() -> None:
         outputs=(graph_output, output),
     )
 
-    assert form_stages(graph) == {0: (first,), 1: (second,)}
+    assert form_stages(graph) == {0: (first, second)}
 
 
-def test_form_stages_rejects_explicit_internal_graph_output() -> None:
+def test_mandatory_group_allows_graph_output_from_earlier_layer() -> None:
     x = Tensor("x", 1, (8,), 2)
     graph_output = Tensor("graph_output", 1, (8,), 2)
     output = Tensor("output", 1, (8,), 2)
@@ -276,7 +290,7 @@ def test_form_stages_rejects_explicit_internal_graph_output() -> None:
         inputs=(x,),
         outputs=(graph_output,),
         payload=UnaryElementwisePayload("Relu", x, graph_output),
-        attributes={"stage_group_id": "explicit"},
+        source_operation="combined",
     )
     second = Node(
         "second",
@@ -284,7 +298,7 @@ def test_form_stages_rejects_explicit_internal_graph_output() -> None:
         inputs=(graph_output,),
         outputs=(output,),
         payload=UnaryElementwisePayload("Exp", graph_output, output),
-        attributes={"stage_group_id": "explicit"},
+        source_operation="combined",
     )
     graph = Graph(
         "explicit_internal_graph_output",
@@ -293,16 +307,10 @@ def test_form_stages_rejects_explicit_internal_graph_output() -> None:
         outputs=(graph_output, output),
     )
 
-    try:
-        form_stages(graph)
-    except ValueError as exc:
-        assert "explicit stage group 'explicit'" in str(exc)
-        assert "graph output graph_output leaves internal Layer first" in str(exc)
-    else:
-        raise AssertionError("expected invalid explicit stage group to fail")
+    assert form_stages(graph) == {0: (first, second)}
 
 
-def test_form_stages_rejects_explicit_internal_cross_stage_output() -> None:
+def test_mandatory_group_allows_cross_stage_output_from_earlier_layer() -> None:
     x = Tensor("x", 1, (8,), 2)
     shared = Tensor("shared", 1, (8,), 2)
     internal_output = Tensor("internal_output", 1, (8,), 2)
@@ -313,7 +321,7 @@ def test_form_stages_rejects_explicit_internal_cross_stage_output() -> None:
         inputs=(x,),
         outputs=(shared,),
         payload=UnaryElementwisePayload("Relu", x, shared),
-        attributes={"stage_group_id": "explicit"},
+        source_operation="combined",
     )
     second = Node(
         "second",
@@ -321,7 +329,7 @@ def test_form_stages_rejects_explicit_internal_cross_stage_output() -> None:
         inputs=(shared,),
         outputs=(internal_output,),
         payload=UnaryElementwisePayload("Exp", shared, internal_output),
-        attributes={"stage_group_id": "explicit"},
+        source_operation="combined",
     )
     external_consumer = Node(
         "external_consumer",
@@ -335,16 +343,13 @@ def test_form_stages_rejects_explicit_internal_cross_stage_output() -> None:
         inputs=(x,),
     )
 
-    try:
-        form_stages(graph)
-    except ValueError as exc:
-        assert "explicit stage group 'explicit'" in str(exc)
-        assert "cross-stage output shared leaves internal Layer first" in str(exc)
-    else:
-        raise AssertionError("expected invalid explicit stage group to fail")
+    assert form_stages(graph) == {
+        0: (first, second),
+        1: (external_consumer,),
+    }
 
 
-def test_form_stages_extends_explicit_group_when_merge_makes_edges_local() -> None:
+def test_form_stages_fuses_consumer_after_mandatory_group() -> None:
     x = Tensor("x", 1, (8,), 2)
     shared = Tensor("shared", 1, (8,), 2)
     middle = Tensor("middle", 1, (8,), 2)
@@ -355,7 +360,7 @@ def test_form_stages_extends_explicit_group_when_merge_makes_edges_local() -> No
         inputs=(x,),
         outputs=(shared,),
         payload=UnaryElementwisePayload("Relu", x, shared),
-        attributes={"stage_group_id": "explicit"},
+        source_operation="combined",
     )
     second = Node(
         "second",
@@ -363,7 +368,7 @@ def test_form_stages_extends_explicit_group_when_merge_makes_edges_local() -> No
         inputs=(shared,),
         outputs=(middle,),
         payload=UnaryElementwisePayload("Exp", shared, middle),
-        attributes={"stage_group_id": "explicit"},
+        source_operation="combined",
     )
     third = Node(
         "third",
@@ -381,7 +386,7 @@ def test_form_stages_extends_explicit_group_when_merge_makes_edges_local() -> No
     assert form_stages(graph) == {0: (first, second, third)}
 
 
-def test_form_stages_prepends_to_explicit_group_when_merge_makes_edges_local() -> None:
+def test_form_stages_fuses_producer_before_mandatory_group() -> None:
     x = Tensor("x", 1, (8,), 2)
     shared = Tensor("shared", 1, (8,), 2)
     middle = Tensor("middle", 1, (8,), 2)
@@ -399,7 +404,7 @@ def test_form_stages_prepends_to_explicit_group_when_merge_makes_edges_local() -
         inputs=(shared,),
         outputs=(middle,),
         payload=UnaryElementwisePayload("Exp", shared, middle),
-        attributes={"stage_group_id": "explicit"},
+        source_operation="combined",
     )
     second = Node(
         "second",
@@ -407,7 +412,7 @@ def test_form_stages_prepends_to_explicit_group_when_merge_makes_edges_local() -
         inputs=(middle, shared),
         outputs=(output,),
         payload=BinaryElementwisePayload("Add", middle, shared, output),
-        attributes={"stage_group_id": "explicit"},
+        source_operation="combined",
     )
     graph = Graph(
         "prepended_explicit_group",
@@ -483,7 +488,7 @@ def test_form_stages_allows_initializer_on_internal_layer() -> None:
     assert form_stages(graph) == {0: (first, second)}
 
 
-def test_form_stages_rejects_unhashable_explicit_group_keys() -> None:
+def test_obsolete_stage_group_attribute_has_no_planning_effect() -> None:
     graph = Graph(
         name="bad_group_key",
         nodes=(
@@ -495,9 +500,4 @@ def test_form_stages_rejects_unhashable_explicit_group_keys() -> None:
         ),
     )
 
-    try:
-        form_stages(graph)
-    except ValueError as exc:
-        assert "unhashable stage_group_id" in str(exc)
-    else:
-        raise AssertionError("expected invalid stage_group_id to fail")
+    assert form_stages(graph) == {0: graph.nodes}

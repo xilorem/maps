@@ -437,6 +437,19 @@ def test_allocate_accepts_automatically_formed_compatible_stage() -> None:
     assert plans[0].nodes == (first, second)
 
 
+def test_allocate_fails_an_infeasible_formed_stage_without_splitting_fusion() -> None:
+    graph, first, second = _elementwise_chain()
+    mesh = _mesh_with_l1(2, 1, l1_size=32)
+    stage_formation = form_stages(graph)
+
+    assert stage_formation == {0: (first, second)}
+    with pytest.raises(
+        ValueError,
+        match=r"source_operations=\('first', 'second'\).*has no L1-feasible layout",
+    ):
+        allocate(graph, mesh, stage_formation)
+
+
 def test_allocate_accepts_caller_supplied_compatible_stage() -> None:
     graph, first, second = _elementwise_chain()
     mesh = _mesh_with_l1(2, 1, l1_size=4096)
@@ -472,7 +485,7 @@ def test_allocate_rejects_caller_supplied_incompatible_internal_edge() -> None:
         allocate(graph, mesh, {0: (first, second)})
 
 
-def test_allocate_rejects_caller_split_explicit_stage_group() -> None:
+def test_allocate_rejects_caller_split_source_operation() -> None:
     graph, first, second = _elementwise_chain()
     first = Node(
         first.name,
@@ -480,7 +493,7 @@ def test_allocate_rejects_caller_split_explicit_stage_group() -> None:
         inputs=first.inputs,
         outputs=first.outputs,
         payload=first.payload,
-        attributes={"stage_group_id": "together"},
+        source_operation="together",
     )
     second = Node(
         second.name,
@@ -488,7 +501,7 @@ def test_allocate_rejects_caller_split_explicit_stage_group() -> None:
         inputs=second.inputs,
         outputs=second.outputs,
         payload=second.payload,
-        attributes={"stage_group_id": "together"},
+        source_operation="together",
     )
     graph = Graph(
         graph.name,
@@ -501,7 +514,7 @@ def test_allocate_rejects_caller_split_explicit_stage_group() -> None:
 
     with pytest.raises(
         ValueError,
-        match=r"explicit stage group 'together' is split across stages 0 and 1",
+        match=r"source operation 'together' is split across stages 0 and 1",
     ):
         allocate(graph, mesh, {0: (first,), 1: (second,)})
 
@@ -551,7 +564,7 @@ def test_allocate_can_use_selected_stage_groups() -> None:
         inputs=node1.inputs,
         outputs=node1.outputs,
         payload=node1.payload,
-        attributes={"stage_group_id": "group0"},
+        source_operation="group0",
     )
     node2 = _gemm_node("gemm2", m=16, k=16, n=16)
     node0 = Node(
@@ -560,7 +573,7 @@ def test_allocate_can_use_selected_stage_groups() -> None:
         inputs=node0.inputs,
         outputs=node0.outputs,
         payload=node0.payload,
-        attributes={"stage_group_id": "group0"},
+        source_operation="group0",
     )
     graph = Graph(name="g", nodes=(node0, node1, node2))
     mesh = _mesh_with_l1(3, 2, l1_size=4096)
@@ -571,7 +584,7 @@ def test_allocate_can_use_selected_stage_groups() -> None:
     except ValueError as exc:
         assert "dependency-connected" in str(exc)
     else:
-        raise AssertionError("expected malformed explicit group to fail")
+        raise AssertionError("expected malformed source operation to fail")
 
 
 def test_stage_candidate_uses_l1_feasible_logical_shape_for_fixed_tile_count() -> None:

@@ -28,13 +28,13 @@ from maps.planning.transitions.contracts import (
 class PlanningConstraints:
     """Hard legality constraints checked against a completed Execution Plan."""
 
-    max_stage_nodes: int = 0
+    max_stage_operations: int = 0
     enforce_l1_capacity: bool = True
     enforce_l2_capacity: bool = True
 
     def __post_init__(self) -> None:
-        if self.max_stage_nodes < 0:
-            raise ValueError("max_stage_nodes must be >= 0")
+        if self.max_stage_operations < 0:
+            raise ValueError("max_stage_operations must be >= 0")
 
 
 @dataclass(frozen=True)
@@ -139,13 +139,15 @@ def _validate_stage(
             f"stage {stage_id} submesh belongs to a different mesh",
         )
     if (
-        constraints.max_stage_nodes > 0
-        and len(stage.layers) > constraints.max_stage_nodes
+        constraints.max_stage_operations > 0
+        and len({layer.source_operation for layer in stage.layers})
+        > constraints.max_stage_operations
     ):
         append_violation(
             violations,
-            "stage_node_limit_exceeded",
-            f"stage {stage_id} exceeds max_stage_nodes={constraints.max_stage_nodes}",
+            "stage_operation_limit_exceeded",
+            f"stage {stage_id} exceeds "
+            f"max_stage_operations={constraints.max_stage_operations}",
         )
     tensor_bindings_valid = True
     try:
@@ -335,13 +337,6 @@ def _validate_transition_source(
     layer_input = execution_plan.stages[stage_id].layers[layer_index].inputs[
         input_index
     ]
-    if layer_index != 0:
-        append_violation(
-            violations,
-            "transition_source_not_on_first_layer",
-            f"stage {stage_id} layer {layer_index} input {input_index} "
-            "references a Transition outside the first layer",
-        )
     if source.transition_id >= len(execution_plan.transitions):
         append_violation(
             violations,
@@ -360,13 +355,12 @@ def _validate_transition_source(
         return
     if (
         transition.destination_stage_id != stage_id
-        or transition.destination_input_index != input_index
     ):
         append_violation(
             violations,
             "transition_destination_mismatch",
             f"transition {source.transition_id} does not target stage {stage_id} "
-            f"input {input_index}",
+            f"for tensor {layer_input.tensor_id}",
         )
     if transition.tensor_id != layer_input.tensor_id:
         append_violation(
@@ -550,18 +544,15 @@ def _validate_source(
             f"transition {transition_id} references missing source stage",
         )
         return
-    outputs = execution_plan.stages[transition.source_stage_id].layers[-1].outputs
-    if not 0 <= transition.source_output_index < len(outputs):
-        append_violation(
-            violations,
-            "transition_source_output_out_of_range",
-            f"transition {transition_id} references missing source output",
-        )
-    elif outputs[transition.source_output_index].tensor_id != transition.tensor_id:
+    if not any(
+        output.tensor_id == transition.tensor_id
+        for layer in execution_plan.stages[transition.source_stage_id].layers
+        for output in layer.outputs
+    ):
         append_violation(
             violations,
             "transition_source_tensor_mismatch",
-            f"transition {transition_id} does not match its source output tensor",
+            f"transition {transition_id} tensor is not resident in its source stage",
         )
 
 
@@ -578,31 +569,28 @@ def _validate_destination(
             f"transition {transition_id} references missing destination stage",
         )
         return
-    inputs = execution_plan.stages[
-        transition.destination_stage_id
-    ].layers[0].inputs
-    if not 0 <= transition.destination_input_index < len(inputs):
+    destination_inputs = tuple(
+        layer_input
+        for layer in execution_plan.stages[transition.destination_stage_id].layers
+        for layer_input in layer.inputs
+        if layer_input.tensor_id == transition.tensor_id
+    )
+    if not destination_inputs:
         append_violation(
             violations,
-            "transition_destination_input_out_of_range",
-            f"transition {transition_id} references missing destination input",
+            "transition_destination_tensor_missing",
+            f"transition {transition_id} tensor is not consumed in its destination stage",
         )
         return
-    destination_input = inputs[transition.destination_input_index]
-    if destination_input.tensor_id != transition.tensor_id:
-        append_violation(
-            violations,
-            "transition_destination_tensor_mismatch",
-            f"transition {transition_id} does not match destination input tensor",
-        )
-    if (
+    if any(
         not isinstance(destination_input.source, TransitionSource)
         or destination_input.source.transition_id != transition_id
+        for destination_input in destination_inputs
     ):
         append_violation(
             violations,
             "transition_destination_binding_mismatch",
-            f"transition {transition_id} is not referenced by its destination input",
+            f"transition {transition_id} is not referenced by every destination consumer",
         )
 
 

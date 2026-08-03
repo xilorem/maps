@@ -102,5 +102,5 @@ def test_magia_example_builds_and_writes_one_execution_plan_bundle(
     assert calls["specialization"] is specialization
     options = calls["planning_options"]
     assert options.execution.num_token_slots == 2
-    assert options.stage_formation.max_stage_nodes == 1
+    assert options.stage_formation.max_stage_operations == 1
     assert calls["specialization_options"].enable_precision_lowering

@@ -352,7 +352,6 @@ def decompose_conv_node(node: Node) -> tuple[tuple[Tensor, ...], tuple[Node, ...
     op = node.payload
     if op.group != 1 and op.group == op.x.dims[1]:
         attributes = dict(node.attributes)
-        attributes["stage_group_id"] = f"{node.name}::depthwise_conv"
         attributes["conv_step"] = "depthwise_conv"
         return (
             (),
@@ -386,7 +385,6 @@ def decompose_conv_node(node: Node) -> tuple[tuple[Tensor, ...], tuple[Node, ...
         )
 
     attributes = dict(node.attributes)
-    attributes.pop("stage_group_id", None)
     return (), (
         Node(
             name=node.name,

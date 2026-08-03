@@ -11,6 +11,7 @@ from maps.planning.mapping import (
     TensorRange,
     TensorSlice,
     TensorSubSlice,
+    bounding_tensor_slice,
     tile_tensor_slice,
 )
 from maps.operations.contracts import OpPayload
@@ -69,21 +70,40 @@ def build_virtual_transitions(
     intermediates: list[VirtualIntermediateTransition] = []
     for destination_stage_id in sorted(stage_plans):
         destination_plan = stage_plans[destination_stage_id]
-        destination_node = destination_plan.nodes[0]
-        destination_layouts = node_output_layouts(
-            destination_plan,
-            destination_node,
-        )
-        for destination_input_index, tensor in enumerate(destination_node.inputs):
-            tensor_identity = id(tensor)
-            if tensor_identity in initializer_identities:
-                continue
-            destinations = _required_input_slices(
-                tensor=tensor,
-                destination_node=destination_node,
-                destination_output_layouts=destination_layouts,
-                destination_input_index=destination_input_index,
+        demands_by_tensor_identity: dict[
+            int,
+            tuple[Tensor, list[tuple[Tile, TensorSlice]]],
+        ] = {}
+        for destination_node in destination_plan.nodes:
+            destination_layouts = node_output_layouts(
+                destination_plan,
+                destination_node,
             )
+            for destination_input_index, tensor in enumerate(destination_node.inputs):
+                tensor_identity = id(tensor)
+                if tensor_identity in initializer_identities:
+                    continue
+                source_node = producer_by_tensor_identity.get(tensor_identity)
+                if (
+                    source_node is not None
+                    and stage_id_by_node_identity[id(source_node)] == destination_stage_id
+                ):
+                    continue
+                _, demanded_slices = demands_by_tensor_identity.setdefault(
+                    tensor_identity,
+                    (tensor, []),
+                )
+                demanded_slices.extend(
+                    _required_input_slices(
+                        tensor=tensor,
+                        destination_node=destination_node,
+                        destination_output_layouts=destination_layouts,
+                        destination_input_index=destination_input_index,
+                    )
+                )
+
+        for tensor_identity, (tensor, demanded_slices) in demands_by_tensor_identity.items():
+            destinations = _resident_destinations(demanded_slices)
             source_node = producer_by_tensor_identity.get(tensor_identity)
             if source_node is None:
                 if tensor_identity in runtime_input_identities:
@@ -92,7 +112,6 @@ def build_virtual_transitions(
                             tensor=tensor,
                             tensor_id=tensor_id_by_identity[tensor_identity],
                             destination_stage_id=destination_stage_id,
-                            destination_input_index=destination_input_index,
                             destinations=tuple(
                                 VirtualInputDestination(
                                     virtual_tile_id=tile.tile_id,
@@ -108,8 +127,6 @@ def build_virtual_transitions(
                 continue
 
             source_stage_id = stage_id_by_node_identity[id(source_node)]
-            if source_stage_id == destination_stage_id:
-                continue
             source_output_index = node_output_index(source_node, tensor)
             source_layout = node_output_layouts(
                 stage_plans[source_stage_id],
@@ -120,9 +137,7 @@ def build_virtual_transitions(
                     tensor=tensor,
                     tensor_id=tensor_id_by_identity[tensor_identity],
                     source_stage_id=source_stage_id,
-                    source_output_index=source_output_index,
                     destination_stage_id=destination_stage_id,
-                    destination_input_index=destination_input_index,
                     transfers=_build_virtual_transfers(
                         tensor,
                         source_layout,
@@ -158,7 +173,6 @@ def bind_transitions(
                 InputTransition(
                     tensor_id=transition.tensor_id,
                     destination_stage_id=transition.destination_stage_id,
-                    destination_input_index=transition.destination_input_index,
                     destinations=tuple(
                         InputDestination(
                             tile_id=placement.physical_tile_id(
@@ -177,9 +191,7 @@ def bind_transitions(
                 IntermediateTransition(
                     tensor_id=transition.tensor_id,
                     source_stage_id=transition.source_stage_id,
-                    source_output_index=transition.source_output_index,
                     destination_stage_id=transition.destination_stage_id,
-                    destination_input_index=transition.destination_input_index,
                     transfers=tuple(
                         Transfer(
                             source_tile_id=source_placement.physical_tile_id(
@@ -203,7 +215,6 @@ def bind_transitions(
                 OutputTransition(
                     tensor_id=transition.tensor_id,
                     source_stage_id=transition.source_stage_id,
-                    source_output_index=transition.source_output_index,
                     sources=tuple(
                         OutputSource(
                             tile_id=source_placement.physical_tile_id(
@@ -235,7 +246,6 @@ def _build_virtual_output_transition(
         tensor=tensor,
         tensor_id=tensor_id,
         source_stage_id=source_stage_id,
-        source_output_index=source_output_index,
         sources=tuple(
             VirtualOutputSource(
                 virtual_tile_id=tile.tile_id,
@@ -269,6 +279,23 @@ def _build_virtual_transfers(
                 )
             )
     return tuple(sorted(transfers, key=_virtual_transfer_sort_key))
+
+
+def _resident_destinations(
+    destinations: list[tuple[Tile, TensorSlice]],
+) -> tuple[tuple[Tile, TensorSlice], ...]:
+    tile_by_id: dict[int, Tile] = {}
+    slices_by_tile_id: dict[int, list[TensorSlice]] = {}
+    for tile, tensor_slice in destinations:
+        tile_by_id.setdefault(tile.tile_id, tile)
+        slices_by_tile_id.setdefault(tile.tile_id, []).append(tensor_slice)
+    return tuple(
+        (
+            tile_by_id[tile_id],
+            bounding_tensor_slice(tuple(slices)),
+        )
+        for tile_id, slices in slices_by_tile_id.items()
+    )
 
 
 def _required_input_slices(

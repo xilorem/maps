@@ -205,7 +205,8 @@ def test_decompose_graph_lowers_depthwise_conv_to_tile_local_operation() -> None
     assert isinstance(lowered.payload, DepthwiseConvPayload)
     assert lowered.payload.strides == (2, 2)
     assert lowered.payload.pads == (1, 1, 1, 1)
-    assert lowered.attributes["stage_group_id"] == "depthwise_0::depthwise_conv"
+    assert "stage_group_id" not in lowered.attributes
+    assert lowered.source_operation == "depthwise_0"
     assert lowered.attributes["conv_step"] == "depthwise_conv"
     assert tuple(tensor.name for tensor in lowered_graph.outputs) == ("y",)
 
@@ -577,18 +578,8 @@ def test_decompose_graph_lowers_softmax_to_grouped_internal_nodes() -> None:
     assert isinstance(lowered_graph.nodes[4].payload, ReductionPayload)
     assert isinstance(lowered_graph.nodes[5].payload, AllReducePayload)
     assert isinstance(lowered_graph.nodes[6].payload, BinaryElementwisePayload)
-    assert tuple(
-        node.attributes["stage_group_id"]
-        for node in lowered_graph.nodes
-    ) == (
-        "softmax_0::softmax:max",
-        "softmax_0::softmax:max",
-        "softmax_0::softmax:normalize",
-        "softmax_0::softmax:normalize",
-        "softmax_0::softmax:normalize",
-        "softmax_0::softmax:normalize",
-        "softmax_0::softmax:normalize",
-    )
+    assert {node.source_operation for node in lowered_graph.nodes} == {"softmax_0"}
+    assert all("stage_group_id" not in node.attributes for node in lowered_graph.nodes)
     assert tuple(tensor.name for tensor in lowered_graph.outputs) == ("y",)
     assert {
         "softmax_0__max_local",

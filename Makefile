@@ -7,7 +7,7 @@ TARGET ?= magia
 MESH ?=
 MESH_OPTION = $(if $(strip $(MESH)),--mesh $(MESH))
 TOKEN_SLOTS ?= 2
-MAX_STAGE_NODES ?= 0
+MAX_STAGE_OPERATIONS ?= 0
 PIPELINE_TOKEN_CAPACITY ?= 1
 EXECUTION_PLAN ?= $(GENERATED_DIR)/$(TARGET).execution-plan.json
 PACKAGE ?= $(GENERATED_DIR)/$(TARGET).maps
@@ -25,7 +25,7 @@ plan:
 		--target $(TARGET) \
 		$(MESH_OPTION) \
 		--token-slots $(TOKEN_SLOTS) \
-		--max-stage-nodes $(MAX_STAGE_NODES) \
+		--max-stage-operations $(MAX_STAGE_OPERATIONS) \
 		--output $(EXECUTION_PLAN)
 
 package:

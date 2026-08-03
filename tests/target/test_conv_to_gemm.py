@@ -235,12 +235,11 @@ def test_magia_composes_fp32_conv_lowering_with_precision_lowering(
     assert output_cast.outputs[0].dtype is TensorDType.FLOAT32
     assert output_reformat.outputs == first.graph.outputs
     assert first.graph.outputs[0].dtype is TensorDType.FLOAT32
-    assert activation_cast.attributes == {
-        "stage_group_id": "conv::conv_to_gemm"
-    }
-    assert output_cast.attributes == {
-        "stage_group_id": "conv::conv_to_gemm"
-    }
+    assert activation_cast.attributes == {}
+    assert output_cast.attributes == {}
+    assert im2col.source_operation == "conv"
+    assert gemm.source_operation == "conv"
+    assert output_reformat.source_operation == "conv"
 
     packed_weight = first.constants.get("weight")
     assert packed_weight.dtype is TensorDType.FLOAT16

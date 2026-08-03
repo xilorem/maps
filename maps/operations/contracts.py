@@ -110,6 +110,7 @@ class LayoutRelation:
     output_index: int
     input_axis_for_output_axis: tuple[int, ...]
     guarantees_slice_containment: bool
+    replicated_output_axes: frozenset[int] = frozenset()
 
     @classmethod
     def exact(
@@ -136,11 +137,27 @@ class LayoutRelation:
         }
         return TensorLayout(
             submesh=input_layout.submesh,
-            mesh_x=self._retarget_axis(input_layout.mesh_x, output_axis_for_input_axis),
-            mesh_y=self._retarget_axis(input_layout.mesh_y, output_axis_for_input_axis),
+            mesh_x=self._output_axis(
+                input_layout.mesh_x,
+                output_axis_for_input_axis,
+            ),
+            mesh_y=self._output_axis(
+                input_layout.mesh_y,
+                output_axis_for_input_axis,
+            ),
             logical_width=input_layout.logical_width,
             logical_height=input_layout.logical_height,
         )
+
+    def _output_axis(
+        self,
+        axis: LayoutAxis,
+        output_axis_for_input_axis: dict[int, int],
+    ) -> LayoutAxis:
+        retargeted = self._retarget_axis(axis, output_axis_for_input_axis)
+        if retargeted.tensor_axis in self.replicated_output_axes:
+            return LayoutAxis(mode=LayoutAxisMode.REPLICATE)
+        return retargeted
 
     def input_layout_from_output_layout(
         self,

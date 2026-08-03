@@ -86,7 +86,7 @@ def plan(
     require_valid_execution_plan(
         execution_plan,
         PlanningConstraints(
-            max_stage_nodes=options.stage_formation.max_stage_nodes,
+            max_stage_operations=options.stage_formation.max_stage_operations,
         ),
         error_prefix="planner produced an invalid Execution Plan",
     )

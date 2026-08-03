@@ -85,10 +85,15 @@ class Node:
     outputs: tuple[Tensor, ...] = field(default_factory=tuple)
     payload: "OperationPayload | None" = None
     attributes: dict[str, object] = field(default_factory=dict)
+    source_operation: str | None = None
 
     def __post_init__(self) -> None:
         if not self.name:
             raise ValueError("node name must not be empty")
+        if self.source_operation is None:
+            object.__setattr__(self, "source_operation", self.name)
+        elif not self.source_operation:
+            raise ValueError("source_operation must not be empty")
 
 
 @dataclass(frozen=True)

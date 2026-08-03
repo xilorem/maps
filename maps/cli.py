@@ -66,7 +66,7 @@ def _add_planning_arguments(parser: argparse.ArgumentParser) -> None:
 def _plan_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="maps plan")
     _add_planning_arguments(parser)
-    parser.add_argument("--max-stage-nodes", type=int, default=0)
+    parser.add_argument("--max-stage-operations", type=int, default=0)
     return parser
 
 
@@ -131,7 +131,7 @@ def _run_plan(arguments: list[str]) -> int:
         PlanningOptions(
             execution=ExecutionContract(num_token_slots=options.token_slots),
             stage_formation=StageFormationOptions(
-                max_stage_nodes=options.max_stage_nodes
+                max_stage_operations=options.max_stage_operations
             ),
             placement=PlacementOptions(print_placement=False),
             print_execution_plan_cost=False,

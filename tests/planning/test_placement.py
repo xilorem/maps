@@ -400,9 +400,7 @@ def test_incremental_evaluation_reuses_source_of_empty_transition() -> None:
         tensor=nodes[0].outputs[0],
         tensor_id=0,
         source_stage_id=0,
-        source_output_index=0,
         destination_stage_id=1,
-        destination_input_index=0,
     )
     evaluator = PlacementEvaluator(mesh, stage_plans, (empty_transition,))
     initial = evaluator.evaluate(placements)
