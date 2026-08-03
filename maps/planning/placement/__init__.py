@@ -26,6 +26,8 @@ def place(
     show_progress: bool = False,
     print_placement: bool = True,
     print_costs: bool = False,
+    stage_latency_weight: float = 1.0,
+    communication_weight: float = 1.0,
 ) -> dict[int, StagePlacement]:
     """Place virtual Stage Plans onto connected physical mesh regions.
 
@@ -76,6 +78,8 @@ def place(
         mesh,
         stage_plans,
         virtual_transitions,
+        stage_latency_weight,
+        communication_weight,
     )
     evaluation = evaluator.evaluate(placements)
     _debug(

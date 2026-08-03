@@ -1,18 +1,22 @@
 from maps.hardware import L2Memory, Mesh
-from maps.graph import Edge, Graph, Node, OpKind
+from maps.graph import Edge, Graph, Node, OpKind, TensorDType, decompose_graph
 from maps.planning.mapping import Submesh
 from maps.graph import Tensor
 from maps.operations.gemm import GemmPayload
+from maps.operations.softmax import SoftmaxPayload
+from maps.planning.allocation.candidates import StageCandidateAnalyzer
 from maps.planning.stages import StagePlacement, StagePlan, virtual_submesh
 from maps.planning.placement import place
 from maps.planning.placement.evaluation import PlacementEvaluator, evaluate_placement
 from maps.planning.placement.regions import assign_stage_ownerships
 import maps.planning.placement.repair as placement_repair
 import maps.planning.placement.regions as placement_topology
+import maps.planning.allocation.candidates as candidates_module
 from maps.planning.placement.evaluation import VirtualTraffic
 from maps.planning.placement.evaluation import build_virtual_traffic
 from maps.planning.transitions import VirtualIntermediateTransition, build_virtual_transitions
 from tests.noc_utils import rectangular_test_noc, rectangular_test_tiles
+from maps.target import magia
 
 
 def _test_mesh(width: int, height: int) -> Mesh:
@@ -338,6 +342,69 @@ def test_exact_placement_ignores_initializers_absent_from_virtual_transitions() 
 
     assert virtual_transitions == ()
     assert evaluation.tile_scores[0].score == 0
+
+
+def test_collective_stage_placement_prefers_nearer_physical_participants(
+    monkeypatch,
+) -> None:
+    x = Tensor("x", 1, (8,), 2, dtype=TensorDType.FLOAT16)
+    output = Tensor("output", 1, (8,), 2, dtype=TensorDType.FLOAT16)
+    softmax = Node(
+        "softmax",
+        OpKind.CUSTOM,
+        inputs=(x,),
+        outputs=(output,),
+        payload=SoftmaxPayload(x, output, axis=0),
+    )
+    graph = decompose_graph(
+        Graph(
+            "softmax",
+            tensors=(x, output),
+            nodes=(softmax,),
+            inputs=(x,),
+            outputs=(output,),
+        )
+    )
+    mesh = magia.build_mesh(width=4, height=2)
+    monkeypatch.setattr(candidates_module, "logical_shape_options", lambda _: ((4, 1),))
+    plan = StageCandidateAnalyzer(
+        {0: graph.nodes},
+        mesh,
+        frozenset(),
+    ).candidate(0, 4)
+    assert plan is not None
+    virtual = virtual_submesh(plan.plan)
+
+    def placement(tile_ids: frozenset[int]) -> StagePlacement:
+        return StagePlacement(
+            stage_id=0,
+            virtual_submesh=virtual,
+            physical_submesh=Submesh(mesh, 0, tile_ids),
+            virtual_to_physical={
+                virtual_id: physical_id
+                for virtual_id, physical_id in zip(
+                    sorted(virtual.tile_ids), sorted(tile_ids)
+                )
+            },
+        )
+
+    adjacent = evaluate_placement(
+        mesh,
+        {0: plan.plan},
+        {0: placement(frozenset((0, 1, 4, 5)))},
+        (),
+    )
+    distant = evaluate_placement(
+        mesh,
+        {0: plan.plan},
+        {0: placement(frozenset((0, 1, 2, 3)))},
+        (),
+    )
+
+    assert adjacent.stage_breakdowns[0].stage_latency < (
+        distant.stage_breakdowns[0].stage_latency
+    )
+    assert adjacent.objective < distant.objective
 
 
 def test_exact_placement_charges_runtime_input_reads_and_graph_output_writes() -> None:

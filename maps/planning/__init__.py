@@ -64,7 +64,7 @@ def plan(
         mesh,
         stage_formation=stage_formation,
         debug=options.allocation.print_progress,
-        compute_weight=options.allocation.compute_weight,
+        stage_latency_weight=options.allocation.stage_latency_weight,
         communication_weight=options.allocation.communication_weight,
         num_token_slots=options.execution.num_token_slots,
     )
@@ -76,6 +76,8 @@ def plan(
         show_progress=options.placement.print_progress,
         print_placement=options.placement.print_placement,
         print_costs=options.placement.print_costs,
+        stage_latency_weight=options.allocation.stage_latency_weight,
+        communication_weight=options.allocation.communication_weight,
     )
     execution_plan = construct_execution_plan(
         graph,
@@ -99,6 +101,8 @@ def plan(
             stage_plans,
             placements,
             virtual_transitions,
+            stage_latency_weight=options.allocation.stage_latency_weight,
+            communication_weight=options.allocation.communication_weight,
         )
 
     return execution_plan

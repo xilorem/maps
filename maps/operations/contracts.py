@@ -59,6 +59,18 @@ class OpCostModel(ABC):
         del node, output_layouts
         return 0
 
+    def collective_cost(
+        self,
+        tile_work: TileWork,
+        tile: Tile,
+        assigned_device: Device,
+        participants: tuple[Tile, ...],
+    ) -> int:
+        """Return latency for one synchronous participant group."""
+
+        del tile_work, tile, assigned_device, participants
+        raise ValueError("operation is not a synchronous collective")
+
 
 class OpPayload(OperationPayload):
     """Planning behavior shared by primitive logical Operations."""

@@ -31,6 +31,11 @@ class CollectiveTileWork(TileWork):
     output: Tensor
     input_slice: TensorSlice
     output_slice: TensorSlice
+    reduction: str = "sum"
+
+    @property
+    def work_kind(self) -> WorkKind:
+        return ALL_REDUCE_WORK_KINDS[self.reduction]
 
     @property
     def input_slices(self) -> tuple[TensorSliceRef, ...]:
@@ -96,6 +101,7 @@ class AllReducePayload(OpPayload):
             output=self.output,
             input_slice=tile_tensor_slice(self.x, input_layout, tile),
             output_slice=tile_tensor_slice(self.output, output_layout, tile),
+            reduction=self.reduction,
         )
 
     def validate_shapes(self) -> None:
@@ -107,7 +113,7 @@ class AllReducePayload(OpPayload):
 
 @dataclass(frozen=True)
 class AllReduceCostModel(OpCostModel):
-    """Generic collective cost pending Device-owned latency modeling."""
+    """Collective cost delegated to the assigned Device implementation."""
 
     reduction: str
 
@@ -121,6 +127,15 @@ class AllReduceCostModel(OpCostModel):
         tile: Tile,
         assigned_device: Device,
     ) -> int:
-        del assigned_device
-        del tile_work, tile
+        del tile_work, tile, assigned_device
         return 0
+
+    def collective_cost(
+        self,
+        tile_work: TileWork,
+        tile: Tile,
+        assigned_device: Device,
+        participants: tuple[Tile, ...],
+    ) -> int:
+        del tile
+        return assigned_device.collective_cycles(tile_work, participants)

@@ -8,6 +8,7 @@ from maps.graph import Node
 from maps.hardware import Mesh
 from maps.planning.mapping import tensor_slice_num_bytes
 from maps.planning.stages import StagePlacement, StagePlan, virtual_submesh
+from maps.planning.stage_latency import estimate_stage_latency
 from maps.planning.transitions import (
     VirtualInputTransition,
     VirtualIntermediateTransition,
@@ -46,10 +47,14 @@ class PlacementEvaluator:
         mesh: Mesh,
         stage_plans: dict[int, StagePlan],
         virtual_transitions: tuple[VirtualTransition, ...],
+        stage_latency_weight: float = 1.0,
+        communication_weight: float = 1.0,
     ) -> None:
         self._mesh = mesh
         self._stage_plans = stage_plans
         self._model = TransportCostModel(mesh=mesh)
+        self._stage_latency_weight = stage_latency_weight
+        self._communication_weight = communication_weight
         (
             self._l1_transfers_by_source,
             self._l2_reads_by_stage,
@@ -146,6 +151,13 @@ class PlacementEvaluator:
             for stage_id in stage_ids
             for tile_id in placements[stage_id].physical_submesh.tile_ids
         }
+        stage_latencies = {
+            stage_id: self._physical_stage_latency(
+                self._stage_plans[stage_id],
+                placements[stage_id],
+            )
+            for stage_id in stage_ids
+        }
         return {
             tile_id: TileIOScore(
                 tile_id=tile_id,
@@ -156,9 +168,31 @@ class PlacementEvaluator:
                 consumer_stage_writes=dict(
                     sorted(consumer_stage_writes[tile_id].items())
                 ),
+                stage_latency=stage_latencies[stage_id],
+                stage_latency_weight=self._stage_latency_weight,
+                communication_weight=self._communication_weight,
             )
             for tile_id, stage_id in stage_of_tile.items()
         }
+
+    def _physical_stage_latency(
+        self,
+        plan: StagePlan,
+        placement: StagePlacement,
+    ) -> int:
+        if not any(plan.virtual_collective_groups):
+            return 0
+        return estimate_stage_latency(
+            stage_nodes=plan.nodes,
+            node_output_layouts=plan.node_output_layouts,
+            virtual_tiles=virtual_submesh(plan).tiles,
+            device_names=plan.device_names,
+            virtual_collective_groups=plan.virtual_collective_groups,
+            physical_tiles_by_virtual_id={
+                virtual_id: self._mesh.tile_by_id(physical_id)
+                for virtual_id, physical_id in placement.virtual_to_physical.items()
+            },
+        )
 
 
 def evaluate_placement(
@@ -166,8 +200,10 @@ def evaluate_placement(
     stage_plans: dict[int, StagePlan],
     placements: dict[int, StagePlacement],
     virtual_transitions: tuple[VirtualTransition, ...],
+    stage_latency_weight: float = 1.0,
+    communication_weight: float = 1.0,
 ) -> PlacementEvaluation:
-    """Compute the exact physical IO objective for a complete Placement.
+    """Compute the exact physical Placement objective.
 
     Contract:
         Every stage must have a disjoint physical placement and a complete
@@ -181,14 +217,16 @@ def evaluate_placement(
         the transport model.
 
     Returns:
-        Per-tile and per-stage breakdowns plus a deterministic lexicographic
-        objective used by local repair.
+        Per-tile and per-stage Stage Latency/external-communication breakdowns
+        plus a deterministic lexicographic objective used by local repair.
     """
 
     return PlacementEvaluator(
         mesh,
         stage_plans,
         virtual_transitions,
+        stage_latency_weight,
+        communication_weight,
     ).evaluate(placements)
 
 
@@ -296,7 +334,7 @@ def _placement_evaluation(
 def tile_score_objective(
     tile_scores: dict[int, TileIOScore],
     k: int = 5,
-) -> tuple[int, int, int, int]:
+) -> tuple[float, float, float, float]:
     """Return deterministic max-first aggregate Placement objectives."""
 
     scores = sorted(
@@ -325,7 +363,7 @@ def _stage_breakdowns(
             default=None,
         )
         if worst_tile is None:
-            breakdowns[stage_id] = StageIOBreakdown(None, 0, 0, 0)
+            breakdowns[stage_id] = StageIOBreakdown(None, 0, 0, 0, 0, 0)
             continue
         score = tile_scores[worst_tile]
         breakdowns[stage_id] = StageIOBreakdown(
@@ -333,6 +371,8 @@ def _stage_breakdowns(
             l2_read=score.l2_reads,
             l2_write=score.l2_writes,
             l1_write=score.tile_to_tile_writes,
+            stage_latency=score.stage_latency,
+            weighted_bottleneck=score.score,
         )
     return breakdowns
 
@@ -401,12 +441,19 @@ class TileIOScore:
     l2_reads: int
     l2_writes: int
     consumer_stage_writes: dict[int, int]
+    stage_latency: int = 0
+    stage_latency_weight: float = 1.0
+    communication_weight: float = 1.0
 
     @property
-    def score(self) -> int:
-        """Return the additive physical IO score for one tile."""
+    def score(self) -> float:
+        """Return the weighted Stage Latency/external-communication bottleneck."""
 
-        return self.tile_to_tile_writes + self.l2_reads + self.l2_writes
+        return max(
+            self.stage_latency_weight * self.stage_latency,
+            self.communication_weight
+            * (self.tile_to_tile_writes + self.l2_reads + self.l2_writes),
+        )
 
 
 @dataclass(frozen=True)
@@ -417,12 +464,14 @@ class StageIOBreakdown:
     l2_read: int
     l2_write: int
     l1_write: int
+    stage_latency: int
+    weighted_bottleneck: float
 
     @property
-    def total(self) -> int:
-        """Return the additive physical IO score of the worst tile."""
+    def total(self) -> float:
+        """Return the weighted bottleneck used by Placement."""
 
-        return self.l1_write + self.l2_read + self.l2_write
+        return self.weighted_bottleneck
 
 
 @dataclass(frozen=True)
@@ -432,7 +481,7 @@ class PlacementEvaluation:
     placements: dict[int, StagePlacement]
     tile_scores: dict[int, TileIOScore]
     stage_breakdowns: dict[int, StageIOBreakdown]
-    objective: tuple[int, int, int, int]
+    objective: tuple[float, float, float, float]
     worst_tile_id: int | None
 
 
@@ -582,18 +631,19 @@ def print_placement_details(
             f"virtual_to_physical={dict(sorted(placement.virtual_to_physical.items()))}"
         )
     print_placement_grid(mesh, placements)
-    print(f"[placement] stage worst physical-tile IO costs for {label}:")
+    print(f"[placement] stage physical bottlenecks for {label}:")
     for stage_id in stage_plans:
         io_cost = evaluation.stage_breakdowns[stage_id]
         print(
             f"  stage={stage_id} name={_stage_name(stage_plans[stage_id].nodes)} "
             f"tile={io_cost.physical_tile_id} l2_read={io_cost.l2_read} "
             f"l2_write={io_cost.l2_write} l1_write={io_cost.l1_write} "
-            f"total={io_cost.total}"
+            f"stage_latency={io_cost.stage_latency} "
+            f"weighted_bottleneck={io_cost.total}"
         )
     print(
         f"[placement] bottleneck for {label} "
-        f"worst_stage_io={max((cost.total for cost in evaluation.stage_breakdowns.values()), default=0)} "
+        f"worst_stage_bottleneck={max((cost.total for cost in evaluation.stage_breakdowns.values()), default=0)} "
         f"objective={evaluation.objective}"
     )
 

@@ -61,7 +61,7 @@ def grow_stage_candidates(
     mesh: Mesh,
     selected_candidates: dict[int, StageCandidate],
     analyzer: StageCandidateAnalyzer,
-    compute_weight: float,
+    stage_latency_weight: float,
     communication_weight: float,
     debug: bool,
 ) -> tuple[dict[int, StageCandidate], SelectionEvaluation]:
@@ -91,7 +91,7 @@ def grow_stage_candidates(
     current_evaluation = evaluate_candidate_selection(
         selected_candidates,
         mesh=mesh,
-        compute_weight=compute_weight,
+        stage_latency_weight=stage_latency_weight,
         communication_weight=communication_weight,
         graph=context.graph,
     )
@@ -130,7 +130,7 @@ def grow_stage_candidates(
                 used_tiles=used_tiles,
                 current_metric=current_metrics[stage_id],
                 debug=debug,
-                compute_weight=compute_weight,
+                stage_latency_weight=stage_latency_weight,
                 communication_weight=communication_weight,
                 graph=context.graph,
                 current_selection_metrics=current_metrics,
@@ -247,7 +247,7 @@ def _growth_candidate_for_stage(
     current_metric: float,
     graph: Graph,
     debug: bool = False,
-    compute_weight: float = 1.0,
+    stage_latency_weight: float = 1.0,
     communication_weight: float = 1.0,
     current_selection_metrics: dict[int, float] | None = None,
     candidate_counts: tuple[int, ...] | None = None,
@@ -289,7 +289,7 @@ def _growth_candidate_for_stage(
         candidate_evaluation = evaluate_candidate_selection(
             candidate_selection,
             mesh=mesh,
-            compute_weight=compute_weight,
+            stage_latency_weight=stage_latency_weight,
             communication_weight=communication_weight,
             graph=graph,
         )
@@ -391,7 +391,7 @@ def build_allocation_context(
 class StageMetricBreakdown:
     """Canonical intrinsic and communication costs for one selected Stage."""
 
-    compute_cycles: int
+    stage_latency: int
     communication_cycles: int
     weighted_bottleneck: float
 
@@ -415,7 +415,7 @@ class SelectionEvaluation:
 def evaluate_candidate_selection(
     candidates: dict[int, StageCandidate],
     mesh: Mesh,
-    compute_weight: float,
+    stage_latency_weight: float,
     communication_weight: float,
     graph: Graph,
 ) -> SelectionEvaluation:
@@ -429,13 +429,13 @@ def evaluate_candidate_selection(
     return SelectionEvaluation(
         stage_breakdowns={
             stage_id: StageMetricBreakdown(
-                compute_cycles=candidate.stage_compute,
+                stage_latency=candidate.stage_latency,
                 communication_cycles=max(
                     virtual_communication[stage_id].values(),
                     default=0,
                 ),
                 weighted_bottleneck=max(
-                    compute_weight * candidate.stage_compute,
+                    stage_latency_weight * candidate.stage_latency,
                     communication_weight
                     * max(virtual_communication[stage_id].values(), default=0),
                 ),
@@ -496,53 +496,6 @@ def selection_objective(metrics: dict[int, float]) -> tuple[float, ...]:
     return tuple(sorted(metrics.values(), reverse=True))
 
 
-def worst_tile_stage_compute(
-    stage_nodes: tuple[Node, ...],
-    node_output_layouts: tuple[tuple, ...],
-    submesh,
-    device_names: tuple[str, ...],
-) -> int:
-    """Return the greatest accumulated compute cost on any stage tile."""
-
-    return max(
-        (
-            sum(
-                _node_compute_cycles(
-                    node,
-                    output_layouts,
-                    tile,
-                    device_names[node_index],
-                )
-                for node_index, (node, output_layouts) in enumerate(
-                    zip(stage_nodes, node_output_layouts)
-                )
-            )
-            for tile in submesh.tiles
-        ),
-        default=0,
-    )
-
-
-def _node_compute_cycles(
-    node: Node,
-    output_layouts: tuple,
-    tile,
-    device_name: str,
-) -> int:
-    """Estimate compute cost for one node on one virtual tile."""
-
-    tile_work = node.payload.build_tile_work(output_layouts=output_layouts, tile=tile)
-    cost_model = node.payload.cost_model
-    compute_cost = cost_model.cost(
-        tile_work,
-        tile,
-        tile.device_by_name(device_name),
-    )
-    return int(compute_cost) + int(
-        cost_model.placement_cost(node=node, output_layouts=output_layouts)
-    )
-
-
 def _ceil_div(numerator: int, denominator: int) -> int:
     """Return positive integer ceiling division."""
 
@@ -556,7 +509,7 @@ def print_stage_metric_breakdown(
     stage_formation: StageFormation,
     evaluation: SelectionEvaluation,
 ) -> None:
-    """Print the canonical final compute and communication bottlenecks."""
+    """Print the canonical final Stage Latency and communication bottlenecks."""
 
     if not enabled:
         return
@@ -565,7 +518,7 @@ def print_stage_metric_breakdown(
         breakdown = evaluation.stage_breakdowns[stage_id]
         print(
             f"  stage={stage_id} nodes={_stage_label(stage_nodes)} "
-            f"compute={breakdown.compute_cycles} "
+            f"stage_latency={breakdown.stage_latency} "
             f"communication={breakdown.communication_cycles}"
         )
         for label in dict.fromkeys(
@@ -581,7 +534,7 @@ def allocate(
     mesh: Mesh,
     stage_formation: StageFormation,
     debug: bool = False,
-    compute_weight: float = 1.0,
+    stage_latency_weight: float = 1.0,
     communication_weight: float = 1.0,
     num_token_slots: int = 2,
 ) -> dict[int, StagePlan]:
@@ -589,7 +542,7 @@ def allocate(
 
     Contract:
         ``stage_formation`` must cover every graph node exactly once.
-        ``compute_weight`` and ``communication_weight`` weight their respective
+        ``stage_latency_weight`` and ``communication_weight`` weight their respective
         costs when comparing feasible allocations; they do not relax memory
         constraints.
 
@@ -628,7 +581,7 @@ def allocate(
         mesh,
         candidates,
         analyzer,
-        compute_weight=compute_weight,
+        stage_latency_weight=stage_latency_weight,
         communication_weight=communication_weight,
         debug=debug,
     )

@@ -131,8 +131,8 @@ def test_allocation_diagnostics_charge_inter_stage_writes_to_producer_tiles(
     allocate(graph, mesh, stage_formation, debug=True)
 
     output = capsys.readouterr().out
-    assert "stage=0 nodes=producer compute=512 communication=128" in output
-    assert "stage=1 nodes=consumer compute=512 communication=0" in output
+    assert "stage=0 nodes=producer stage_latency=512 communication=128" in output
+    assert "stage=1 nodes=consumer stage_latency=512 communication=0" in output
 
 
 def test_allocation_diagnostics_include_graph_input_and_output_transitions(
@@ -151,7 +151,7 @@ def test_allocation_diagnostics_include_graph_input_and_output_transitions(
     allocate(graph, mesh, {0: (node,)}, debug=True)
 
     output = capsys.readouterr().out
-    assert "stage=0 nodes=gemm compute=512 communication=384" in output
+    assert "stage=0 nodes=gemm stage_latency=512 communication=384" in output
 
 
 def test_allocate_preserves_layout_decisions() -> None:
@@ -323,7 +323,7 @@ def test_allocate_rejects_growth_that_worsens_global_objective(
         return SelectionEvaluation(
             {
                 stage_id: StageMetricBreakdown(
-                    compute_cycles=1000 + stage_id * 100 + tile_counts[stage_id],
+                    stage_latency=1000 + stage_id * 100 + tile_counts[stage_id],
                     communication_cycles=2000 + stage_id * 100 + tile_counts[stage_id],
                     weighted_bottleneck=metric,
                 )
@@ -349,8 +349,8 @@ def test_allocate_rejects_growth_that_worsens_global_objective(
         0: 1,
         1: 2,
     }
-    assert "stage=0 nodes=first compute=1001 communication=2001" in output
-    assert "stage=1 nodes=second compute=1102 communication=2102" in output
+    assert "stage=0 nodes=first stage_latency=1001 communication=2001" in output
+    assert "stage=1 nodes=second stage_latency=1102 communication=2102" in output
 
 
 def test_planner_selected_token_slots_control_l1_feasibility() -> None:

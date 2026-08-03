@@ -47,7 +47,7 @@ def main():
             execution=ExecutionContract(num_token_slots=2),
             stage_formation=StageFormationOptions(max_stage_operations=1),
             allocation=AllocationOptions(
-                compute_weight=1.0,
+                stage_latency_weight=1.0,
                 communication_weight=10.0,
                 print_progress=True,
             ),

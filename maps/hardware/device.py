@@ -158,6 +158,38 @@ class Device:
     def cycles(self, work: Any) -> int:
         raise NotImplementedError
 
+    def collective_cycles(
+        self,
+        work: Any,
+        participants: tuple[Any, ...],
+    ) -> int:
+        """Estimate one synchronous collective supplied by this Device.
+
+        The default model is a topology-sensitive, non-rooted exchange. Targets
+        may override it when their SDK implementation uses another protocol.
+        """
+
+        if len(participants) <= 1:
+            return 0
+        work_kind = work.work_kind
+        transfer_cycles = self._throughput_cycles(
+            work_kind,
+            work.output_slices[0].tensor_slice.num_elements
+            * (len(participants) - 1),
+        )
+        diameter = max(
+            abs(left.x - right.x) + abs(left.y - right.y)
+            for left in participants
+            for right in participants
+        )
+        return transfer_cycles + diameter
+
+    def temporary_l1_bytes(self, work: Any) -> int:
+        """Return reusable per-tile scratch required by this implementation."""
+
+        del work
+        return 0
+
     def _throughput_cycles(self, work_kind: WorkKind, amount: int) -> int:
         if amount < 0:
             raise ValueError("device work amount must be >= 0")

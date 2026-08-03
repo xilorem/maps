@@ -10,8 +10,11 @@ from typing import cast
 from maps.graph import Graph, Node, Tensor
 from maps.hardware import EndpointKind, Mesh, Tile
 from maps.operations.contracts import OpPayload
-from maps.planning.allocation.candidates import permanent_l1_allocation_bytes
-from maps.planning.allocation.selection import worst_tile_stage_compute
+from maps.planning.allocation.candidates import (
+    permanent_l1_allocation_bytes,
+    stage_l1_allocation_bytes,
+)
+from maps.planning.stage_latency import estimate_stage_latency
 from maps.planning.mapping import (
     Submesh,
     TensorLayout,
@@ -554,40 +557,68 @@ def print_execution_plan_stage_cost(
     stage_plans: dict[int, StagePlan],
     placements: dict[int, StagePlacement],
     virtual_transitions: tuple[VirtualTransition, ...],
+    stage_latency_weight: float = 1.0,
+    communication_weight: float = 1.0,
 ) -> None:
-    """Print the combined worst-stage compute and physical IO estimate.
+    """Print the combined worst-stage latency and physical IO estimate.
 
-    Compute is evaluated from the final virtual layouts. Physical IO is
-    evaluated from the separate spatial placements and ownership maps. The
-    displayed total is the sum of the greatest stage compute and IO bottlenecks.
+    Stage Latency is evaluated from the final physical collective bindings.
+    Physical IO remains a separate signal from the spatial placement.
     """
 
-    worst_stage_compute = max(
-        (
-            worst_tile_stage_compute(
-                stage_nodes=plan.nodes,
-                node_output_layouts=plan.node_output_layouts,
-                submesh=virtual_submesh(plan),
-                device_names=plan.device_names,
-            )
-            for plan in stage_plans.values()
-        ),
-        default=0,
-    )
+    stage_latencies = {
+        plan.stage_id: estimate_stage_latency(
+            stage_nodes=plan.nodes,
+            node_output_layouts=plan.node_output_layouts,
+            virtual_tiles=virtual_submesh(plan).tiles,
+            device_names=plan.device_names,
+            virtual_collective_groups=plan.virtual_collective_groups,
+            physical_tiles_by_virtual_id={
+                virtual_id: execution_plan.mesh.tile_by_id(physical_id)
+                for virtual_id, physical_id in placements[
+                    plan.stage_id
+                ].virtual_to_physical.items()
+            },
+        )
+        for plan in stage_plans.values()
+    }
+    worst_stage_latency = max(stage_latencies.values(), default=0)
     evaluation = evaluate_placement(
         execution_plan.mesh,
         stage_plans,
         placements,
         virtual_transitions,
+        stage_latency_weight=stage_latency_weight,
+        communication_weight=communication_weight,
     )
-    worst_stage_io = max(
-        (breakdown.total for breakdown in evaluation.stage_breakdowns.values()),
+    worst_external_communication = max(
+        (
+            breakdown.l1_write + breakdown.l2_read + breakdown.l2_write
+            for breakdown in evaluation.stage_breakdowns.values()
+        ),
+        default=0,
+    )
+    weighted_stage_bottleneck = max(
+        (
+            max(
+                stage_latency_weight
+                * stage_latencies[plan.stage_id],
+                communication_weight
+                * (
+                    evaluation.stage_breakdowns[plan.stage_id].l1_write
+                    + evaluation.stage_breakdowns[plan.stage_id].l2_read
+                    + evaluation.stage_breakdowns[plan.stage_id].l2_write
+                ),
+            )
+            for plan in stage_plans.values()
+        ),
         default=0,
     )
     print(
         "[planner] execution_plan_stage_cost="
-        f"{worst_stage_compute + worst_stage_io} "
-        f"(worst_compute={worst_stage_compute} worst_io={worst_stage_io})"
+        f"{weighted_stage_bottleneck} "
+        f"(worst_stage_latency={worst_stage_latency} "
+        f"worst_external_communication={worst_external_communication})"
     )
 
 
@@ -651,7 +682,41 @@ def estimate_stage_l1_memory_for_tile(
                 tensor_slice_num_bytes(tensor, tensor_slice)
                 * execution_plan.execution.num_token_slots
             )
-    return permanent_l1_allocation_bytes(allocation_sizes)
+    permanent_l1_bytes = permanent_l1_allocation_bytes(allocation_sizes)
+    scratch_l1_bytes = max(
+        (
+            _execution_layer_scratch_l1_bytes(layer, tile, virtual_tile)
+            for layer in stage.layers
+        ),
+        default=0,
+    )
+    return stage_l1_allocation_bytes(permanent_l1_bytes, scratch_l1_bytes)
+
+
+def _execution_layer_scratch_l1_bytes(
+    layer: Layer,
+    physical_tile: Tile,
+    virtual_tile: Tile,
+) -> int:
+    """Price scratch only after the Layer's execution contract is resolvable."""
+
+    if (
+        layer.device_name is None
+        or not layer.outputs
+        or not hasattr(layer.node.payload, "build_tile_work")
+    ):
+        return 0
+    try:
+        device = physical_tile.device_by_name(layer.device_name)
+    except ValueError:
+        return 0
+    payload = cast(OpPayload, layer.node.payload)
+    return device.temporary_l1_bytes(
+        payload.build_tile_work(
+            output_layouts=tuple(output.layout for output in layer.outputs),
+            tile=virtual_tile,
+        )
+    )
 
 
 def estimate_stage_l2_memory(

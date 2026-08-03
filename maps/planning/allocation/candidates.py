@@ -23,6 +23,7 @@ from maps.planning.stages import (
     VirtualCollectiveGroup,
     derive_virtual_collective_groups,
 )
+from maps.planning.stage_latency import estimate_stage_latency
 
 
 @dataclass(frozen=True)
@@ -30,8 +31,18 @@ class StageTileFacts:
     """Intrinsic facts for one virtual tile of a Stage Candidate."""
 
     tile_id: int
-    compute_cycles: int
+    local_cycles: int
     permanent_l1_bytes: int
+    scratch_l1_bytes: int
+
+    @property
+    def total_l1_bytes(self) -> int:
+        """Return persistent allocation plus one aligned reusable scratch area."""
+
+        return stage_l1_allocation_bytes(
+            self.permanent_l1_bytes,
+            self.scratch_l1_bytes,
+        )
 
 
 @dataclass(frozen=True)
@@ -40,12 +51,7 @@ class StageCandidate:
 
     plan: StagePlan
     tile_facts: tuple[StageTileFacts, ...]
-
-    @property
-    def stage_compute(self) -> int:
-        """Return the greatest accumulated Layer compute on one virtual tile."""
-
-        return max(fact.compute_cycles for fact in self.tile_facts)
+    stage_latency: int
 
 
 class StageCandidateAnalyzer:
@@ -139,7 +145,7 @@ class StageCandidateAnalyzer:
             tile_facts = tuple(
                 StageTileFacts(
                     tile_id=tile.tile_id,
-                    compute_cycles=sum(
+                    local_cycles=sum(
                         _node_cost(
                             cost_models[node_index],
                             node_tile_work[node_index][tile_index],
@@ -157,11 +163,19 @@ class StageCandidateAnalyzer:
                         self._initializer_tensors,
                         self._num_token_slots,
                     ),
+                    scratch_l1_bytes=max(
+                        (
+                            tile.device_by_name(device_names[node_index])
+                            .temporary_l1_bytes(node_tile_work[node_index][tile_index])
+                            for node_index in range(len(stage_nodes))
+                        ),
+                        default=0,
+                    ),
                 )
                 for tile_index, tile in enumerate(submesh.tiles)
             )
             if any(
-                fact.permanent_l1_bytes > tile.memory.size
+                fact.total_l1_bytes > tile.memory.size
                 for fact, tile in zip(tile_facts, submesh.tiles)
             ):
                 continue
@@ -179,12 +193,23 @@ class StageCandidateAnalyzer:
                     ),
                 ),
                 tile_facts=tile_facts,
+                stage_latency=estimate_stage_latency(
+                    stage_nodes=stage_nodes,
+                    node_output_layouts=layouts,
+                    virtual_tiles=submesh.tiles,
+                    device_names=device_names,
+                    virtual_collective_groups=_stage_collective_groups(
+                        stage_nodes,
+                        layouts,
+                    ),
+                    node_tile_work=node_tile_work,
+                ),
             )
             if best_candidate is None or (
-                candidate.stage_compute,
+                candidate.stage_latency,
                 candidate.plan.logical_shape[1],
             ) < (
-                best_candidate.stage_compute,
+                best_candidate.stage_latency,
                 best_candidate.plan.logical_shape[1],
             ):
                 best_candidate = candidate
@@ -497,6 +522,22 @@ def permanent_l1_allocation_bytes(allocation_sizes) -> int:
         next_offset = _align_to(next_offset, L1_ALLOCATION_ALIGNMENT_BYTES)
         next_offset += allocation_size
     return next_offset
+
+
+def stage_l1_allocation_bytes(
+    permanent_l1_bytes: int,
+    scratch_l1_bytes: int,
+) -> int:
+    """Append one reusable operation-scratch reservation to persistent L1."""
+
+    if scratch_l1_bytes < 0:
+        raise ValueError("operation scratch bytes must be >= 0")
+    if scratch_l1_bytes == 0:
+        return permanent_l1_bytes
+    return _align_to(
+        permanent_l1_bytes,
+        L1_ALLOCATION_ALIGNMENT_BYTES,
+    ) + scratch_l1_bytes
 
 
 def _is_initializer(
