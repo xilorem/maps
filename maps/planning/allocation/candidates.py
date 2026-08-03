@@ -9,6 +9,7 @@ from maps.hardware import Mesh, Tile, WorkSignature
 from maps.graph import Node
 from maps.graph import Tensor
 from maps.operations.contracts import OpPayload, TileWork, find_layout_relation
+from maps.operations.collective import AllReducePayload
 from maps.planning.mapping import (
     TensorLayout,
     TensorSlice,
@@ -16,7 +17,12 @@ from maps.planning.mapping import (
     tensor_slice_num_bytes,
     tile_tensor_slice,
 )
-from maps.planning.stages import StagePlan, StageFormation
+from maps.planning.stages import (
+    StageFormation,
+    StagePlan,
+    VirtualCollectiveGroup,
+    derive_virtual_collective_groups,
+)
 
 
 @dataclass(frozen=True)
@@ -167,6 +173,10 @@ class StageCandidateAnalyzer:
                     nodes=stage_nodes,
                     node_output_layouts=layouts,
                     device_names=device_names,
+                    virtual_collective_groups=_stage_collective_groups(
+                        stage_nodes,
+                        layouts,
+                    ),
                 ),
                 tile_facts=tile_facts,
             )
@@ -179,6 +189,29 @@ class StageCandidateAnalyzer:
             ):
                 best_candidate = candidate
         return best_candidate
+
+
+def _stage_collective_groups(
+    stage_nodes: tuple[Node, ...],
+    layouts: tuple[tuple[TensorLayout, ...], ...],
+) -> tuple[tuple[VirtualCollectiveGroup, ...], ...]:
+    producer_layout_by_tensor: dict[Tensor, TensorLayout] = {}
+    groups: list[tuple[VirtualCollectiveGroup, ...]] = []
+    for node, output_layouts in zip(stage_nodes, layouts):
+        if isinstance(node.payload, AllReducePayload):
+            input_layout = producer_layout_by_tensor.get(node.inputs[0])
+            if input_layout is None:
+                raise ValueError(
+                    f"collective node {node.name} must consume a Stage-local Partial Value"
+                )
+            groups.append(
+                derive_virtual_collective_groups(node.inputs[0], input_layout)
+            )
+        else:
+            groups.append(())
+        for tensor, layout in zip(node.outputs, output_layouts):
+            producer_layout_by_tensor[tensor] = layout
+    return tuple(groups)
 
 
 def _node_cost(cost_model, tile_work, tile, device_name: str) -> int:

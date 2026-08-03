@@ -5,13 +5,21 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from maps.hardware import WorkSignature
+from maps.operations.collective import AllReducePayload
 from maps.planning.execution_plan import (
     ExecutionPlan,
     InitializerInput,
     LocalInput,
     TransitionSource,
 )
-from maps.planning.mapping import TensorSlice, TensorSubSlice
+from maps.planning.mapping import (
+    LayoutAxisMode,
+    TensorLayout,
+    TensorSlice,
+    TensorSubSlice,
+    tensor_slice_num_bytes,
+    tile_tensor_slice,
+)
 from maps.planning.execution_plan import (
     estimate_stage_l1_memory_for_tile,
     estimate_stage_l2_memory,
@@ -167,6 +175,12 @@ def _validate_stage(
             layer_index,
             execution_plan,
         )
+        _validate_collective_groups(
+            violations,
+            stage_id,
+            layer_index,
+            execution_plan,
+        )
         for input_index, layer_input in enumerate(layer.inputs):
             source = layer_input.source
             if isinstance(source, InitializerInput):
@@ -188,6 +202,14 @@ def _validate_stage(
                     execution_plan,
                 )
             elif isinstance(source, LocalInput):
+                _validate_partial_local_input(
+                    violations,
+                    stage_id,
+                    layer_index,
+                    input_index,
+                    source,
+                    execution_plan,
+                )
                 _validate_local_input(
                     violations,
                     stage_id,
@@ -219,6 +241,119 @@ def _validate_stage(
                     f"tile {tile.tile_id} only provides {tile.memory.size}",
                 )
     return tensor_bindings_valid
+
+
+def _layout_is_partial(layout: TensorLayout) -> bool:
+    return any(
+        axis.mode is LayoutAxisMode.PARTIAL
+        for axis in (layout.mesh_x, layout.mesh_y)
+    )
+
+
+def _validate_partial_local_input(
+    violations: list[ConstraintViolation],
+    stage_id: int,
+    layer_index: int,
+    input_index: int,
+    source: LocalInput,
+    execution_plan: ExecutionPlan,
+) -> None:
+    stage = execution_plan.stages[stage_id]
+    if source.layer_idx < 0 or source.layer_idx >= len(stage.layers):
+        return
+    producer = stage.layers[source.layer_idx]
+    output = next(
+        (
+            candidate
+            for candidate in producer.outputs
+            if candidate.tensor_id == source.tensor_id
+        ),
+        None,
+    )
+    if output is None or not _layout_is_partial(output.layout):
+        return
+    consumer = stage.layers[layer_index]
+    if not isinstance(consumer.node.payload, AllReducePayload):
+        append_violation(
+            violations,
+            "partial_value_consumed_by_ordinary_layer",
+            f"stage {stage_id} layer {layer_index} input {input_index} consumes "
+            f"unresolved Partial Value tensor {source.tensor_id}",
+        )
+
+
+def _validate_collective_groups(
+    violations: list[ConstraintViolation],
+    stage_id: int,
+    layer_index: int,
+    execution_plan: ExecutionPlan,
+) -> None:
+    stage = execution_plan.stages[stage_id]
+    layer = stage.layers[layer_index]
+    is_collective = isinstance(layer.node.payload, AllReducePayload)
+    if not is_collective:
+        if layer.collective_groups:
+            append_violation(
+                violations,
+                "collective_groups_on_ordinary_layer",
+                f"stage {stage_id} layer {layer_index} is not a collective",
+            )
+        return
+    if not layer.collective_groups:
+        append_violation(
+            violations,
+            "collective_groups_missing",
+            f"stage {stage_id} layer {layer_index} has no Collective Groups",
+        )
+        return
+
+    participant_ids = tuple(
+        tile_id
+        for group in layer.collective_groups
+        for tile_id in group.tile_ids
+    )
+    if len(participant_ids) != len(set(participant_ids)):
+        append_violation(
+            violations,
+            "collective_groups_overlap",
+            f"stage {stage_id} layer {layer_index} assigns a tile more than once",
+        )
+    stage_tile_ids = set(stage.submesh.tile_ids)
+    if not set(participant_ids) <= stage_tile_ids:
+        append_violation(
+            violations,
+            "collective_group_binding_invalid",
+            f"stage {stage_id} layer {layer_index} includes tiles outside its Submesh",
+        )
+    if not layer.outputs:
+        return
+    output = layer.outputs[0]
+    if output.tensor_id >= len(execution_plan.tensors):
+        return
+    tensor = execution_plan.tensors[output.tensor_id]
+    expected = {
+        tile.tile_id
+        for tile in stage.submesh.tiles
+        if tensor_slice_num_bytes(
+            tensor,
+            tile_tensor_slice(tensor, output.layout, tile),
+        )
+        > 0
+    }
+    if set(participant_ids) != expected:
+        append_violation(
+            violations,
+            "collective_group_coverage_invalid",
+            f"stage {stage_id} layer {layer_index} participants "
+            f"{sorted(set(participant_ids))} do not cover non-empty work "
+            f"{sorted(expected)}",
+        )
+    if _layout_is_partial(output.layout):
+        append_violation(
+            violations,
+            "collective_output_remains_partial",
+            f"stage {stage_id} layer {layer_index} does not resolve its Partial Value",
+        )
 
 
 def _validate_layer_device(
@@ -544,15 +679,24 @@ def _validate_source(
             f"transition {transition_id} references missing source stage",
         )
         return
-    if not any(
-        output.tensor_id == transition.tensor_id
+    outputs = tuple(
+        output
         for layer in execution_plan.stages[transition.source_stage_id].layers
         for output in layer.outputs
-    ):
+        if output.tensor_id == transition.tensor_id
+    )
+    if not outputs:
         append_violation(
             violations,
             "transition_source_tensor_mismatch",
             f"transition {transition_id} tensor is not resident in its source stage",
+        )
+    elif any(_layout_is_partial(output.layout) for output in outputs):
+        append_violation(
+            violations,
+            "partial_value_transition_escape",
+            f"transition {transition_id} exposes unresolved Partial Value tensor "
+            f"{transition.tensor_id}",
         )
 
 

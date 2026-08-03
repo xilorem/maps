@@ -49,9 +49,9 @@ def decompose_softmax_node(node: Node) -> tuple[tuple[Tensor, ...], tuple[Node, 
     attributes = dict(node.attributes)
 
     max_local = _reduced_tensor(f"{node.name}__max_local", x, axis)
-    collective_axis = _collective_axis_for_softmax(x, axis)
-    max_value = max_local
-    new_tensors: list[Tensor] = [max_local]
+    max_global = _same_shape_tensor(f"{node.name}__max_global", max_local)
+    max_value = max_global
+    new_tensors: list[Tensor] = [max_local, max_global]
     nodes: list[Node] = [
         Node(
             name=f"{node.name}__reduce_max",
@@ -69,26 +69,21 @@ def decompose_softmax_node(node: Node) -> tuple[tuple[Tensor, ...], tuple[Node, 
         )
     ]
 
-    if collective_axis is not None:
-        max_global = _same_shape_tensor(f"{node.name}__max_global", max_local)
-        new_tensors.append(max_global)
-        nodes.append(
-            Node(
-                name=f"{node.name}__allreduce_max",
-                kind=OpKind.CUSTOM,
-                inputs=(max_local,),
-                outputs=(max_global,),
-                payload=AllReducePayload(
-                    op_name="AllReduceMax",
-                    x=max_local,
-                    output=max_global,
-                    reduction="max",
-                    collective_axis=collective_axis,
-                ),
-                attributes={**attributes, "softmax_step": "allreduce_max"},
-            )
+    nodes.append(
+        Node(
+            name=f"{node.name}__allreduce_max",
+            kind=OpKind.CUSTOM,
+            inputs=(max_local,),
+            outputs=(max_global,),
+            payload=AllReducePayload(
+                op_name="AllReduceMax",
+                x=max_local,
+                output=max_global,
+                reduction="max",
+            ),
+            attributes={**attributes, "softmax_step": "allreduce_max"},
         )
-        max_value = max_global
+    )
 
     shifted = _same_shape_tensor(f"{node.name}__shifted", x)
     exp = _same_shape_tensor(f"{node.name}__exp", x)
@@ -140,30 +135,27 @@ def decompose_softmax_node(node: Node) -> tuple[tuple[Tensor, ...], tuple[Node, 
         )
     )
 
-    sum_value = sum_local
-    if collective_axis is not None:
-        sum_global = _same_shape_tensor(f"{node.name}__sum_global", sum_local)
-        new_tensors.append(sum_global)
-        nodes.append(
-            Node(
-                name=f"{node.name}__allreduce_sum",
-                kind=OpKind.CUSTOM,
-                inputs=(sum_local,),
-                outputs=(sum_global,),
-                payload=AllReducePayload(
-                    op_name="AllReduceSum",
-                    x=sum_local,
-                    output=sum_global,
-                    reduction="sum",
-                    collective_axis=collective_axis,
-                ),
-                attributes={
-                    **attributes,
-                    "softmax_step": "allreduce_sum",
-                },
-            )
+    sum_global = _same_shape_tensor(f"{node.name}__sum_global", sum_local)
+    new_tensors.append(sum_global)
+    nodes.append(
+        Node(
+            name=f"{node.name}__allreduce_sum",
+            kind=OpKind.CUSTOM,
+            inputs=(sum_local,),
+            outputs=(sum_global,),
+            payload=AllReducePayload(
+                op_name="AllReduceSum",
+                x=sum_local,
+                output=sum_global,
+                reduction="sum",
+            ),
+            attributes={
+                **attributes,
+                "softmax_step": "allreduce_sum",
+            },
         )
-        sum_value = sum_global
+    )
+    sum_value = sum_global
 
     nodes.append(
         Node(
@@ -205,11 +197,3 @@ def _reduced_tensor(name: str, reference: Tensor, axis: int) -> Tensor:
         elem_bytes=reference.elem_bytes,
         dtype=reference.dtype,
     )
-
-
-def _collective_axis_for_softmax(tensor: Tensor, axis: int) -> str | None:
-    if axis == tensor.rank - 1:
-        return "x"
-    if tensor.rank >= 2 and axis == tensor.rank - 2:
-        return "y"
-    return None

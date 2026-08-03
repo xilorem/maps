@@ -327,7 +327,7 @@ def test_onnx_reduce_sum_consumes_static_axis_and_adds_collective() -> None:
     )
     assert isinstance(lowered.nodes[0].payload, ReductionPayload)
     assert isinstance(lowered.nodes[1].payload, AllReducePayload)
-    assert lowered.nodes[1].payload.collective_axis == "x"
+    assert lowered.nodes[1].payload.work_kind is WorkKind.ALL_REDUCE_SUM
 
 
 def test_onnx_reduce_sum_rejects_rank_reducing_form() -> None:
@@ -608,7 +608,7 @@ def test_decompose_graph_lowers_softmax_to_grouped_internal_nodes() -> None:
     assert output_edges[0].tensor.name == "y"
 
 
-def test_decompose_graph_lowers_softmax_without_collectives_outside_default_mesh_axes() -> None:
+def test_decompose_graph_keeps_explicit_singleton_collectives_for_unsharded_axis() -> None:
     try:
         from onnx import TensorProto, helper
     except ImportError:
@@ -623,12 +623,14 @@ def test_decompose_graph_lowers_softmax_without_collectives_outside_default_mesh
 
     assert tuple(node.name for node in lowered_graph.nodes) == (
         "softmax_0__reduce_max",
+        "softmax_0__allreduce_max",
         "softmax_0__sub",
         "softmax_0__exp",
         "softmax_0__reduce_sum",
+        "softmax_0__allreduce_sum",
         "softmax_0__div",
     )
-    assert all(not isinstance(node.payload, AllReducePayload) for node in lowered_graph.nodes)
+    assert sum(isinstance(node.payload, AllReducePayload) for node in lowered_graph.nodes) == 2
 
 
 def test_onnx_split_constant_sizes_decompose_to_offset_static_slices() -> None:

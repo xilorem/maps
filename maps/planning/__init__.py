@@ -6,6 +6,7 @@ from maps.graph import Graph
 from maps.hardware import Mesh
 
 from .execution_plan import (
+    CollectiveGroup,
     ExecutionContract,
     ExecutionPlan,
     InitializerInput,
@@ -19,6 +20,7 @@ from .execution_plan import (
     construct_execution_plan,
     print_execution_plan_stage_cost,
 )
+from .stages import VirtualCollectiveGroup
 from .options import (
     AllocationOptions,
     PlacementOptions,
@@ -106,6 +108,7 @@ __all__ = [
     "AllocationOptions",
     "ConstraintReport",
     "ConstraintViolation",
+    "CollectiveGroup",
     "ExecutionContract",
     "ExecutionPlan",
     "InitializerInput",
@@ -120,6 +123,7 @@ __all__ = [
     "Stage",
     "StageFormationOptions",
     "TransitionSource",
+    "VirtualCollectiveGroup",
     "plan",
     "require_valid_execution_plan",
     "validate_execution_plan",

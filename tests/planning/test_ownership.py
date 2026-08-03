@@ -12,6 +12,7 @@ from maps.planning.mapping import (
 )
 from maps.target.magia import build_mesh as magia_mesh
 from maps.planning.mapping import Submesh
+from maps.planning.stages import derive_virtual_collective_groups
 from maps.graph import Tensor
 
 
@@ -117,4 +118,52 @@ def test_tile_tensor_slice_uses_logical_shape_not_physical_shape() -> None:
     assert result.dims == (
         TensorRange(start=3, length=3),
         TensorRange(start=4, length=4),
+    )
+
+
+def test_partial_layout_keeps_equal_slices_as_unresolved_contributions() -> None:
+    mesh = magia_mesh(width=2, height=1)
+    submesh = Submesh(mesh, 0, frozenset((0, 1)))
+    tensor = Tensor("partial", rank=1, dims=(1,), elem_bytes=2)
+    layout = TensorLayout(
+        submesh=submesh,
+        mesh_x=LayoutAxis(LayoutAxisMode.PARTIAL, tensor_axis=0),
+        mesh_y=LayoutAxis(LayoutAxisMode.REPLICATE),
+    )
+
+    assert tile_tensor_slice(tensor, layout, mesh.tiles[0]) == tile_tensor_slice(
+        tensor, layout, mesh.tiles[1]
+    )
+
+
+def test_collective_groups_follow_partial_ownership_and_keep_singletons() -> None:
+    mesh = magia_mesh(width=2, height=2)
+    submesh = Submesh(mesh, 0, frozenset((0, 1, 2, 3)))
+    tensor = Tensor("partial", rank=2, dims=(4, 1), elem_bytes=2)
+    row_groups = derive_virtual_collective_groups(
+        tensor,
+        TensorLayout(
+            submesh=submesh,
+            mesh_x=LayoutAxis(LayoutAxisMode.PARTIAL, tensor_axis=1),
+            mesh_y=LayoutAxis(LayoutAxisMode.SHARD, tensor_axis=0),
+        ),
+    )
+    singleton_groups = derive_virtual_collective_groups(
+        tensor,
+        TensorLayout(
+            submesh=submesh,
+            mesh_x=LayoutAxis(LayoutAxisMode.REPLICATE),
+            mesh_y=LayoutAxis(LayoutAxisMode.SHARD, tensor_axis=0),
+        ),
+    )
+
+    assert tuple(group.virtual_tile_ids for group in row_groups) == (
+        (0, 1),
+        (2, 3),
+    )
+    assert tuple(group.virtual_tile_ids for group in singleton_groups) == (
+        (0,),
+        (1,),
+        (2,),
+        (3,),
     )

@@ -28,21 +28,6 @@ from .collective import AllReducePayload
 from .elementwise import BinaryElementwisePayload, ElementwiseCostModel
 
 
-def _replicated_layout(
-    submesh: Submesh,
-    logical_shape: tuple[int, int] | None,
-) -> TensorLayout:
-    logical_width = logical_shape[0] if logical_shape is not None else None
-    logical_height = logical_shape[1] if logical_shape is not None else None
-    return TensorLayout(
-        submesh=submesh,
-        mesh_x=LayoutAxis(mode=LayoutAxisMode.REPLICATE),
-        mesh_y=LayoutAxis(mode=LayoutAxisMode.REPLICATE),
-        logical_width=logical_width,
-        logical_height=logical_height,
-    )
-
-
 @dataclass(frozen=True)
 class GroupReduceTileWork(TileWork):
     x: Tensor
@@ -94,7 +79,22 @@ class GroupReducePayload(OpPayload):
         submesh: Submesh,
         logical_shape: tuple[int, int] | None = None,
     ) -> tuple[TensorLayout, ...]:
-        return (_replicated_layout(submesh, logical_shape),)
+        input_layout = sharded_layout(self.x, submesh, logical_shape)
+
+        def partial(axis: LayoutAxis) -> LayoutAxis:
+            if axis.mode is LayoutAxisMode.SHARD:
+                return LayoutAxis(LayoutAxisMode.PARTIAL, tensor_axis=axis.tensor_axis)
+            return axis
+
+        return (
+            TensorLayout(
+                submesh=submesh,
+                mesh_x=partial(input_layout.mesh_x),
+                mesh_y=partial(input_layout.mesh_y),
+                logical_width=input_layout.logical_width,
+                logical_height=input_layout.logical_height,
+            ),
+        )
 
     def build_tile_work(
         self,
@@ -102,13 +102,17 @@ class GroupReducePayload(OpPayload):
         tile: Tile,
     ) -> GroupReduceTileWork:
         output_layout = self.single_output_layout(output_layouts)
-        input_layout = sharded_layout(
-            self.x,
-            output_layout.submesh,
-            (
-                output_layout.effective_logical_width,
-                output_layout.effective_logical_height,
-            ),
+        def sharded(axis: LayoutAxis) -> LayoutAxis:
+            if axis.mode is LayoutAxisMode.PARTIAL:
+                return LayoutAxis(LayoutAxisMode.SHARD, tensor_axis=axis.tensor_axis)
+            return axis
+
+        input_layout = TensorLayout(
+            submesh=output_layout.submesh,
+            mesh_x=sharded(output_layout.mesh_x),
+            mesh_y=sharded(output_layout.mesh_y),
+            logical_width=output_layout.logical_width,
+            logical_height=output_layout.logical_height,
         )
         return GroupReduceTileWork(
             x=self.x,
@@ -303,9 +307,7 @@ def decompose_group_normalization_node(
     squared = _same_shape_tensor(f"{node.name}__squared", op.x)
     sum_local = _stats_tensor(f"{node.name}__sum_local", op)
     sumsq_local = _stats_tensor(f"{node.name}__sumsq_local", op)
-    sum_x = _same_shape_tensor(f"{node.name}__sum_x", sum_local)
     sum_global = _same_shape_tensor(f"{node.name}__sum_global", sum_local)
-    sumsq_x = _same_shape_tensor(f"{node.name}__sumsq_x", sumsq_local)
     sumsq_global = _same_shape_tensor(f"{node.name}__sumsq_global", sumsq_local)
 
     def attrs(step: str) -> dict[str, object]:
@@ -337,36 +339,20 @@ def decompose_group_normalization_node(
             attrs("reduce_sumsq"),
         ),
         Node(
-            f"{node.name}__allreduce_sum_x",
+            f"{node.name}__allreduce_sum",
             OpKind.CUSTOM,
             (sum_local,),
-            (sum_x,),
-            AllReducePayload("AllReduceSum", sum_local, sum_x, "sum", "x"),
-            attrs("allreduce_sum_x"),
-        ),
-        Node(
-            f"{node.name}__allreduce_sum_y",
-            OpKind.CUSTOM,
-            (sum_x,),
             (sum_global,),
-            AllReducePayload("AllReduceSum", sum_x, sum_global, "sum", "y"),
-            attrs("allreduce_sum_y"),
+            AllReducePayload("AllReduceSum", sum_local, sum_global, "sum"),
+            attrs("allreduce_sum"),
         ),
         Node(
-            f"{node.name}__allreduce_sumsq_x",
+            f"{node.name}__allreduce_sumsq",
             OpKind.CUSTOM,
             (sumsq_local,),
-            (sumsq_x,),
-            AllReducePayload("AllReduceSum", sumsq_local, sumsq_x, "sum", "x"),
-            attrs("allreduce_sumsq_x"),
-        ),
-        Node(
-            f"{node.name}__allreduce_sumsq_y",
-            OpKind.CUSTOM,
-            (sumsq_x,),
             (sumsq_global,),
-            AllReducePayload("AllReduceSum", sumsq_x, sumsq_global, "sum", "y"),
-            attrs("allreduce_sumsq_y"),
+            AllReducePayload("AllReduceSum", sumsq_local, sumsq_global, "sum"),
+            attrs("allreduce_sumsq"),
         ),
         Node(
             f"{node.name}__normalize",
@@ -387,6 +373,6 @@ def decompose_group_normalization_node(
         ),
     )
     return (
-        (squared, sum_local, sumsq_local, sum_x, sum_global, sumsq_x, sumsq_global),
+        (squared, sum_local, sumsq_local, sum_global, sumsq_global),
         nodes,
     )

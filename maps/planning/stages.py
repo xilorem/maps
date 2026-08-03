@@ -2,19 +2,41 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from maps.graph import Graph, Node, Tensor
 from maps.hardware import Tile
 from maps.operations.contracts import find_layout_relation
-from maps.planning.mapping import Submesh, TensorSlice
+from maps.planning.mapping import (
+    LayoutAxisMode,
+    Submesh,
+    TensorLayout,
+    TensorSlice,
+    tensor_slice_num_bytes,
+    tile_tensor_slice,
+)
 
 if TYPE_CHECKING:
     from .options import StageFormationOptions
 
 
 StageFormation = dict[int, tuple[Node, ...]]
+
+
+@dataclass(frozen=True)
+class VirtualCollectiveGroup:
+    """One deterministic group of Stage-local virtual participants."""
+
+    virtual_tile_ids: tuple[int, ...]
+
+    def __post_init__(self) -> None:
+        if not self.virtual_tile_ids:
+            raise ValueError("Virtual Collective Groups must not be empty")
+        if tuple(sorted(set(self.virtual_tile_ids))) != self.virtual_tile_ids:
+            raise ValueError(
+                "Virtual Collective Group tile ids must be unique and sorted"
+            )
 
 
 @dataclass(frozen=True)
@@ -33,12 +55,55 @@ class StagePlan:
     nodes: tuple[Node, ...]
     node_output_layouts: tuple[tuple, ...]
     device_names: tuple[str, ...]
+    virtual_collective_groups: tuple[
+        tuple[VirtualCollectiveGroup, ...], ...
+    ] = field(default_factory=tuple)
 
     def __post_init__(self) -> None:
         if len(self.device_names) != len(self.nodes):
             raise ValueError("Stage Plan must retain one Device name per Layer")
         if any(not device_name for device_name in self.device_names):
             raise ValueError("Stage Plan Device names must not be empty")
+        if not self.virtual_collective_groups:
+            object.__setattr__(
+                self,
+                "virtual_collective_groups",
+                tuple(() for _ in self.nodes),
+            )
+        if len(self.virtual_collective_groups) != len(self.nodes):
+            raise ValueError(
+                "Stage Plan must retain Virtual Collective Groups per Layer"
+            )
+
+
+def derive_virtual_collective_groups(
+    tensor: Tensor,
+    layout: TensorLayout,
+) -> tuple[VirtualCollectiveGroup, ...]:
+    """Group equal Partial Value ownership without mesh-axis assumptions."""
+
+    logical_width = layout.effective_logical_width
+    groups: dict[tuple[object, ...], list[int]] = {}
+    for tile_ordinal, tile in enumerate(layout.submesh.tiles):
+        tensor_slice = tile_tensor_slice(tensor, layout, tile)
+        if tensor_slice_num_bytes(tensor, tensor_slice) == 0:
+            continue
+        logical_x = tile_ordinal % logical_width
+        logical_y = tile_ordinal // logical_width
+        slice_key = tuple(
+            (dimension.start, dimension.length)
+            for dimension in tensor_slice.dims
+        )
+        key = (
+            slice_key,
+            None if layout.mesh_x.mode is LayoutAxisMode.PARTIAL else logical_x,
+            None if layout.mesh_y.mode is LayoutAxisMode.PARTIAL else logical_y,
+        )
+        groups.setdefault(key, []).append(tile.tile_id)
+    return tuple(
+        VirtualCollectiveGroup(tuple(sorted(tile_ids)))
+        for tile_ids in groups.values()
+    )
 
 
 @dataclass(frozen=True)
@@ -391,6 +456,8 @@ __all__ = [
     "StageFormation",
     "StagePlacement",
     "StagePlan",
+    "VirtualCollectiveGroup",
+    "derive_virtual_collective_groups",
     "form_stages",
     "node_output_index",
     "node_output_layouts",

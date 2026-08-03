@@ -16,6 +16,8 @@ from maps.hardware import (
 
 _LOCAL_WORK = (
     WorkKind.ABS,
+    WorkKind.ALL_REDUCE_MAX,
+    WorkKind.ALL_REDUCE_SUM,
     WorkKind.ADD,
     WorkKind.DEPTHWISE_CONV,
     WorkKind.DIV,

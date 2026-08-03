@@ -25,6 +25,8 @@ class WorkKind(Enum):
     ELEMENTWISE = auto()
     GROUP_NORMALIZE = auto()
     GROUP_REDUCE = auto()
+    ALL_REDUCE_SUM = auto()
+    ALL_REDUCE_MAX = auto()
     ABS = auto()
     ADD = auto()
     DIV = auto()

@@ -200,10 +200,12 @@ def _apply_layout_axis(current_range: TensorRange,
                        part_idx: int) -> TensorRange:
     """Apply one mesh-axis policy to one tensor-axis range."""
 
-    if axis.mode in (LayoutAxisMode.NONE, LayoutAxisMode.REPLICATE):
+    if axis.mode in (
+        LayoutAxisMode.NONE,
+        LayoutAxisMode.PARTIAL,
+        LayoutAxisMode.REPLICATE,
+    ):
         return current_range
-    if axis.mode is LayoutAxisMode.PARTIAL:
-        raise NotImplementedError("PARTIAL ownership is not implemented yet")
     if axis.mode is not LayoutAxisMode.SHARD:
         raise ValueError(f"unsupported layout axis mode: {axis.mode}")
 

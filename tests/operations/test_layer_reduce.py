@@ -24,7 +24,7 @@ def _make_reduce_sum_op() -> ReductionPayload:
     )
 
 
-def test_reduce_op_replicates_output_along_reduced_mesh_axis() -> None:
+def test_reduce_op_produces_partial_output_along_reduced_mesh_axis() -> None:
     mesh = magia_mesh()
     submesh = Submesh(mesh=mesh, submesh_id=0, x0=0, y0=0, width=2, height=1)
     op = _make_reduce_sum_op()
@@ -39,7 +39,7 @@ def test_reduce_op_replicates_output_along_reduced_mesh_axis() -> None:
         tile=submesh.tiles[1],
     )
 
-    assert output_layout.mesh_x.mode.name == "REPLICATE"
+    assert output_layout.mesh_x.mode.name == "PARTIAL"
     assert tuple((dim.start, dim.length) for dim in tile0_work.input_slice.dims) == (
         (0, 4),
         (0, 4),

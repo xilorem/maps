@@ -17,9 +17,11 @@ from maps.graph import (
 )
 from maps.hardware import FixedDeviceAssignment
 from maps.operations.elementwise import UnaryElementwisePayload
+from maps.operations.collective import AllReducePayload
 from maps.operations.softmax import SoftmaxPayload
 from maps.planning import (
     AllocationOptions,
+    CollectiveGroup,
     ConstraintReport,
     ConstraintViolation,
     ExecutionContract,
@@ -42,7 +44,7 @@ from maps.planning.execution_plan import construct_execution_plan
 from maps.planning.execution_plan import estimate_stage_l1_memory_for_tile
 from maps.planning.execution_plan import print_execution_plan_stage_cost
 from maps.planning.allocation import allocate
-from maps.planning.mapping import TensorLayout
+from maps.planning.mapping import LayoutAxis, LayoutAxisMode, TensorLayout
 from maps.planning.placement import place
 from maps.planning.mapping import Submesh
 from maps.planning.stages import form_stages
@@ -156,6 +158,24 @@ def test_magia_fuses_operations_around_decomposed_softmax_with_provenance() -> N
         SpecializationOptions(enable_precision_lowering=False),
     )
 
+    stage_formation = form_stages(specialized.model.graph)
+    virtual_plans = allocate(
+        specialized.model.graph,
+        mesh,
+        stage_formation=stage_formation,
+    )
+    virtual_collective_groups = tuple(
+        groups
+        for stage_plan in virtual_plans.values()
+        for node, groups in zip(
+            stage_plan.nodes,
+            stage_plan.virtual_collective_groups,
+        )
+        if isinstance(node.payload, AllReducePayload)
+    )
+    assert len(virtual_collective_groups) == 2
+    assert all(groups for groups in virtual_collective_groups)
+
     execution_plan = plan(
         specialized.model.graph,
         mesh,
@@ -190,6 +210,27 @@ def test_magia_fuses_operations_around_decomposed_softmax_with_provenance() -> N
         and "source_output_index" not in transition
         for transition in payload["transitions"]
     )
+    collective_layers = tuple(
+        layer
+        for layer in execution_plan.stages[0].layers
+        if isinstance(layer.node.payload, AllReducePayload)
+    )
+    assert len(collective_layers) == 2
+    for layer in collective_layers:
+        participants = tuple(
+            tile_id
+            for group in layer.collective_groups
+            for tile_id in group.tile_ids
+        )
+        assert tuple(sorted(participants)) == tuple(
+            sorted(execution_plan.stages[0].submesh.tile_ids)
+        )
+    serialized_collectives = tuple(
+        layer["collective_groups"]
+        for layer in payload["stages"][0]["layers"]
+        if layer["collective_groups"]
+    )
+    assert len(serialized_collectives) == 2
     assert validate_execution_plan(
         execution_plan,
         PlanningConstraints(max_stage_operations=3),
@@ -201,6 +242,86 @@ def test_magia_fuses_operations_around_decomposed_softmax_with_provenance() -> N
     assert tuple(violation.kind for violation in limited.violations) == (
         "stage_operation_limit_exceeded",
     )
+
+    collective_index = next(
+        index
+        for index, layer in enumerate(execution_plan.stages[0].layers)
+        if isinstance(layer.node.payload, AllReducePayload)
+    )
+    collective = execution_plan.stages[0].layers[collective_index]
+    repeated_tile = min(execution_plan.stages[0].submesh.tile_ids)
+    malformed_layers = list(execution_plan.stages[0].layers)
+    malformed_layers[collective_index] = replace(
+        collective,
+        collective_groups=(
+            CollectiveGroup((repeated_tile,)),
+            CollectiveGroup((repeated_tile,)),
+        ),
+    )
+    malformed_plan = replace(
+        execution_plan,
+        stages=(
+            replace(execution_plan.stages[0], layers=tuple(malformed_layers)),
+        ),
+    )
+    assert "collective_groups_overlap" in {
+        violation.kind
+        for violation in validate_execution_plan(
+            malformed_plan,
+            PlanningConstraints(),
+        ).violations
+    }
+
+    partial_layers = list(execution_plan.stages[0].layers)
+    partial_output = collective.outputs[0]
+    partial_layers[collective_index] = replace(
+        collective,
+        outputs=(
+            replace(
+                partial_output,
+                layout=replace(
+                    partial_output.layout,
+                    mesh_x=LayoutAxis(LayoutAxisMode.PARTIAL, tensor_axis=0),
+                ),
+            ),
+        ),
+    )
+    partial_plan = replace(
+        execution_plan,
+        stages=(replace(execution_plan.stages[0], layers=tuple(partial_layers)),),
+    )
+    partial_report = validate_execution_plan(partial_plan, PlanningConstraints())
+    assert {
+        "collective_output_remains_partial",
+        "partial_value_consumed_by_ordinary_layer",
+    } <= {violation.kind for violation in partial_report.violations}
+
+    escaping_layers = list(execution_plan.stages[0].layers)
+    final_layer = escaping_layers[-1]
+    final_output = final_layer.outputs[0]
+    escaping_layers[-1] = replace(
+        final_layer,
+        outputs=(
+            replace(
+                final_output,
+                layout=replace(
+                    final_output.layout,
+                    mesh_x=LayoutAxis(LayoutAxisMode.PARTIAL, tensor_axis=0),
+                ),
+            ),
+        ),
+    )
+    escaping_plan = replace(
+        execution_plan,
+        stages=(replace(execution_plan.stages[0], layers=tuple(escaping_layers)),),
+    )
+    assert "partial_value_transition_escape" in {
+        violation.kind
+        for violation in validate_execution_plan(
+            escaping_plan,
+            PlanningConstraints(),
+        ).violations
+    }
 
 
 @pytest.mark.parametrize(

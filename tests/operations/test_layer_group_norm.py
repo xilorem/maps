@@ -32,15 +32,13 @@ def test_group_normalization_decomposes_like_softmax_with_collectives() -> None:
 
     tensors, nodes = decompose_group_normalization_node(node)
 
-    assert len(tensors) == 7
+    assert len(tensors) == 5
     assert tuple(item.name for item in nodes) == (
         "group_norm__square",
         "group_norm__reduce_sum",
         "group_norm__reduce_sumsq",
-        "group_norm__allreduce_sum_x",
-        "group_norm__allreduce_sum_y",
-        "group_norm__allreduce_sumsq_x",
-        "group_norm__allreduce_sumsq_y",
+        "group_norm__allreduce_sum",
+        "group_norm__allreduce_sumsq",
         "group_norm__normalize",
     )
     assert isinstance(nodes[1].payload, GroupReducePayload)

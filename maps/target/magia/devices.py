@@ -38,6 +38,8 @@ SPATZ_VLSU_SWITCH_LOAD_TO_STORE_CYCLES = 7
 
 _FLOAT_DTYPES = (TensorDType.FLOAT16, TensorDType.FLOAT32)
 _UNARY_CORE_WORK = (
+    WorkKind.ALL_REDUCE_MAX,
+    WorkKind.ALL_REDUCE_SUM,
     WorkKind.ABS,
     WorkKind.EXP,
     WorkKind.GROUP_REDUCE,
@@ -97,6 +99,8 @@ CORE_DEVICE = ScalarDevice(
     name="core",
     kind=DeviceKind.SCALAR,
     throughput={
+        WorkKind.ALL_REDUCE_MAX: 1,
+        WorkKind.ALL_REDUCE_SUM: 1,
         WorkKind.GEMM: 1,
         WorkKind.GROUP_NORMALIZE: 1,
         WorkKind.GROUP_REDUCE: 1,

@@ -92,7 +92,7 @@ class ReductionPayload(OpPayload):
                 output_index=0,
                 input_axis_for_output_axis=tuple(range(self.x.rank)),
                 guarantees_slice_containment=True,
-                replicated_output_axes=frozenset((self.axis,)),
+                partial_output_axes=frozenset((self.axis,)),
             ),
         )
 
@@ -105,9 +105,9 @@ class ReductionPayload(OpPayload):
         mesh_x = input_layout.mesh_x
         mesh_y = input_layout.mesh_y
         if mesh_x.tensor_axis == self.axis:
-            mesh_x = LayoutAxis(mode=LayoutAxisMode.REPLICATE)
+            mesh_x = LayoutAxis(mode=LayoutAxisMode.PARTIAL, tensor_axis=self.axis)
         if mesh_y.tensor_axis == self.axis:
-            mesh_y = LayoutAxis(mode=LayoutAxisMode.REPLICATE)
+            mesh_y = LayoutAxis(mode=LayoutAxisMode.PARTIAL, tensor_axis=self.axis)
         return (
             TensorLayout(
                 submesh=submesh,
@@ -119,13 +119,17 @@ class ReductionPayload(OpPayload):
         )
 
     def _input_layout_from_output_layout(self, output_layout: TensorLayout) -> TensorLayout:
-        return sharded_layout(
-            self.x,
-            output_layout.submesh,
-            (
-                output_layout.effective_logical_width,
-                output_layout.effective_logical_height,
-            ),
+        def input_axis(axis: LayoutAxis) -> LayoutAxis:
+            if axis.mode is LayoutAxisMode.PARTIAL:
+                return LayoutAxis(LayoutAxisMode.SHARD, tensor_axis=axis.tensor_axis)
+            return axis
+
+        return TensorLayout(
+            submesh=output_layout.submesh,
+            mesh_x=input_axis(output_layout.mesh_x),
+            mesh_y=input_axis(output_layout.mesh_y),
+            logical_width=output_layout.logical_width,
+            logical_height=output_layout.logical_height,
         )
 
     def build_tile_work(
@@ -227,18 +231,6 @@ class ReduceSumPayload(CompositeOpPayload):
         )
 
     def decompose(self, node: Node) -> tuple[tuple[Tensor, ...], tuple[Node, ...]]:
-        collective_axis = _collective_axis(self.x, self.axis)
-        if collective_axis is None:
-            return (), (
-                _reduction_node(
-                    name=node.name,
-                    x=self.x,
-                    output=self.output,
-                    axis=self.axis,
-                    attributes=node.attributes,
-                ),
-            )
-
         local = _tensor_like(f"{node.name}__local", self.output)
         attributes = dict(node.attributes)
         return (local,), (
@@ -259,7 +251,6 @@ class ReduceSumPayload(CompositeOpPayload):
                     x=local,
                     output=self.output,
                     reduction="sum",
-                    collective_axis=collective_axis,
                 ),
                 attributes={**attributes, "reduce_sum_step": "allreduce"},
             ),
@@ -306,7 +297,6 @@ class GlobalAveragePoolPayload(CompositeOpPayload):
                 f"{node.name}__allreduce_width",
                 width_sum_local,
                 width_sum,
-                "x",
                 {**attributes, "global_average_pool_step": "allreduce_width"},
             ),
             _reduction_node(
@@ -320,7 +310,6 @@ class GlobalAveragePoolPayload(CompositeOpPayload):
                 f"{node.name}__allreduce_height",
                 spatial_sum_local,
                 spatial_sum,
-                "y",
                 {**attributes, "global_average_pool_step": "allreduce_height"},
             ),
             Node(
@@ -361,14 +350,6 @@ def _reduced_tensor(name: str, reference: Tensor, axis: int) -> Tensor:
     )
 
 
-def _collective_axis(tensor: Tensor, axis: int) -> str | None:
-    if axis == tensor.rank - 1:
-        return "x"
-    if tensor.rank >= 2 and axis == tensor.rank - 2:
-        return "y"
-    return None
-
-
 def _reduction_node(
     name: str,
     x: Tensor,
@@ -396,7 +377,6 @@ def _allreduce_node(
     name: str,
     x: Tensor,
     output: Tensor,
-    collective_axis: str,
     attributes: dict[str, object],
 ) -> Node:
     return Node(
@@ -409,7 +389,6 @@ def _allreduce_node(
             x=x,
             output=output,
             reduction="sum",
-            collective_axis=collective_axis,
         ),
         attributes=attributes,
     )

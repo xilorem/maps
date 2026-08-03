@@ -40,6 +40,19 @@ from maps.planning.transitions.contracts import (
 
 
 @dataclass(frozen=True)
+class CollectiveGroup:
+    """Exact physical participants for one Intra-Stage Collective invocation."""
+
+    tile_ids: tuple[int, ...]
+
+    def __post_init__(self) -> None:
+        if not self.tile_ids:
+            raise ValueError("Collective Groups must not be empty")
+        if tuple(sorted(set(self.tile_ids))) != self.tile_ids:
+            raise ValueError("Collective Group tile ids must be unique and sorted")
+
+
+@dataclass(frozen=True)
 class ExecutionContract:
     """Execution settings that affect planning and backend allocation."""
 
@@ -145,6 +158,7 @@ class Layer:
     outputs: tuple[LayerOutput, ...] = field(default_factory=tuple)
     device_name: str | None = None
     source_operation: str | None = None
+    collective_groups: tuple[CollectiveGroup, ...] = field(default_factory=tuple)
 
     def __post_init__(self) -> None:
         if self.source_operation is None:
@@ -396,6 +410,17 @@ def _build_layer(
         node=node,
         device_name=plan.device_names[layer_index],
         source_operation=node.source_operation,
+        collective_groups=tuple(
+            CollectiveGroup(
+                tuple(
+                    sorted(
+                        placement.physical_tile_id(virtual_tile_id)
+                        for virtual_tile_id in virtual_group.virtual_tile_ids
+                    )
+                )
+            )
+            for virtual_group in plan.virtual_collective_groups[layer_index]
+        ),
         inputs=tuple(
             _build_layer_input(
                 stage_id,
@@ -732,6 +757,7 @@ def _default_tensor_slice(tensor: Tensor) -> TensorSlice:
 
 
 __all__ = [
+    "CollectiveGroup",
     "ExecutionContract",
     "ExecutionPlan",
     "InitializerInput",

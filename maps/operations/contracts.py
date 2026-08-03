@@ -111,6 +111,8 @@ class LayoutRelation:
     input_axis_for_output_axis: tuple[int, ...]
     guarantees_slice_containment: bool
     replicated_output_axes: frozenset[int] = frozenset()
+    partial_output_axes: frozenset[int] = frozenset()
+    resolves_partial_values: bool = False
 
     @classmethod
     def exact(
@@ -155,6 +157,16 @@ class LayoutRelation:
         output_axis_for_input_axis: dict[int, int],
     ) -> LayoutAxis:
         retargeted = self._retarget_axis(axis, output_axis_for_input_axis)
+        if self.resolves_partial_values and retargeted.mode is LayoutAxisMode.PARTIAL:
+            return LayoutAxis(mode=LayoutAxisMode.REPLICATE)
+        if (
+            retargeted.tensor_axis in self.partial_output_axes
+            and retargeted.mode is LayoutAxisMode.SHARD
+        ):
+            return LayoutAxis(
+                mode=LayoutAxisMode.PARTIAL,
+                tensor_axis=retargeted.tensor_axis,
+            )
         if retargeted.tensor_axis in self.replicated_output_axes:
             return LayoutAxis(mode=LayoutAxisMode.REPLICATE)
         return retargeted
