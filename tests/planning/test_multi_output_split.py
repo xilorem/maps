@@ -345,11 +345,10 @@ def test_imported_split_deploys_three_consumer_branches_deterministically(
         transition_id = transition_id_by_tensor[output]
         transition = first_execution_plan.transitions[transition_id]
         consumer_stage_id = stage_id_by_node[id(consumer)]
+        consumer_layer = first_execution_plan.stages[consumer_stage_id].layers[0]
         assert isinstance(transition, IntermediateTransition)
         assert transition.destination_stage_id == consumer_stage_id
-        assert first_execution_plan.stages[consumer_stage_id].layers[
-            0
-        ].inputs[0].source == TransitionSource(transition_id)
+        assert consumer_layer.inputs[0].source == TransitionSource(transition_id)
     assert split_layer.node == split
     assert split_layer.source_operation == "split"
     assert split_layer.device_name == "core"
@@ -711,8 +710,11 @@ def test_imported_split_rejects_an_undeclared_signature_with_node_diagnostic(
         )
 
     message = str(error.value)
+    expected_signature = WorkSignature(
+        WorkKind.SPLIT,
+        (dtype,),
+        (dtype,) * len(sizes),
+    )
     assert "node split" in message
-    assert "WorkSignature" in message
-    assert "WorkKind.SPLIT" in message
-    assert repr(dtype) in message
+    assert str(expected_signature) in message
     assert "no fixed assignment" in message
