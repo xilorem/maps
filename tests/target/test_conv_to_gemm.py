@@ -4,18 +4,29 @@ import json
 import numpy as np
 import pytest
 
-from maps.hardware import WorkKind, WorkSignature
-from maps.graph import Constant, ConstantStore, Graph, Node, OpKind, Tensor, TensorDType
-from maps.graph import Edge
 from maps.deployment import write_execution_plan_bundle
+from maps.graph import (
+    Constant,
+    ConstantStore,
+    Edge,
+    Graph,
+    ImportedModel,
+    Node,
+    OpKind,
+    Tensor,
+    TensorDType,
+)
+from maps.hardware import WorkKind, WorkSignature
+from maps.operations.convolution import Conv2DPayload
+from maps.operations.convolution_transforms import Im2ColPayload, OutputReformatPayload
+from maps.operations.gemm import GemmPayload
+from maps.planning.allocation.candidates import (
+    permanent_l1_allocation_for_stage,
+    resolve_stage_layouts,
+)
+from maps.planning.execution_plan import LocalInput
 from maps.target.magia import build_mesh as magia_mesh
 from tests.target.workflows import magia_workflow_options, plan_magia_model
-from maps.graph import ImportedModel
-from maps.operations.convolution_transforms import Im2ColPayload, OutputReformatPayload
-from maps.operations.convolution import Conv2DPayload
-from maps.operations.gemm import GemmPayload
-
-
 
 
 def _conv_tensor(
@@ -35,13 +46,17 @@ def _conv_tensor(
     )
 
 
-def _conv_model(dtype: TensorDType) -> tuple[ImportedModel, np.ndarray]:
-    x = _conv_tensor("x", (1, 2, 3, 3), dtype)
+def _conv_model(
+    dtype: TensorDType,
+    *,
+    batch: int = 1,
+) -> tuple[ImportedModel, np.ndarray]:
+    x = _conv_tensor("x", (batch, 2, 3, 3), dtype)
     weight = _conv_tensor(
         "weight", (4, 2, 2, 2), dtype, initializer=True
     )
     bias = _conv_tensor("bias", (4,), dtype, initializer=True)
-    output = _conv_tensor("output", (1, 4, 2, 2), dtype)
+    output = _conv_tensor("output", (batch, 4, 2, 2), dtype)
     conv = Node(
         name="conv",
         kind=OpKind.CONV,
@@ -98,6 +113,20 @@ def _quiet_magia_options():
     return magia_workflow_options(
         enable_precision_lowering=False,
     )
+
+
+def test_conv_to_gemm_rejects_multiple_samples_at_specialization() -> None:
+    model, _ = _conv_model(TensorDType.FLOAT16, batch=2)
+
+    with pytest.raises(
+        ValueError,
+        match="node conv Conv-to-GEMM supports only batch size 1, got 2",
+    ):
+        plan_magia_model(
+            model,
+            magia_mesh(width=1, height=1),
+            _quiet_magia_options(),
+        )
 
 
 def test_magia_lowers_fp16_conv_to_auditable_redmule_execution(
@@ -334,6 +363,90 @@ def test_magia_composes_fp32_conv_lowering_with_precision_lowering(
             "work_kind": "CAST",
         },
     ]
+
+
+@pytest.mark.parametrize(
+    ("dtype", "enable_precision_lowering", "matrix_layer_indexes"),
+    (
+        (TensorDType.FLOAT16, False, (0, 1)),
+        (TensorDType.FLOAT32, True, (0, 1, 2, 3)),
+        (TensorDType.FLOAT32, False, (0, 1)),
+    ),
+)
+def test_all_conv_to_gemm_precision_paths_preserve_spatial_ownership(
+    dtype: TensorDType,
+    enable_precision_lowering: bool,
+    matrix_layer_indexes: tuple[int, ...],
+) -> None:
+    model, _ = _conv_model(dtype)
+    bundle = plan_magia_model(
+        model,
+        magia_mesh(width=2, height=2),
+        magia_workflow_options(
+            enable_precision_lowering=enable_precision_lowering,
+        ),
+    )
+
+    assert len(bundle.execution_plan.stages) == 1
+    stage = bundle.execution_plan.stages[0]
+    assert len(stage.submesh.tile_ids) > 1
+    matrix_layouts = tuple(
+        stage.layers[index].outputs[0].layout
+        for index in matrix_layer_indexes
+    )
+    assert all(layout.mesh_y.tensor_axis == 0 for layout in matrix_layouts)
+    assert all(layout.mesh_y.shard_granularity == 2 for layout in matrix_layouts)
+    final_layout = stage.layers[-1].outputs[0].layout
+    assert final_layout.mesh_x.tensor_axis == 1
+    assert final_layout.mesh_y.tensor_axis == 2
+    assert final_layout.mesh_y.shard_granularity == 1
+    assert all(layer.collective_groups == () for layer in stage.layers)
+    assert all(
+        isinstance(layer_input.source, LocalInput)
+        for layer in stage.layers[1:]
+        for layer_input in layer.inputs
+        if layer_input.tensor_id
+        in {
+            output.tensor_id
+            for producer in stage.layers
+            for output in producer.outputs
+        }
+    )
+
+
+def test_public_planning_selects_spatial_rows_and_lowers_per_tile_l1() -> None:
+    model, _ = _conv_model(TensorDType.FLOAT32)
+    bundle = plan_magia_model(
+        model,
+        magia_mesh(width=2, height=2),
+        _quiet_magia_options(),
+    )
+
+    stage = bundle.execution_plan.stages[0]
+    layouts = tuple(
+        tuple(output.layout for output in layer.outputs)
+        for layer in stage.layers
+    )
+    assert layouts[-1][0].effective_logical_height == 2
+    spatial_l1 = permanent_l1_allocation_for_stage(
+        tuple(layer.node for layer in stage.layers),
+        layouts,
+        stage.submesh,
+        frozenset(bundle.graph.initializers),
+    )
+    channel_only_layouts = resolve_stage_layouts(
+        tuple(layer.node for layer in stage.layers),
+        stage.submesh,
+        (len(stage.submesh.tile_ids), 1),
+    )
+    channel_only_l1 = permanent_l1_allocation_for_stage(
+        tuple(layer.node for layer in stage.layers),
+        channel_only_layouts,
+        stage.submesh,
+        frozenset(bundle.graph.initializers),
+    )
+
+    assert spatial_l1 < channel_only_l1
 
 
 def test_magia_keeps_lowered_fp32_conv_on_core_when_precision_is_disabled() -> None:

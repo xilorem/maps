@@ -29,31 +29,10 @@ CONV_TRANSFORM_WORK_KINDS: dict[str, WorkKind] = {
 }
 
 
-def _full_slice(tensor: Tensor) -> TensorSlice:
-    return TensorSlice(
-        rank=tensor.rank,
-        dims=tuple(TensorRange(start=0, length=dim) for dim in tensor.dims),
-    )
-
-
 def _logical_dims(logical_shape: tuple[int, int] | None) -> tuple[int | None, int | None]:
     if logical_shape is None:
         return None, None
     return logical_shape
-
-
-def _replicated_layout(
-    submesh: Submesh,
-    logical_shape: tuple[int, int] | None,
-) -> TensorLayout:
-    logical_width, logical_height = _logical_dims(logical_shape)
-    return TensorLayout(
-        submesh=submesh,
-        mesh_x=LayoutAxis(mode=LayoutAxisMode.REPLICATE),
-        mesh_y=LayoutAxis(mode=LayoutAxisMode.REPLICATE),
-        logical_width=logical_width,
-        logical_height=logical_height,
-    )
 
 
 def _channel_sharded_layout(
@@ -72,6 +51,71 @@ def _channel_sharded_layout(
         logical_width=logical_width,
         logical_height=logical_height,
     )
+
+
+def _spatial_matrix_layout(
+    tensor: Tensor,
+    submesh: Submesh,
+    logical_shape: tuple[int, int] | None,
+    row_granularity: int,
+) -> TensorLayout:
+    if tensor.rank != 2:
+        raise ValueError("Conv matrix layouts require rank-2 tensors")
+    logical_width, logical_height = _logical_dims(logical_shape)
+    return TensorLayout(
+        submesh=submesh,
+        mesh_x=LayoutAxis(mode=LayoutAxisMode.SHARD, tensor_axis=1),
+        mesh_y=LayoutAxis(
+            mode=LayoutAxisMode.SHARD,
+            tensor_axis=0,
+            shard_granularity=row_granularity,
+        ),
+        logical_width=logical_width,
+        logical_height=logical_height,
+    )
+
+
+def _spatial_activation_layout(
+    tensor: Tensor,
+    submesh: Submesh,
+    logical_shape: tuple[int, int] | None,
+    row_granularity: int,
+) -> TensorLayout:
+    logical_width, logical_height = _logical_dims(logical_shape)
+    return TensorLayout(
+        submesh=submesh,
+        mesh_x=LayoutAxis(mode=LayoutAxisMode.REPLICATE),
+        mesh_y=LayoutAxis(
+            mode=LayoutAxisMode.SHARD,
+            tensor_axis=0,
+            shard_granularity=row_granularity,
+        ),
+        logical_width=logical_width,
+        logical_height=logical_height,
+    )
+
+
+def _spatial_output_layout(
+    tensor: Tensor,
+    submesh: Submesh,
+    logical_shape: tuple[int, int] | None,
+) -> TensorLayout:
+    if tensor.rank != 4:
+        raise ValueError("Conv output layouts require rank-4 tensors")
+    logical_width, logical_height = _logical_dims(logical_shape)
+    return TensorLayout(
+        submesh=submesh,
+        mesh_x=LayoutAxis(mode=LayoutAxisMode.SHARD, tensor_axis=1),
+        mesh_y=LayoutAxis(mode=LayoutAxisMode.SHARD, tensor_axis=2),
+        logical_width=logical_width,
+        logical_height=logical_height,
+    )
+
+
+def _clamped_range(start: int, end: int, length: int) -> TensorRange:
+    clamped_start = min(max(start, 0), length)
+    clamped_end = min(max(end, 0), length)
+    return TensorRange(clamped_start, max(0, clamped_end - clamped_start))
 
 
 @dataclass(frozen=True)
@@ -152,7 +196,15 @@ class Im2ColPayload(_TransformPayload):
         submesh: Submesh,
         logical_shape: tuple[int, int] | None = None,
     ) -> tuple[TensorLayout, ...]:
-        return (_replicated_layout(submesh, logical_shape),)
+        output_width = self._output_spatial_dims()[1]
+        return (
+            _spatial_activation_layout(
+                self.output,
+                submesh,
+                logical_shape,
+                row_granularity=output_width,
+            ),
+        )
 
     def build_tile_work(
         self,
@@ -160,12 +212,85 @@ class Im2ColPayload(_TransformPayload):
         tile: Tile,
     ) -> TransformTileWork:
         output_layout = self.single_output_layout(output_layouts)
+        output_slice = tile_tensor_slice(self.output, output_layout, tile)
+        output_width = self._output_spatial_dims()[1]
+        output_rows = output_slice.dims[0]
+        if output_rows.length == 0:
+            input_height = TensorRange(0, 0)
+            input_width = TensorRange(0, 0)
+        else:
+            output_height_start = output_rows.start // output_width
+            output_height_length = output_rows.length // output_width
+            stride_h, stride_w = self.strides
+            pad_top, pad_left, _, _ = self.pads
+            dilation_h, dilation_w = self.dilations
+            kernel_h, kernel_w = self.kernel_shape
+            theoretical_h_start = output_height_start * stride_h - pad_top
+            theoretical_h_end = (
+                (output_height_start + output_height_length - 1) * stride_h
+                - pad_top
+                + dilation_h * (kernel_h - 1)
+                + 1
+            )
+            theoretical_w_start = -pad_left
+            theoretical_w_end = (
+                (output_width - 1) * stride_w
+                - pad_left
+                + dilation_w * (kernel_w - 1)
+                + 1
+            )
+            input_height = _clamped_range(
+                theoretical_h_start,
+                theoretical_h_end,
+                self.x.dims[2],
+            )
+            input_width = _clamped_range(
+                theoretical_w_start,
+                theoretical_w_end,
+                self.x.dims[3],
+            )
+        input_slice = TensorSlice(
+            rank=self.x.rank,
+            dims=(
+                TensorRange(0, self.x.dims[0]),
+                TensorRange(0, self.x.dims[1]),
+                input_height,
+                input_width,
+            ),
+        )
         return TransformTileWork(
             output=self.output,
-            output_slice=tile_tensor_slice(self.output, output_layout, tile),
+            output_slice=output_slice,
             inputs=(self.x,),
-            input_tile_slices=(_full_slice(self.x),),
+            input_tile_slices=(input_slice,),
             work_kind=self.work_kind,
+        )
+
+    def _output_spatial_dims(self) -> tuple[int, int]:
+        _, _, input_h, input_w = self.x.dims
+        kernel_h, kernel_w = self.kernel_shape
+        stride_h, stride_w = self.strides
+        pad_top, pad_left, pad_bottom, pad_right = self.pads
+        dilation_h, dilation_w = self.dilations
+        return (
+            (
+                input_h
+                + pad_top
+                + pad_bottom
+                - dilation_h * (kernel_h - 1)
+                - 1
+            )
+            // stride_h
+            + 1,
+            (
+                input_w
+                + pad_left
+                + pad_right
+                - dilation_w * (kernel_w - 1)
+                - 1
+            )
+            // stride_w
+            + 1,
         )
 
 
@@ -221,14 +346,23 @@ class WeightPackPayload(_TransformPayload):
 
 @dataclass(frozen=True)
 class ChannelShardedGemmPayload(GemmPayload):
-    """GEMM used by Conv decomposition with rows kept local and replicated."""
+    """GEMM used by Conv decomposition with channel and spatial ownership."""
+
+    row_granularity: int = 1
 
     def output_layouts(
         self,
         submesh: Submesh,
         logical_shape: tuple[int, int] | None = None,
     ) -> tuple[TensorLayout, ...]:
-        return (_channel_sharded_layout(self.output, submesh, logical_shape),)
+        return (
+            _spatial_matrix_layout(
+                self.output,
+                submesh,
+                logical_shape,
+                self.row_granularity,
+            ),
+        )
 
 
 @dataclass(frozen=True)
@@ -265,7 +399,7 @@ class OutputReformatPayload(_TransformPayload):
         submesh: Submesh,
         logical_shape: tuple[int, int] | None = None,
     ) -> tuple[TensorLayout, ...]:
-        return (_channel_sharded_layout(self.output, submesh, logical_shape),)
+        return (_spatial_output_layout(self.output, submesh, logical_shape),)
 
     def build_tile_work(
         self,
@@ -274,10 +408,15 @@ class OutputReformatPayload(_TransformPayload):
     ) -> TransformTileWork:
         output_layout = self.single_output_layout(output_layouts)
         output_slice = tile_tensor_slice(self.output, output_layout, tile)
+        output_height = output_slice.dims[2]
+        output_width = self.output.dims[3]
         input_slice = TensorSlice(
             rank=self.x.rank,
             dims=(
-                TensorRange(start=0, length=self.x.dims[0]),
+                TensorRange(
+                    start=output_height.start * output_width,
+                    length=output_height.length * output_width,
+                ),
                 output_slice.dims[1],
             ),
         )

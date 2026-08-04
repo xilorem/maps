@@ -141,6 +141,11 @@ def lower_convolutions(model: ImportedModel) -> RewriteTransformResult:
             continue
 
         op = cast(Conv2DPayload, node.payload)
+        if op.x.dims[0] != 1:
+            raise ValueError(
+                f"node {node.name} Conv-to-GEMM supports only batch size 1, "
+                f"got {op.x.dims[0]}"
+            )
         x_dtype = cast(TensorDType, op.x.dtype)
         weight_dtype = cast(TensorDType, op.w.dtype)
         output_dtype = cast(TensorDType, op.output.dtype)
@@ -254,6 +259,7 @@ def lower_convolutions(model: ImportedModel) -> RewriteTransformResult:
                 w=packed_weight,
                 y=op.b,
                 output=gemm_output,
+                row_granularity=output_w,
             ),
             attributes={"conv_step": "gemm"},
             source_operation=node.source_operation,
@@ -500,18 +506,19 @@ def precision_lower_model(
         for target_output in target_outputs:
             add_generated_tensor(target_output, tensors)
 
+        lowered_gemm_payload = replace(
+            node.payload,
+            x=target_inputs[0],
+            w=target_inputs[1],
+            y=target_inputs[2] if len(target_inputs) == 3 else None,
+            output=target_outputs[0],
+        )
         lowered_gemm = Node(
             name=node.name,
             kind=node.kind,
             inputs=tuple(target_inputs),
             outputs=target_outputs,
-            payload=GemmPayload(
-                x=target_inputs[0],
-                w=target_inputs[1],
-                y=target_inputs[2] if len(target_inputs) == 3 else None,
-                output=target_outputs[0],
-                transpose_w=node.payload.transpose_w,
-            ),
+            payload=lowered_gemm_payload,
             attributes=node.attributes,
             source_operation=node.source_operation,
         )
