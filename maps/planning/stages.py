@@ -289,11 +289,12 @@ def form_stages(
     dependencies = StageDependencies.from_graph(graph)
     units = _source_operation_units(graph)
     if options.max_stage_operations == 1:
-        operation_stages = {
+        stages = {
             stage_id: unit.nodes
             for stage_id, unit in enumerate(units)
         }
-        return operation_stages
+        print(f"[stage formation] selected_stages={len(stages)}")
+        return stages
 
     unit_id_by_node = {
         id(node): unit_id
@@ -350,10 +351,12 @@ def form_stages(
         current_last_unit = next_unit_id
     if current:
         stages.append(current)
-    return {
+    stage_formation = {
         stage_id: nodes
         for stage_id, nodes in enumerate(stages)
     }
+    print(f"[stage formation] selected_stages={len(stage_formation)}")
+    return stage_formation
 
 
 def _source_operation_units(graph: Graph) -> tuple[_FormationUnit, ...]:

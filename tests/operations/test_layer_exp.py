@@ -2,9 +2,16 @@ from maps.hardware import WorkKind
 from maps.target.magia import build_mesh as magia_mesh
 from maps.target.magia import SPATZ_DEVICE
 from maps.graph import TensorDType
-from maps.planning.mapping import LayoutAxis, LayoutAxisMode, TensorLayout
+from maps.planning.mapping import (
+    LayoutAxis,
+    LayoutAxisMode,
+    TensorLayout,
+    TensorRange,
+    TensorSlice,
+)
 from maps.planning.mapping import Submesh
 from maps.graph import Tensor
+from maps.operations.broadcasting import broadcast_input_slice
 from maps.operations.elementwise import ElementwiseCostModel
 from maps.operations.elementwise import (
     BINARY_ELEMENTWISE_OPS,
@@ -113,3 +120,21 @@ def test_binary_elementwise_tile_work_supports_broadcasting() -> None:
     assert tuple((dim.start, dim.length) for dim in tile_work.input_tile_slices[1].dims) == (
         (4, 4),
     )
+
+
+def test_broadcast_input_slice_preserves_empty_equal_singleton_axis() -> None:
+    input_tensor = Tensor(name="input", rank=2, dims=(1, 8), elem_bytes=2)
+    output = Tensor(name="output", rank=2, dims=(1, 8), elem_bytes=2)
+    output_slice = TensorSlice(
+        rank=2,
+        dims=(TensorRange(start=1, length=0), TensorRange(start=0, length=8)),
+    )
+
+    input_slice = broadcast_input_slice(
+        input_tensor,
+        output,
+        output_slice,
+        "test",
+    )
+
+    assert input_slice == output_slice

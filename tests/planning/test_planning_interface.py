@@ -19,6 +19,7 @@ from maps.graph import (
 from maps.hardware import FixedDeviceAssignment, WorkKind
 from maps.operations.elementwise import UnaryElementwisePayload
 from maps.operations.collective import AllReducePayload
+from maps.operations.gemm import GemmPayload
 from maps.operations.normalization import GroupNormalizationPayload
 from maps.operations.reduction import GlobalAveragePoolPayload, ReduceSumPayload
 from maps.operations.softmax import SoftmaxPayload
@@ -266,6 +267,59 @@ def test_magia_fuses_operations_around_decomposed_softmax_with_provenance(
     assert tuple(violation.kind for violation in limited.violations) == (
         "stage_operation_limit_exceeded",
     )
+
+
+def test_gemm_softmax_preserves_locality_when_batch_axis_has_one_element() -> None:
+    x = Tensor("x", 2, (1, 4), 2, dtype=TensorDType.FLOAT16)
+    weight = Tensor("weight", 2, (4, 8), 2, dtype=TensorDType.FLOAT16)
+    logits = Tensor("logits", 2, (1, 8), 2, dtype=TensorDType.FLOAT16)
+    output = Tensor("output", 2, (1, 8), 2, dtype=TensorDType.FLOAT16)
+    gemm = Node(
+        "gemm",
+        OpKind.GEMM,
+        inputs=(x, weight),
+        outputs=(logits,),
+        payload=GemmPayload(x, weight, None, logits),
+    )
+    softmax = Node(
+        "softmax",
+        OpKind.CUSTOM,
+        inputs=(logits,),
+        outputs=(output,),
+        payload=SoftmaxPayload(logits, output, axis=1),
+    )
+    model, _ = run_graph_rewrites_with_effects(
+        ImportedModel(
+            Graph(
+                "gemm_softmax",
+                tensors=(x, weight, logits, output),
+                nodes=(gemm, softmax),
+                inputs=(x, weight),
+                outputs=(output,),
+            ),
+            ConstantStore(()),
+        )
+    )
+    mesh = magia.build_mesh(width=2, height=1)
+    specialized = magia.specialize(
+        model,
+        mesh,
+        SpecializationOptions(enable_precision_lowering=False),
+    )
+
+    execution_plan = plan(
+        specialized.model.graph,
+        mesh,
+        PlanningOptions(
+            placement=PlacementOptions(print_placement=False),
+            print_execution_plan_cost=False,
+        ),
+    )
+
+    assert len(execution_plan.stages) == 1
+    assert tuple(
+        layer.source_operation for layer in execution_plan.stages[0].layers
+    ) == ("gemm", *("softmax",) * 7)
 
 
 def test_validation_rejects_overlapping_collective_groups(

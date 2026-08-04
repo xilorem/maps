@@ -56,7 +56,7 @@ def broadcast_input_slice(
     rank_offset = output.rank - input_tensor.rank
     dims = tuple(
         TensorRange(start=0, length=1)
-        if input_dim == 1
+        if input_dim == 1 and output.dims[input_axis + rank_offset] != 1
         else output_slice.dims[input_axis + rank_offset]
         for input_axis, input_dim in enumerate(input_tensor.dims)
     )
