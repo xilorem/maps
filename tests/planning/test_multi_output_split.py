@@ -14,7 +14,7 @@ from maps.graph import (
 )
 from maps.graph.onnx.parser import parse_graph
 from maps.hardware import WorkKind, WorkSignature
-from maps.operations.elementwise import UnaryElementwisePayload
+from maps.operations.elementwise import BinaryElementwisePayload, UnaryElementwisePayload
 from maps.operations.split import SplitPayload
 from maps.planning import (
     LocalInput,
@@ -264,10 +264,35 @@ def test_imported_split_plans_three_consumer_branches_deterministically() -> Non
         for transition in first.transitions
         if isinstance(transition, IntermediateTransition)
     ) == split.outputs
-    assert all(
-        transition.transfers
+    differently_sharded = next(
+        transition
         for transition in first.transitions
         if isinstance(transition, IntermediateTransition)
+        and first.tensors[transition.tensor_id] == split.outputs[2]
+    )
+    assert tuple(
+        (
+            transfer.source_tile_id,
+            transfer.destination_tile_id,
+            transfer.source_subslice.dims,
+            transfer.destination_subslice.dims,
+        )
+        for transfer in differently_sharded.transfers
+    ) == tuple(
+        (
+            source_tile_id,
+            destination_tile_id,
+            (
+                TensorRange(0, 32),
+                TensorRange(destination_column * 50, 50),
+            ),
+            (
+                TensorRange(source_row * 32, 32),
+                TensorRange(0, 50),
+            ),
+        )
+        for source_tile_id, source_row in ((1, 0), (2, 1), (0, 2), (3, 3))
+        for destination_tile_id, destination_column in ((4, 0), (5, 1))
     )
     assert first == second
     assert execution_plan_json_payload(first) == execution_plan_json_payload(second)
@@ -337,9 +362,24 @@ def test_split_branches_share_destination_residency_and_fan_out_per_stage() -> N
         "shared_consumer0",
         split.outputs[0],
     )
-    shared_consumer1, shared_output1 = _relu(
+    shared_output1 = Tensor(
+        "shared_consumer1_output",
+        split.outputs[0].rank,
+        split.outputs[0].dims,
+        split.outputs[0].elem_bytes,
+        dtype=split.outputs[0].dtype,
+    )
+    shared_consumer1 = Node(
         "shared_consumer1",
-        split.outputs[0],
+        OpKind.CUSTOM,
+        inputs=(split.outputs[0], shared_output0),
+        outputs=(shared_output1,),
+        payload=BinaryElementwisePayload(
+            "add",
+            split.outputs[0],
+            shared_output0,
+            shared_output1,
+        ),
     )
     remote_consumer, remote_output = _relu(
         "remote_consumer",
@@ -369,7 +409,11 @@ def test_split_branches_share_destination_residency_and_fan_out_per_stage() -> N
         nodes=(split, *consumers),
         edges=(
             Edge(split.inputs[0], None, split),
-            *(Edge(node.inputs[0], split, node) for node in consumers),
+            Edge(split.outputs[1], split, local_consumer),
+            Edge(split.outputs[0], split, shared_consumer0),
+            Edge(split.outputs[0], split, shared_consumer1),
+            Edge(shared_output0, shared_consumer0, shared_consumer1),
+            Edge(split.outputs[0], split, remote_consumer),
             *(
                 Edge(output, node, None)
                 for node, output in zip(consumers, consumer_outputs)
