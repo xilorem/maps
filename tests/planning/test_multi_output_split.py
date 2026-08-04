@@ -447,10 +447,12 @@ def test_imported_split_deploys_three_consumer_branches_deterministically(
         assert serialized_layout["mesh_x"] == {
             "mode": layout.mesh_x.mode,
             "tensor_axis": layout.mesh_x.tensor_axis,
+            "shard_granularity": layout.mesh_x.shard_granularity,
         }
         assert serialized_layout["mesh_y"] == {
             "mode": layout.mesh_y.mode,
             "tensor_axis": layout.mesh_y.tensor_axis,
+            "shard_granularity": layout.mesh_y.shard_granularity,
         }
         assert serialized_layout["logical_width"] == layout.logical_width
         assert serialized_layout["logical_height"] == layout.logical_height

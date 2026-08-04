@@ -56,6 +56,48 @@ def _placement(
     )
 
 
+def test_execution_plan_serializes_shard_granularity_for_every_layout_axis() -> None:
+    from maps.planning.mapping import LayoutAxis, LayoutAxisMode, TensorLayout
+
+    mesh = magia_mesh(width=2, height=1)
+    submesh = Submesh(mesh, 0, frozenset((0, 1)))
+    tensor = Tensor("flattened_rows", 1, (9,), 2)
+    layout = TensorLayout(
+        submesh=submesh,
+        mesh_x=LayoutAxis(
+            LayoutAxisMode.SHARD,
+            tensor_axis=0,
+            shard_granularity=3,
+        ),
+        mesh_y=LayoutAxis(LayoutAxisMode.REPLICATE),
+        logical_width=2,
+        logical_height=1,
+    )
+    stage = Stage(
+        "granular",
+        submesh,
+        layers=(
+            Layer(
+                Node("source", OpKind.CUSTOM, outputs=(tensor,)),
+                outputs=(LayerOutput(tensor_id=0, layout=layout),),
+            ),
+        ),
+    )
+    execution_plan = ExecutionPlan(
+        "granular",
+        mesh,
+        tensors=(tensor,),
+        stages=(stage,),
+    )
+
+    serialized_layout = execution_plan_json_payload(execution_plan)["stages"][0][
+        "layers"
+    ][0]["outputs"][0]["layout"]
+
+    assert serialized_layout["mesh_x"]["shard_granularity"] == 3
+    assert serialized_layout["mesh_y"]["shard_granularity"] == 1
+
+
 def test_stage_tensor_residency_is_shared_and_internal_outputs_can_leave() -> None:
     mesh = magia_mesh(width=1, height=1)
     virtual = Submesh(mesh=mesh, submesh_id=0, tile_ids=frozenset((0,)))

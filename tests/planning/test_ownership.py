@@ -97,6 +97,96 @@ def test_tile_tensor_slice_shards_both_axes() -> None:
     assert result.dims == expected
 
 
+def test_tile_tensor_slice_balances_indivisible_shard_units() -> None:
+    mesh = magia_mesh(width=2, height=1)
+    submesh = Submesh(mesh=mesh, submesh_id=0, tile_ids={0, 1})
+    tensor = Tensor(name="flattened_rows", rank=1, dims=(9,), elem_bytes=2)
+    layout = TensorLayout(
+        submesh=submesh,
+        mesh_x=LayoutAxis(
+            mode=LayoutAxisMode.SHARD,
+            tensor_axis=0,
+            shard_granularity=3,
+        ),
+        mesh_y=LayoutAxis(mode=LayoutAxisMode.REPLICATE),
+    )
+
+    assert tile_tensor_slice(tensor, layout, mesh.tiles[0]).dims == (
+        TensorRange(start=0, length=6),
+    )
+    assert tile_tensor_slice(tensor, layout, mesh.tiles[1]).dims == (
+        TensorRange(start=6, length=3),
+    )
+
+
+def test_default_shard_granularity_preserves_element_partitioning() -> None:
+    mesh = magia_mesh(width=2, height=1)
+    submesh = Submesh(mesh=mesh, submesh_id=0, tile_ids={0, 1})
+    tensor = Tensor(name="elements", rank=1, dims=(9,), elem_bytes=2)
+    layout = TensorLayout(
+        submesh=submesh,
+        mesh_x=LayoutAxis(mode=LayoutAxisMode.SHARD, tensor_axis=0),
+        mesh_y=LayoutAxis(mode=LayoutAxisMode.REPLICATE),
+    )
+
+    assert layout.mesh_x.shard_granularity == 1
+    assert tile_tensor_slice(tensor, layout, mesh.tiles[0]).dims == (
+        TensorRange(start=0, length=5),
+    )
+    assert tile_tensor_slice(tensor, layout, mesh.tiles[1]).dims == (
+        TensorRange(start=5, length=4),
+    )
+
+
+def test_layout_rejects_invalid_shard_granularity() -> None:
+    mesh = magia_mesh(width=1, height=1)
+    submesh = Submesh(mesh=mesh, submesh_id=0, tile_ids={0})
+    tensor = Tensor(name="elements", rank=1, dims=(10,), elem_bytes=2)
+
+    with pytest.raises(ValueError, match="shard_granularity must be positive"):
+        LayoutAxis(
+            mode=LayoutAxisMode.SHARD,
+            tensor_axis=0,
+            shard_granularity=0,
+        )
+
+    for mode in (
+        LayoutAxisMode.NONE,
+        LayoutAxisMode.PARTIAL,
+        LayoutAxisMode.REPLICATE,
+    ):
+        layout = TensorLayout(
+            submesh=submesh,
+            mesh_x=LayoutAxis(mode=mode, tensor_axis=0, shard_granularity=2),
+            mesh_y=LayoutAxis(mode=LayoutAxisMode.REPLICATE),
+        )
+        with pytest.raises(
+            ValueError,
+            match="shard_granularity must be one for non-sharded axes",
+        ):
+            layout.validate_for(tensor)
+
+    non_divisible = TensorLayout(
+        submesh=submesh,
+        mesh_x=LayoutAxis(
+            mode=LayoutAxisMode.SHARD,
+            tensor_axis=0,
+            shard_granularity=3,
+        ),
+        mesh_y=LayoutAxis(mode=LayoutAxisMode.REPLICATE),
+    )
+    with pytest.raises(ValueError, match="must divide tensor axis length"):
+        non_divisible.validate_for(tensor)
+
+
+def test_layout_equality_includes_shard_granularity() -> None:
+    assert LayoutAxis(LayoutAxisMode.SHARD, tensor_axis=0) != LayoutAxis(
+        LayoutAxisMode.SHARD,
+        tensor_axis=0,
+        shard_granularity=3,
+    )
+
+
 def test_tile_tensor_slice_uses_logical_shape_not_physical_shape() -> None:
     mesh = magia_mesh()
     submesh = Submesh(mesh=mesh, submesh_id=0, x0=0, y0=0, width=6, height=1)

@@ -24,14 +24,33 @@ class LayoutAxis:
 
     mode: LayoutAxisMode
     tensor_axis: int | None = TENSOR_AXIS_NONE
+    shard_granularity: int = 1
+
+    def __post_init__(self) -> None:
+        if self.shard_granularity <= 0:
+            raise ValueError("shard_granularity must be positive")
 
     def validate_for(self, tensor: Tensor) -> None:
+        if (
+            self.mode is not LayoutAxisMode.SHARD
+            and self.shard_granularity != 1
+        ):
+            raise ValueError(
+                "shard_granularity must be one for non-sharded axes"
+            )
         if self.mode in (LayoutAxisMode.NONE, LayoutAxisMode.REPLICATE):
             return
         if self.tensor_axis is None:
             raise ValueError("tensor_axis must be set for shard/partial modes")
         if self.tensor_axis < 0 or self.tensor_axis >= tensor.rank:
             raise ValueError("tensor_axis out of range for tensor rank")
+        if (
+            self.mode is LayoutAxisMode.SHARD
+            and tensor.dims[self.tensor_axis] % self.shard_granularity != 0
+        ):
+            raise ValueError(
+                "shard_granularity must divide tensor axis length exactly"
+            )
 
 
 def partial_axis_to_shard(axis: LayoutAxis) -> LayoutAxis:
@@ -217,10 +236,11 @@ def _apply_layout_axis(current_range: TensorRange,
     if axis.mode is not LayoutAxisMode.SHARD:
         raise ValueError(f"unsupported layout axis mode: {axis.mode}")
 
-    local_range = partition_range(current_range.length, num_parts, part_idx)
+    ownership_units = current_range.length // axis.shard_granularity
+    local_units = partition_range(ownership_units, num_parts, part_idx)
     return TensorRange(
-        start=current_range.start + local_range.start,
-        length=local_range.length,
+        start=current_range.start + local_units.start * axis.shard_granularity,
+        length=local_units.length * axis.shard_granularity,
     )
 
 

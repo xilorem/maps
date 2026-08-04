@@ -4,6 +4,7 @@ from maps.graph import Node, OpKind
 from maps.planning.mapping import LayoutAxis, LayoutAxisMode, Submesh, TensorLayout
 from maps.graph import Tensor
 from maps.planning.allocation.candidates import cost_estimator, placement_cost_estimator
+from maps.operations import LayoutRelation
 from maps.operations.collective import AllReducePayload
 
 
@@ -53,6 +54,32 @@ def test_allreduce_resolves_every_partial_layout_axis() -> None:
     assert output_layout.mesh_x.mode is LayoutAxisMode.REPLICATE
     assert tile0_work.input_slice == tile1_work.input_slice
     assert tile0_work.output_slice == tile1_work.output_slice
+
+
+def test_relation_drops_shard_granularity_when_output_is_replicated() -> None:
+    tensor = Tensor("partial", rank=1, dims=(9,), elem_bytes=2)
+    mesh = magia_mesh(width=2, height=1)
+    submesh = Submesh(mesh, 0, frozenset((0, 1)))
+    input_layout = TensorLayout(
+        submesh=submesh,
+        mesh_x=LayoutAxis(
+            LayoutAxisMode.SHARD,
+            tensor_axis=0,
+            shard_granularity=3,
+        ),
+        mesh_y=LayoutAxis(LayoutAxisMode.REPLICATE),
+    )
+    relation = LayoutRelation(
+        input_index=0,
+        output_index=0,
+        input_axis_for_output_axis=(0,),
+        guarantees_slice_containment=True,
+        replicated_output_axes=frozenset({0}),
+    )
+
+    output_layout = relation.output_layout_from_input_layout(input_layout)
+
+    assert output_layout.mesh_x == LayoutAxis(LayoutAxisMode.REPLICATE)
 
 
 def test_allreduce_protocol_cost_is_not_prescribed_by_the_generic_operation() -> None:

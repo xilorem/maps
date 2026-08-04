@@ -222,7 +222,11 @@ class LayoutRelation:
             raise ValueError(
                 f"layout relation does not map sharded tensor axis {axis.tensor_axis}"
             )
-        return LayoutAxis(mode=axis.mode, tensor_axis=mapping[axis.tensor_axis])
+        return LayoutAxis(
+            mode=axis.mode,
+            tensor_axis=mapping[axis.tensor_axis],
+            shard_granularity=axis.shard_granularity,
+        )
 
 
 def payload_layout_relations(payload: object) -> tuple[LayoutRelation, ...]:

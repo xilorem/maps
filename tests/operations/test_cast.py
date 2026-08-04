@@ -11,7 +11,7 @@ from maps.graph import (
 from maps.graph import Edge
 from maps.target.magia import build_mesh as magia_mesh
 from maps.operations.cast import CastPayload
-from maps.planning.mapping import LayoutAxisMode
+from maps.planning.mapping import LayoutAxis, LayoutAxisMode, TensorLayout
 from maps.planning.mapping import Submesh
 from maps.planning import PlacementOptions, PlanningOptions, plan
 
@@ -65,6 +65,30 @@ def test_cast_shards_output_and_preserves_the_exact_input_layout() -> None:
     assert output_layout.mesh_x.tensor_axis == 1
     assert output_layout.mesh_y.mode is LayoutAxisMode.SHARD
     assert output_layout.mesh_y.tensor_axis == 0
+    assert input_layout == output_layout
+
+
+def test_cast_exact_relation_preserves_shard_granularity() -> None:
+    payload = CastPayload(
+        x=_tensor("x", TensorDType.FLOAT16, (9, 8)),
+        output=_tensor("output", TensorDType.FLOAT32, (9, 8)),
+    )
+    mesh = magia_mesh(width=1, height=2)
+    submesh = Submesh(mesh=mesh, submesh_id=0, tile_ids={0, 1})
+    output_layout = TensorLayout(
+        submesh=submesh,
+        mesh_x=LayoutAxis(LayoutAxisMode.REPLICATE),
+        mesh_y=LayoutAxis(
+            LayoutAxisMode.SHARD,
+            tensor_axis=0,
+            shard_granularity=3,
+        ),
+    )
+
+    input_layout = payload.layout_relations[0].input_layout_from_output_layout(
+        output_layout
+    )
+
     assert input_layout == output_layout
 
 
