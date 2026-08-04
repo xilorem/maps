@@ -68,7 +68,12 @@ from maps.operations.reduction import (
     ScalarMultiplyPayload,
 )
 from maps.operations.softmax import SoftmaxPayload
-from maps.operations.split import SplitPayload, StaticSlicePayload, StaticSliceTileWork
+from maps.operations.split import (
+    SplitPayload,
+    SplitTileWork,
+    StaticSlicePayload,
+    StaticSliceTileWork,
+)
 from maps.planning.mapping import Submesh
 from maps.target.magia import build_mesh as magia_mesh
 from maps.planning import PlacementOptions, PlanningOptions, plan
@@ -158,7 +163,7 @@ def test_elementwise_family_colocates_operations_tile_work_and_cost() -> None:
         ("maps.operations.softmax", (SoftmaxPayload,)),
         (
             "maps.operations.split",
-            (SplitPayload, StaticSlicePayload, StaticSliceTileWork),
+            (SplitPayload, SplitTileWork, StaticSlicePayload, StaticSliceTileWork),
         ),
     ),
 )

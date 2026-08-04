@@ -22,7 +22,7 @@ from maps.operations.reduction import (
     ScalarMultiplyPayload,
 )
 from maps.operations.rearrangement import ReshapePayload, TransposePayload
-from maps.operations.split import SplitPayload, StaticSlicePayload
+from maps.operations.split import SplitPayload
 
 
 def _make_tiny_matmul_graph():
@@ -633,7 +633,7 @@ def test_decompose_graph_keeps_explicit_singleton_collectives_for_unsharded_axis
     assert sum(isinstance(node.payload, AllReducePayload) for node in lowered_graph.nodes) == 2
 
 
-def test_onnx_split_constant_sizes_decompose_to_offset_static_slices() -> None:
+def test_onnx_split_constant_sizes_remain_one_primitive_operation() -> None:
     import numpy as np
     from onnx import TensorProto, helper, numpy_helper
 
@@ -669,27 +669,10 @@ def test_onnx_split_constant_sizes_decompose_to_offset_static_slices() -> None:
 
     lowered = decompose_graph(parsed)
 
-    assert tuple(node.name for node in lowered.nodes) == (
-        "split_0__slice_0",
-        "split_0__slice_1",
-        "split_0__slice_2",
-    )
-    assert all(isinstance(node.payload, StaticSlicePayload) for node in lowered.nodes)
-    assert tuple(node.payload.offsets for node in lowered.nodes) == (
-        (0, 0, 0),
-        (0, 1, 0),
-        (0, 4, 0),
-    )
-    assert all(node.inputs == (parsed.inputs[0],) for node in lowered.nodes)
-    assert {
-        edge.dst.name
-        for edge in lowered.edges
-        if edge.src is None and edge.tensor.name == "x"
-    } == {
-        "split_0__slice_0",
-        "split_0__slice_1",
-        "split_0__slice_2",
-    }
+    assert lowered == parsed
+    assert tuple(node.name for node in lowered.nodes) == ("split_0",)
+    assert isinstance(lowered.nodes[0].payload, SplitPayload)
+    assert lowered.nodes[0].outputs == parsed.outputs
 
 
 def test_onnx_split_num_outputs_uses_default_axis_and_smaller_final_chunk() -> None:
@@ -716,10 +699,7 @@ def test_onnx_split_num_outputs_uses_default_axis_and_smaller_final_chunk() -> N
     assert isinstance(payload, SplitPayload)
     assert payload.axis == 0
     assert payload.sizes == (4, 4, 2)
-    assert tuple(
-        node.payload.offsets
-        for node in decompose_graph(parsed).nodes
-    ) == ((0, 0), (4, 0), (8, 0))
+    assert decompose_graph(parsed) == parsed
 
 
 def test_onnx_split_rejects_dynamic_or_ambiguous_size_configuration() -> None:

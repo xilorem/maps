@@ -13,6 +13,7 @@ from maps.planning.mapping import (
     Submesh,
     TensorLayout,
     TensorSlice,
+    bounding_tensor_slice,
     tensor_slice_num_bytes,
     tile_tensor_slice,
 )
@@ -445,10 +446,14 @@ def required_input_slices(
             output_layouts=destination_output_layouts,
             tile=tile,
         )
-        for reference in tile_work.input_slices:
-            if reference.tensor is tensor:
-                required_slices.append((tile, reference.tensor_slice))
-                break
+        matching_slices = tuple(
+            reference.tensor_slice
+            for reference in tile_work.input_slices
+            if reference.tensor is tensor
+            and reference.tensor_slice.num_elements > 0
+        )
+        if matching_slices:
+            required_slices.append((tile, bounding_tensor_slice(matching_slices)))
     return tuple(required_slices)
 
 

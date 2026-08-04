@@ -80,6 +80,14 @@ _CORE_CAPABILITIES = (
         )
         for input_count in (2, 3)
     )
+    | frozenset(
+        WorkSignature(
+            WorkKind.SPLIT,
+            (dtype,),
+            (dtype, dtype, dtype),
+        )
+        for dtype in _FLOAT_DTYPES
+    )
 )
 
 IDMA_READ_DEVICE = DMADevice(
@@ -121,6 +129,7 @@ CORE_DEVICE = ScalarDevice(
         WorkKind.RESHAPE: 1,
         WorkKind.SIGMOID: 1,
         WorkKind.SLICE: 1,
+        WorkKind.SPLIT: 1,
         WorkKind.SQRT: 1,
         WorkKind.SUB: 1,
         WorkKind.TRANSPOSE: 1,

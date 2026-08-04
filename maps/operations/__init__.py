@@ -59,7 +59,7 @@ from .reduction import (
     ScalarMultiplyPayload,
 )
 from .softmax import SoftmaxPayload
-from .split import SplitPayload, StaticSlicePayload, StaticSliceTileWork
+from .split import SplitPayload, SplitTileWork, StaticSlicePayload, StaticSliceTileWork
 
 __all__ = [
     "AllReduceCostModel",
@@ -104,6 +104,7 @@ __all__ = [
     "ScalarMultiplyPayload",
     "SoftmaxPayload",
     "SplitPayload",
+    "SplitTileWork",
     "StaticSlicePayload",
     "StaticSliceTileWork",
     "TileWork",

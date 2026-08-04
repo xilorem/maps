@@ -79,7 +79,7 @@ def build_virtual_transitions(
                 destination_plan,
                 destination_node,
             )
-            for destination_input_index, tensor in enumerate(destination_node.inputs):
+            for tensor in destination_node.inputs:
                 tensor_identity = id(tensor)
                 if tensor_identity in initializer_identities:
                     continue
@@ -98,7 +98,6 @@ def build_virtual_transitions(
                         tensor=tensor,
                         destination_node=destination_node,
                         destination_output_layouts=destination_layouts,
-                        destination_input_index=destination_input_index,
                     )
                 )
 
@@ -302,7 +301,6 @@ def _required_input_slices(
     tensor: Tensor,
     destination_node: Node,
     destination_output_layouts: tuple[TensorLayout, ...],
-    destination_input_index: int,
 ) -> tuple[tuple[Tile, TensorSlice], ...]:
     payload = cast(OpPayload, destination_node.payload)
     destinations = []
@@ -311,15 +309,12 @@ def _required_input_slices(
             output_layouts=destination_output_layouts,
             tile=tile,
         )
-        if destination_input_index >= len(tile_work.input_slices):
-            continue
-        reference = tile_work.input_slices[destination_input_index]
-        if reference.tensor is not tensor:
-            raise ValueError(
-                f"tile work input {destination_input_index} does not match "
-                f"node {destination_node.name}"
-            )
-        destinations.append((tile, reference.tensor_slice))
+        destinations.extend(
+            (tile, reference.tensor_slice)
+            for reference in tile_work.input_slices
+            if reference.tensor is tensor
+            and reference.tensor_slice.num_elements > 0
+        )
     return tuple(destinations)
 
 

@@ -8,6 +8,7 @@ from maps.graph import Tensor
 from maps.target.magia import build_mesh as magia_mesh
 from maps.target.magia import CORE_DEVICE as MAGIA_CORE_DEVICE
 from maps.operations.split import SplitPayload, StaticSlicePayload
+from maps.planning.allocation.candidates import permanent_l1_allocation_for_tile_work
 
 
 def test_static_slice_maps_sharded_output_to_offset_input_region() -> None:
@@ -76,3 +77,49 @@ def test_split_payload_validates_axis_sizes_and_output_geometry() -> None:
     bad_output = Tensor("bad", 2, (2, 5), 2, dtype=TensorDType.FLOAT16)
     with pytest.raises(ValueError, match="output shape does not match"):
         SplitPayload(x, (output0, bad_output), axis=0, sizes=(2, 2))
+
+
+def test_split_maps_every_sharded_output_to_its_offset_input_region() -> None:
+    mesh = magia_mesh()
+    submesh = Submesh(mesh=mesh, submesh_id=0, x0=0, y0=0, width=4, height=1)
+    x = Tensor("x", 2, (2, 7), 2, dtype=TensorDType.FLOAT16)
+    outputs = (
+        Tensor("q", 2, (2, 1), 2, dtype=TensorDType.FLOAT16),
+        Tensor("k", 2, (2, 3), 2, dtype=TensorDType.FLOAT16),
+        Tensor("v", 2, (2, 3), 2, dtype=TensorDType.FLOAT16),
+    )
+    payload = SplitPayload(x, outputs, axis=1, sizes=(1, 3, 3))
+
+    layouts = payload.output_layouts(submesh, logical_shape=(4, 1))
+    tile_work = payload.build_tile_work(layouts, submesh.tiles[2])
+
+    assert len(layouts) == 3
+    assert all(layout.submesh is submesh for layout in layouts)
+    assert all(layout.logical_width == 4 for layout in layouts)
+    assert tile_work.work_kind is WorkKind.SPLIT
+    assert tuple(reference.tensor for reference in tile_work.output_slices) == outputs
+    assert tuple(
+        reference.tensor_slice.dims for reference in tile_work.output_slices
+    ) == (
+        (TensorRange(0, 2), TensorRange(1, 0)),
+        (TensorRange(0, 2), TensorRange(2, 1)),
+        (TensorRange(0, 2), TensorRange(2, 1)),
+    )
+    assert tuple(
+        reference.tensor_slice.dims for reference in tile_work.input_slices
+    ) == (
+        (TensorRange(0, 2), TensorRange(1, 0)),
+        (TensorRange(0, 2), TensorRange(3, 1)),
+        (TensorRange(0, 2), TensorRange(6, 1)),
+    )
+    assert tile_work.operation_count() == 4
+    assert payload.cost_model.cost(
+        tile_work,
+        submesh.tiles[2],
+        MAGIA_CORE_DEVICE,
+    ) == 4
+    assert permanent_l1_allocation_for_tile_work(
+        (tile_work,),
+        frozenset(),
+        num_token_slots=2,
+    ) == 56

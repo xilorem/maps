@@ -1,11 +1,11 @@
-"""Split semantics, deterministic decomposition, Tile Work, and costing."""
+"""Primitive Split and Static Slice semantics, Tile Work, and costing."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
 from maps.hardware import Tile, WorkKind
-from maps.graph import Node, OpKind, Tensor
+from maps.graph import Tensor
 from maps.planning.mapping import (
     TensorLayout,
     TensorRange,
@@ -14,7 +14,8 @@ from maps.planning.mapping import (
     tile_tensor_slice,
 )
 from maps.planning.mapping import Submesh
-from .contracts import CompositeOpPayload, OpCostModel, OpPayload, TileWork, sharded_layout
+
+from .contracts import OpCostModel, OpPayload, TileWork, sharded_layout
 
 
 @dataclass(frozen=True)
@@ -112,15 +113,46 @@ class StaticSlicePayload(OpPayload):
 
 
 @dataclass(frozen=True)
-class SplitPayload(CompositeOpPayload):
+class SplitTileWork(TileWork):
+    """One tile's ordered Split output slices and offset input regions."""
+
+    x: Tensor
+    outputs: tuple[Tensor, ...]
+    input_regions: tuple[TensorSlice, ...]
+    output_regions: tuple[TensorSlice, ...]
+    work_kind: WorkKind = WorkKind.SPLIT
+
+    @property
+    def input_slices(self) -> tuple[TensorSliceRef, ...]:
+        return tuple(
+            TensorSliceRef(self.x, input_region)
+            for input_region in self.input_regions
+        )
+
+    @property
+    def output_slices(self) -> tuple[TensorSliceRef, ...]:
+        return tuple(
+            TensorSliceRef(output, output_region)
+            for output, output_region in zip(self.outputs, self.output_regions)
+        )
+
+    def operation_count(self) -> int:
+        return sum(output.num_elements for output in self.output_regions)
+
+
+@dataclass(frozen=True)
+class SplitPayload(OpPayload):
     """Static multi-output split with normalized axis and sizes."""
 
     x: Tensor
     outputs: tuple[Tensor, ...]
     axis: int
     sizes: tuple[int, ...]
+    work_kind: WorkKind = WorkKind.SPLIT
 
     def __post_init__(self) -> None:
+        if self.work_kind is not WorkKind.SPLIT:
+            raise ValueError("Split must use SPLIT work")
         if self.axis < 0 or self.axis >= self.x.rank:
             raise ValueError("Split axis must be within input tensor rank")
         if not self.outputs:
@@ -144,28 +176,63 @@ class SplitPayload(CompositeOpPayload):
                     "Split input and output element representations must match"
                 )
 
-    def decompose(self, node: Node) -> tuple[tuple[Tensor, ...], tuple[Node, ...]]:
-        offsets = [0] * self.x.rank
-        split_offset = 0
-        nodes = []
-        for output_idx, (output, size) in enumerate(zip(self.outputs, self.sizes)):
-            offsets[self.axis] = split_offset
-            nodes.append(
-                Node(
-                    name=f"{node.name}__slice_{output_idx}",
-                    kind=OpKind.TRANSFORM,
-                    inputs=(self.x,),
-                    outputs=(output,),
-                    payload=StaticSlicePayload(
-                        x=self.x,
-                        output=output,
-                        offsets=tuple(offsets),
+    @property
+    def cost_model(self) -> OpCostModel:
+        from .elementwise import ElementwiseCostModel
+
+        return ElementwiseCostModel(work_kind=self.work_kind)
+
+    def output_layouts(
+        self,
+        submesh: Submesh,
+        logical_shape: tuple[int, int] | None = None,
+    ) -> tuple[TensorLayout, ...]:
+        return tuple(
+            sharded_layout(output, submesh, logical_shape)
+            for output in self.outputs
+        )
+
+    def required_input_slice(
+        self,
+        output_index: int,
+        output_slice: TensorSlice,
+    ) -> TensorSlice:
+        split_offset = sum(self.sizes[:output_index])
+        return TensorSlice(
+            rank=self.x.rank,
+            dims=tuple(
+                TensorRange(
+                    start=(
+                        output_range.start + split_offset
+                        if axis == self.axis
+                        else output_range.start
                     ),
-                    attributes={
-                        **node.attributes,
-                        "split_output_index": output_idx,
-                    },
+                    length=output_range.length,
                 )
+                for axis, output_range in enumerate(output_slice.dims)
+            ),
+        )
+
+    def build_tile_work(
+        self,
+        output_layouts: tuple[TensorLayout, ...],
+        tile: Tile,
+    ) -> SplitTileWork:
+        if len(output_layouts) != len(self.outputs):
+            raise ValueError(
+                f"Split expects {len(self.outputs)} output layouts, "
+                f"got {len(output_layouts)}"
             )
-            split_offset += size
-        return (), tuple(nodes)
+        output_regions = tuple(
+            tile_tensor_slice(output, layout, tile)
+            for output, layout in zip(self.outputs, output_layouts)
+        )
+        return SplitTileWork(
+            x=self.x,
+            outputs=self.outputs,
+            input_regions=tuple(
+                self.required_input_slice(output_index, output_region)
+                for output_index, output_region in enumerate(output_regions)
+            ),
+            output_regions=output_regions,
+        )

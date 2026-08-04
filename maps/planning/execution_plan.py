@@ -763,9 +763,14 @@ def infer_input_slice_for_tile(
             output_layouts=output_layouts,
             tile=tile,
         )
-        for reference in tile_work.input_slices:
-            if tensor == reference.tensor:
-                return reference.tensor_slice
+        matching_slices = tuple(
+            reference.tensor_slice
+            for reference in tile_work.input_slices
+            if tensor == reference.tensor
+            and reference.tensor_slice.num_elements > 0
+        )
+        if matching_slices:
+            return bounding_tensor_slice(matching_slices)
     return _default_tensor_slice(tensor)
 
 

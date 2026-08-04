@@ -35,6 +35,7 @@ _LOCAL_WORK = (
     WorkKind.RESHAPE,
     WorkKind.SIGMOID,
     WorkKind.SLICE,
+    WorkKind.SPLIT,
     WorkKind.SQRT,
     WorkKind.SUB,
     WorkKind.TRANSPOSE,
@@ -68,6 +69,14 @@ _LOCAL_CAPABILITIES = (
     | same_dtype_signatures((WorkKind.MUL,), (1,), _FLOAT_DTYPES)
     | same_dtype_signatures((WorkKind.DEPTHWISE_CONV,), (2, 3), _FLOAT_DTYPES)
     | same_dtype_signatures((WorkKind.GROUP_NORMALIZE,), (5,), _FLOAT_DTYPES)
+    | frozenset(
+        WorkSignature(
+            WorkKind.SPLIT,
+            (dtype,),
+            (dtype, dtype, dtype),
+        )
+        for dtype in _FLOAT_DTYPES
+    )
 )
 _GEMM_CAPABILITIES = same_dtype_signatures(
     (WorkKind.GEMM,),

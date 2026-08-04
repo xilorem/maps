@@ -477,6 +477,7 @@ def permanent_l1_allocation_for_tile_work(
             if (
                 reference.tensor not in produced_tensors
                 and not _is_initializer(reference.tensor, initializer_tensors)
+                and reference.tensor_slice.num_elements > 0
             ):
                 resident_slices.setdefault(reference.tensor, []).append(
                     reference.tensor_slice
@@ -489,6 +490,8 @@ def permanent_l1_allocation_for_tile_work(
     allocation_sizes = []
     for work in tile_work:
         for reference in work.input_slices:
+            if reference.tensor_slice.num_elements == 0:
+                continue
             if reference.tensor in produced_tensors:
                 continue
             if _is_initializer(reference.tensor, initializer_tensors):

@@ -43,6 +43,7 @@ class WorkKind(Enum):
     EXP = auto()
     SIGMOID = auto()
     SLICE = auto()
+    SPLIT = auto()
     SQRT = auto()
     SUB = auto()
     TRANSPOSE = auto()
