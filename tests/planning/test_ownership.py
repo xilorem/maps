@@ -150,6 +150,17 @@ def test_layout_rejects_invalid_shard_granularity() -> None:
             shard_granularity=0,
         )
 
+    for non_integer in (1.5, True):
+        with pytest.raises(
+            TypeError,
+            match="shard_granularity must be an integer",
+        ):
+            LayoutAxis(
+                mode=LayoutAxisMode.SHARD,
+                tensor_axis=0,
+                shard_granularity=non_integer,  # type: ignore[arg-type]
+            )
+
     for mode in (
         LayoutAxisMode.NONE,
         LayoutAxisMode.PARTIAL,

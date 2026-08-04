@@ -27,6 +27,8 @@ class LayoutAxis:
     shard_granularity: int = 1
 
     def __post_init__(self) -> None:
+        if type(self.shard_granularity) is not int:
+            raise TypeError("shard_granularity must be an integer")
         if self.shard_granularity <= 0:
             raise ValueError("shard_granularity must be positive")
 
