@@ -763,7 +763,10 @@ def infer_input_slice_for_tile(
             output_layouts=output_layouts,
             tile=tile,
         )
-        matching_slices = input_slices_for_tensor(tile_work, tensor)
+        matching_slices = input_slices_for_tensor(
+            tile_work,
+            node.inputs[binding_idx],
+        )
         if matching_slices:
             return bounding_tensor_slice(matching_slices)
     return _default_tensor_slice(tensor)
