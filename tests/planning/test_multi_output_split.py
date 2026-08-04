@@ -19,7 +19,7 @@ from maps.graph import (
 from maps.graph.onnx.parser import parse_graph
 from maps.hardware import WorkKind, WorkSignature
 from maps.operations.elementwise import BinaryElementwisePayload, UnaryElementwisePayload
-from maps.operations.split import SplitPayload
+from maps.operations.split import SplitPayload, StaticSlicePayload
 from maps.planning import (
     LocalInput,
     PlacementOptions,
@@ -104,13 +104,18 @@ def _onnx_split_model(
     *,
     batch_size: int = 2,
     sizes: tuple[int, ...] = (1, 3, 3),
+    dtype: TensorDType = TensorDType.FLOAT16,
 ) -> ImportedModel:
     import numpy as np
     from onnx import TensorProto, helper, numpy_helper
 
+    onnx_dtype = {
+        TensorDType.FLOAT16: TensorProto.FLOAT16,
+        TensorDType.INT32: TensorProto.INT32,
+    }[dtype]
     x = helper.make_tensor_value_info(
         "x",
-        TensorProto.FLOAT16,
+        onnx_dtype,
         [batch_size, sum(sizes)],
     )
     output_names = tuple(
@@ -120,7 +125,7 @@ def _onnx_split_model(
     split_outputs = tuple(
         helper.make_tensor_value_info(
             name,
-            TensorProto.FLOAT16,
+            onnx_dtype,
             [batch_size, size],
         )
         for name, size in zip(output_names, sizes)
@@ -128,7 +133,7 @@ def _onnx_split_model(
     graph_outputs = tuple(
         helper.make_tensor_value_info(
             f"{output.name}_relu",
-            TensorProto.FLOAT16,
+            onnx_dtype,
             [batch_size, size],
         )
         for output, size in zip(split_outputs, sizes)
@@ -243,6 +248,7 @@ def test_imported_split_deploys_three_consumer_branches_deterministically(
 
     bundles = []
     serialized_payloads = []
+    serialized_bytes = []
     for build_index in range(2):
         rewritten_model, rewrite_effects = run_graph_rewrites_with_effects(model)
         specialization = magia.specialize(
@@ -266,10 +272,11 @@ def test_imported_split_deploys_three_consumer_branches_deterministically(
         serialized_payloads.append(
             json.loads(output_json.read_text(encoding="utf-8"))
         )
+        serialized_bytes.append(output_json.read_bytes())
 
     first_bundle, second_bundle = bundles
-    first = first_bundle.execution_plan
-    second = second_bundle.execution_plan
+    first_execution_plan = first_bundle.execution_plan
+    second_execution_plan = second_bundle.execution_plan
     specialization_graph = first_bundle.graph
 
     split, *consumers = specialization_graph.nodes
@@ -279,10 +286,14 @@ def test_imported_split_deploys_three_consumer_branches_deterministically(
         for node in specialization_graph.nodes
         if isinstance(node.payload, SplitPayload)
     ) == (split,)
+    assert not any(
+        isinstance(node.payload, StaticSlicePayload)
+        for node in specialization_graph.nodes
+    )
     assert first_bundle.rewrite_report.events == ()
     stage_id_by_node = {
         id(layer.node): stage_id
-        for stage_id, stage in enumerate(first.stages)
+        for stage_id, stage in enumerate(first_execution_plan.stages)
         for layer in stage.layers
     }
     branch_stage_ids = (
@@ -290,29 +301,62 @@ def test_imported_split_deploys_three_consumer_branches_deterministically(
         *(stage_id_by_node[id(node)] for node in consumers),
     )
     assert len(set(branch_stage_ids)) == 4
-    branch_stages = tuple(first.stages[stage_id] for stage_id in branch_stage_ids[1:])
+    split_stage = first_execution_plan.stages[branch_stage_ids[0]]
+    split_layer = split_stage.layers[0]
+    assert tuple(
+        layer
+        for stage in first_execution_plan.stages
+        for layer in stage.layers
+        if isinstance(layer.node.payload, SplitPayload)
+    ) == (split_layer,)
+    assert not any(
+        isinstance(layer.node.payload, StaticSlicePayload)
+        for stage in first_execution_plan.stages
+        for layer in stage.layers
+    )
+    branch_stages = tuple(
+        first_execution_plan.stages[stage_id]
+        for stage_id in branch_stage_ids[1:]
+    )
+    branch_output_layouts = tuple(
+        stage.layers[0].outputs[0].layout
+        for stage in branch_stages
+    )
     assert tuple(stage.submesh.num_tiles for stage in branch_stages) == (1, 1, 2)
     assert tuple(
         (
-            stage.layers[0].outputs[0].layout.effective_logical_width,
-            stage.layers[0].outputs[0].layout.effective_logical_height,
+            layout.effective_logical_width,
+            layout.effective_logical_height,
         )
-        for stage in branch_stages
+        for layout in branch_output_layouts
     ) == ((1, 1), (1, 1), (2, 1))
     assert len({stage.submesh.tile_ids for stage in branch_stages}) == 3
     assert tuple(
-        first.tensors[transition.tensor_id]
-        for transition in first.transitions
+        first_execution_plan.tensors[transition.tensor_id]
+        for transition in first_execution_plan.transitions
         if isinstance(transition, IntermediateTransition)
     ) == split.outputs
-    split_layer = first.stages[stage_id_by_node[id(split)]].layers[0]
+    transition_id_by_tensor = {
+        first_execution_plan.tensors[transition.tensor_id]: transition_id
+        for transition_id, transition in enumerate(first_execution_plan.transitions)
+        if isinstance(transition, IntermediateTransition)
+    }
+    for output, consumer in zip(split.outputs, consumers):
+        transition_id = transition_id_by_tensor[output]
+        transition = first_execution_plan.transitions[transition_id]
+        consumer_stage_id = stage_id_by_node[id(consumer)]
+        assert isinstance(transition, IntermediateTransition)
+        assert transition.destination_stage_id == consumer_stage_id
+        assert first_execution_plan.stages[consumer_stage_id].layers[
+            0
+        ].inputs[0].source == TransitionSource(transition_id)
     assert split_layer.node == split
     assert split_layer.source_operation == "split"
     assert split_layer.device_name == "core"
-    assert tuple(first.tensors[output.tensor_id] for output in split_layer.outputs) == (
-        split.outputs
-    )
-    split_stage = first.stages[stage_id_by_node[id(split)]]
+    assert tuple(
+        first_execution_plan.tensors[output.tensor_id]
+        for output in split_layer.outputs
+    ) == split.outputs
     split_output_layouts = tuple(output.layout for output in split_layer.outputs)
     assert all(
         layout.submesh == split_output_layouts[0].submesh
@@ -331,9 +375,9 @@ def test_imported_split_deploys_three_consumer_branches_deterministically(
     )
     remapped_transition = next(
         transition
-        for transition in first.transitions
+        for transition in first_execution_plan.transitions
         if isinstance(transition, IntermediateTransition)
-        and first.tensors[transition.tensor_id] == split.outputs[2]
+        and first_execution_plan.tensors[transition.tensor_id] == split.outputs[2]
     )
     assert tuple(
         (
@@ -360,23 +404,26 @@ def test_imported_split_deploys_three_consumer_branches_deterministically(
         for destination_tile_id, destination_column in ((4, 0), (5, 1))
     )
     assert tuple(
-        first.tensors[transition.tensor_id]
-        for transition in first.transitions
+        first_execution_plan.tensors[transition.tensor_id]
+        for transition in first_execution_plan.transitions
         if isinstance(transition, OutputTransition)
     ) == specialization_graph.outputs
     assert first_bundle.graph == second_bundle.graph
     assert first_bundle.rewrite_report == second_bundle.rewrite_report
-    assert first == second
-    assert first.transitions == second.transitions
+    assert first_execution_plan == second_execution_plan
+    assert first_execution_plan.transitions == second_execution_plan.transitions
     assert serialized_payloads[0] == serialized_payloads[1]
+    assert serialized_bytes[0] == serialized_bytes[1]
 
     serialized_plan = serialized_payloads[0]
-    serialized_split_layer = next(
+    serialized_split_layers = tuple(
         layer
         for stage in serialized_plan["stages"]
         for layer in stage["layers"]
         if layer["node"]["name"] == "split"
     )
+    assert len(serialized_split_layers) == 1
+    serialized_split_layer = serialized_split_layers[0]
     assert serialized_split_layer["node"]["payload"]["work_kind"] == "SPLIT"
     assert serialized_split_layer["node"]["payload"]["axis"] == 1
     assert serialized_split_layer["node"]["payload"]["sizes"] == [1, 10, 100]
@@ -385,14 +432,36 @@ def test_imported_split_deploys_three_consumer_branches_deterministically(
     assert [
         output["tensor_id"] for output in serialized_split_layer["outputs"]
     ] == [specialization_graph.tensors.index(output) for output in split.outputs]
-    assert all("layout" in output for output in serialized_split_layer["outputs"])
+    for serialized_output, planned_output in zip(
+        serialized_split_layer["outputs"],
+        split_layer.outputs,
+    ):
+        layout = planned_output.layout
+        serialized_layout = serialized_output["layout"]
+        assert (
+            serialized_layout["submesh"]["submesh_id"]
+            == layout.submesh.submesh_id
+        )
+        assert serialized_layout["submesh"]["tile_ids"] == sorted(
+            layout.submesh.tile_ids
+        )
+        assert serialized_layout["mesh_x"] == {
+            "mode": layout.mesh_x.mode,
+            "tensor_axis": layout.mesh_x.tensor_axis,
+        }
+        assert serialized_layout["mesh_y"] == {
+            "mode": layout.mesh_y.mode,
+            "tensor_axis": layout.mesh_y.tensor_axis,
+        }
+        assert serialized_layout["logical_width"] == layout.logical_width
+        assert serialized_layout["logical_height"] == layout.logical_height
     assert [
-        first.tensors[transition["tensor_id"]].name
+        first_execution_plan.tensors[transition["tensor_id"]].name
         for transition in serialized_plan["transitions"]
         if transition["kind"] == "INTERMEDIATE"
     ] == ["q", "k", "v"]
     assert [
-        first.tensors[transition["tensor_id"]].name
+        first_execution_plan.tensors[transition["tensor_id"]].name
         for transition in serialized_plan["transitions"]
         if transition["kind"] == "OUTPUT"
     ] == ["q_relu", "k_relu", "v_relu"]
@@ -611,8 +680,18 @@ def test_public_planning_rejects_an_undeclared_split_signature(
         )
 
 
-def test_imported_split_rejects_an_undeclared_arity_with_node_signature() -> None:
-    model = _onnx_split_model(sizes=(2, 2))
+@pytest.mark.parametrize(
+    ("sizes", "dtype"),
+    (
+        ((2, 2), TensorDType.FLOAT16),
+        ((1, 3, 3), TensorDType.INT32),
+    ),
+)
+def test_imported_split_rejects_an_undeclared_signature_with_node_diagnostic(
+    sizes: tuple[int, ...],
+    dtype: TensorDType,
+) -> None:
+    model = _onnx_split_model(sizes=sizes, dtype=dtype)
     mesh = magia.build_mesh(width=1, height=1)
     rewritten_model, _ = run_graph_rewrites_with_effects(model)
     specialization = magia.specialize(
@@ -635,5 +714,5 @@ def test_imported_split_rejects_an_undeclared_arity_with_node_signature() -> Non
     assert "node split" in message
     assert "WorkSignature" in message
     assert "WorkKind.SPLIT" in message
-    assert "output_dtypes=(<TensorDType.FLOAT16" in message
+    assert repr(dtype) in message
     assert "no fixed assignment" in message
