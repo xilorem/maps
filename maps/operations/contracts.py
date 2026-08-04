@@ -10,6 +10,7 @@ from maps.planning.mapping import (
     LayoutAxis,
     LayoutAxisMode,
     TensorLayout,
+    TensorSlice,
     TensorSliceRef,
 )
 from maps.planning.mapping import Submesh
@@ -70,6 +71,20 @@ class OpCostModel(ABC):
 
         del tile_work, tile, assigned_device, participants
         raise ValueError("operation is not a synchronous collective")
+
+
+def input_slices_for_tensor(
+    tile_work: TileWork,
+    tensor: Tensor,
+) -> tuple[TensorSlice, ...]:
+    """Return every non-empty input region required for one Tensor identity."""
+
+    return tuple(
+        reference.tensor_slice
+        for reference in tile_work.input_slices
+        if reference.tensor is tensor
+        and reference.tensor_slice.num_elements > 0
+    )
 
 
 class OpPayload(OperationPayload):

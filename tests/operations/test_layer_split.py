@@ -123,3 +123,8 @@ def test_split_maps_every_sharded_output_to_its_offset_input_region() -> None:
         frozenset(),
         num_token_slots=2,
     ) == 56
+    assert permanent_l1_allocation_for_tile_work(
+        (tile_work,),
+        frozenset({x}),
+        num_token_slots=2,
+    ) == 40

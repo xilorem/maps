@@ -9,7 +9,7 @@ from typing import cast
 
 from maps.graph import Graph, Node, Tensor
 from maps.hardware import EndpointKind, Mesh, Tile, WorkSignature
-from maps.operations.contracts import OpPayload
+from maps.operations.contracts import OpPayload, input_slices_for_tensor
 from maps.planning.allocation.candidates import (
     permanent_l1_allocation_bytes,
     stage_l1_allocation_bytes,
@@ -763,12 +763,7 @@ def infer_input_slice_for_tile(
             output_layouts=output_layouts,
             tile=tile,
         )
-        matching_slices = tuple(
-            reference.tensor_slice
-            for reference in tile_work.input_slices
-            if tensor == reference.tensor
-            and reference.tensor_slice.num_elements > 0
-        )
+        matching_slices = input_slices_for_tensor(tile_work, tensor)
         if matching_slices:
             return bounding_tensor_slice(matching_slices)
     return _default_tensor_slice(tensor)

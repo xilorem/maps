@@ -14,7 +14,7 @@ from maps.planning.mapping import (
     bounding_tensor_slice,
     tile_tensor_slice,
 )
-from maps.operations.contracts import OpPayload
+from maps.operations.contracts import OpPayload, input_slices_for_tensor
 from maps.planning.stages import node_output_index, node_output_layouts
 from maps.planning.stages import StagePlacement, StagePlan
 
@@ -310,10 +310,8 @@ def _required_input_slices(
             tile=tile,
         )
         destinations.extend(
-            (tile, reference.tensor_slice)
-            for reference in tile_work.input_slices
-            if reference.tensor is tensor
-            and reference.tensor_slice.num_elements > 0
+            (tile, tensor_slice)
+            for tensor_slice in input_slices_for_tensor(tile_work, tensor)
         )
     return tuple(destinations)
 

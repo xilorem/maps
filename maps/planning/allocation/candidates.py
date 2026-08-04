@@ -8,7 +8,12 @@ from typing import cast
 from maps.hardware import Mesh, Tile, WorkSignature
 from maps.graph import Node
 from maps.graph import Tensor
-from maps.operations.contracts import OpPayload, TileWork, find_layout_relation
+from maps.operations.contracts import (
+    OpPayload,
+    TileWork,
+    find_layout_relation,
+    input_slices_for_tensor,
+)
 from maps.operations.collective import AllReducePayload
 from maps.planning.mapping import (
     TensorLayout,
@@ -489,13 +494,24 @@ def permanent_l1_allocation_for_tile_work(
     allocated_resident_tensors: set[Tensor] = set()
     allocation_sizes = []
     for work in tile_work:
+        allocated_initializer_tensors: set[Tensor] = set()
         for reference in work.input_slices:
             if reference.tensor_slice.num_elements == 0:
                 continue
             if reference.tensor in produced_tensors:
                 continue
             if _is_initializer(reference.tensor, initializer_tensors):
-                allocation_sizes.append(reference.num_bytes)
+                if reference.tensor in allocated_initializer_tensors:
+                    continue
+                allocated_initializer_tensors.add(reference.tensor)
+                allocation_sizes.append(
+                    tensor_slice_num_bytes(
+                        reference.tensor,
+                        bounding_tensor_slice(
+                            input_slices_for_tensor(work, reference.tensor)
+                        ),
+                    )
+                )
                 continue
             if reference.tensor in allocated_resident_tensors:
                 continue

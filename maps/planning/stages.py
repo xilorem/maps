@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 from maps.graph import Graph, Node, Tensor
 from maps.hardware import Tile
-from maps.operations.contracts import find_layout_relation
+from maps.operations.contracts import find_layout_relation, input_slices_for_tensor
 from maps.planning.mapping import (
     LayoutAxisMode,
     Submesh,
@@ -446,12 +446,7 @@ def required_input_slices(
             output_layouts=destination_output_layouts,
             tile=tile,
         )
-        matching_slices = tuple(
-            reference.tensor_slice
-            for reference in tile_work.input_slices
-            if reference.tensor is tensor
-            and reference.tensor_slice.num_elements > 0
-        )
+        matching_slices = input_slices_for_tensor(tile_work, tensor)
         if matching_slices:
             required_slices.append((tile, bounding_tensor_slice(matching_slices)))
     return tuple(required_slices)
