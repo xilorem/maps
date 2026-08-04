@@ -72,6 +72,26 @@ def _split_model(
     )
 
 
+def _relu(name: str, tensor: Tensor) -> tuple[Node, Tensor]:
+    output = Tensor(
+        f"{name}_output",
+        tensor.rank,
+        tensor.dims,
+        tensor.elem_bytes,
+        dtype=tensor.dtype,
+    )
+    return (
+        Node(
+            name,
+            OpKind.CUSTOM,
+            inputs=(tensor,),
+            outputs=(output,),
+            payload=UnaryElementwisePayload("relu", tensor, output),
+        ),
+        output,
+    )
+
+
 def _onnx_split_model(
     *,
     batch_size: int = 2,
@@ -267,24 +287,7 @@ def test_imported_split_plans_three_consumer_branches_deterministically() -> Non
 def test_split_fuses_with_one_local_consumer_without_an_intermediate_transition() -> None:
     split_model = _split_model()
     split = split_model.graph.nodes[0]
-    local_output = Tensor(
-        "local_output",
-        split.outputs[0].rank,
-        split.outputs[0].dims,
-        split.outputs[0].elem_bytes,
-        dtype=split.outputs[0].dtype,
-    )
-    consumer = Node(
-        "local_consumer",
-        OpKind.CUSTOM,
-        inputs=(split.outputs[0],),
-        outputs=(local_output,),
-        payload=UnaryElementwisePayload(
-            "relu",
-            split.outputs[0],
-            local_output,
-        ),
-    )
+    consumer, local_output = _relu("local_consumer", split.outputs[0])
     graph = Graph(
         "split_with_local_consumer",
         tensors=(*split_model.graph.tensors, local_output),
@@ -329,30 +332,19 @@ def test_split_fuses_with_one_local_consumer_without_an_intermediate_transition(
 def test_split_branches_share_destination_residency_and_fan_out_per_stage() -> None:
     split_model = _split_model()
     split = split_model.graph.nodes[0]
-
-    def relu(name: str, tensor: Tensor) -> tuple[Node, Tensor]:
-        output = Tensor(
-            f"{name}_output",
-            tensor.rank,
-            tensor.dims,
-            tensor.elem_bytes,
-            dtype=tensor.dtype,
-        )
-        return (
-            Node(
-                name,
-                OpKind.CUSTOM,
-                inputs=(tensor,),
-                outputs=(output,),
-                payload=UnaryElementwisePayload("relu", tensor, output),
-            ),
-            output,
-        )
-
-    local_consumer, local_output = relu("local_consumer", split.outputs[1])
-    shared_consumer0, shared_output0 = relu("shared_consumer0", split.outputs[0])
-    shared_consumer1, shared_output1 = relu("shared_consumer1", split.outputs[0])
-    remote_consumer, remote_output = relu("remote_consumer", split.outputs[0])
+    local_consumer, local_output = _relu("local_consumer", split.outputs[1])
+    shared_consumer0, shared_output0 = _relu(
+        "shared_consumer0",
+        split.outputs[0],
+    )
+    shared_consumer1, shared_output1 = _relu(
+        "shared_consumer1",
+        split.outputs[0],
+    )
+    remote_consumer, remote_output = _relu(
+        "remote_consumer",
+        split.outputs[0],
+    )
     consumers = (
         local_consumer,
         shared_consumer0,
