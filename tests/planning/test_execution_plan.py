@@ -3,7 +3,7 @@ from pathlib import Path
 
 from maps.graph import TensorDType
 from maps.graph import Edge, Graph, Node, OpKind
-from maps.planning.mapping import Submesh
+from maps.planning.mapping import LayoutAxis, LayoutAxisMode, Submesh, TensorLayout
 from maps.graph import Tensor
 from maps.target.magia import build_mesh as magia_mesh
 from maps.operations.gemm import GemmPayload
@@ -57,8 +57,6 @@ def _placement(
 
 
 def test_execution_plan_serializes_shard_granularity_for_every_layout_axis() -> None:
-    from maps.planning.mapping import LayoutAxis, LayoutAxisMode, TensorLayout
-
     mesh = magia_mesh(width=2, height=1)
     submesh = Submesh(mesh, 0, frozenset((0, 1)))
     tensor = Tensor("flattened_rows", 1, (9,), 2)
