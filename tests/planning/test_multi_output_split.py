@@ -72,14 +72,18 @@ def _split_model(
     )
 
 
-def _relu(name: str, tensor: Tensor) -> tuple[Node, Tensor]:
-    output = Tensor(
-        f"{name}_output",
+def _tensor_like(name: str, tensor: Tensor) -> Tensor:
+    return Tensor(
+        name,
         tensor.rank,
         tensor.dims,
         tensor.elem_bytes,
         dtype=tensor.dtype,
     )
+
+
+def _relu(name: str, tensor: Tensor) -> tuple[Node, Tensor]:
+    output = _tensor_like(f"{name}_output", tensor)
     return (
         Node(
             name,
@@ -264,7 +268,7 @@ def test_imported_split_plans_three_consumer_branches_deterministically() -> Non
         for transition in first.transitions
         if isinstance(transition, IntermediateTransition)
     ) == split.outputs
-    differently_sharded = next(
+    remapped_transition = next(
         transition
         for transition in first.transitions
         if isinstance(transition, IntermediateTransition)
@@ -277,7 +281,7 @@ def test_imported_split_plans_three_consumer_branches_deterministically() -> Non
             transfer.source_subslice.dims,
             transfer.destination_subslice.dims,
         )
-        for transfer in differently_sharded.transfers
+        for transfer in remapped_transition.transfers
     ) == tuple(
         (
             source_tile_id,
@@ -362,12 +366,9 @@ def test_split_branches_share_destination_residency_and_fan_out_per_stage() -> N
         "shared_consumer0",
         split.outputs[0],
     )
-    shared_output1 = Tensor(
+    shared_output1 = _tensor_like(
         "shared_consumer1_output",
-        split.outputs[0].rank,
-        split.outputs[0].dims,
-        split.outputs[0].elem_bytes,
-        dtype=split.outputs[0].dtype,
+        split.outputs[0],
     )
     shared_consumer1 = Node(
         "shared_consumer1",
