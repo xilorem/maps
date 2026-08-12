@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from hashlib import sha256
 import json
 from pathlib import Path
 import shutil
@@ -532,6 +533,176 @@ def test_build_application_leaves_no_partial_output_after_backend_failure(
 
     assert not output.exists()
     assert not list(tmp_path.glob(".failed-application.staging-*"))
+
+
+def test_build_application_regenerates_owned_files_and_preserves_user_work(
+    tmp_path: Path,
+) -> None:
+    repository = Path(__file__).parents[2]
+    output = tmp_path / "application"
+    application = build_application(
+        repository / "examples" / "simple_three_stage.onnx",
+        output,
+        name="Regenerated Demo",
+        mesh_width=4,
+        mesh_height=4,
+    )
+    customization = b"/* developer customization */\n"
+    notes = b"developer notes\x00remain byte-identical\n"
+    (application / "src/application.c").write_bytes(customization)
+    (application / "developer/private").mkdir(parents=True)
+    (application / "developer/private/notes.bin").write_bytes(notes)
+
+    stale = application / "src/obsolete_generated.c"
+    stale_contents = b"/* stale generated source */\n"
+    stale.write_bytes(stale_contents)
+    manifest_path = application / "manifest.json"
+    previous_manifest = json.loads(manifest_path.read_text())
+    previous_tiles = set(previous_manifest["active_physical_tiles"])
+    previous_readme = (application / "README.md").read_bytes()
+    previous_manifest["files"]["generated"].append(
+        {
+            "path": "src/obsolete_generated.c",
+            "role": "model_data",
+            "byte_size": len(stale_contents),
+            "sha256": sha256(stale_contents).hexdigest(),
+        }
+    )
+    manifest_path.write_text(json.dumps(previous_manifest))
+
+    model = _write_two_input_model(tmp_path / "changed-interface.onnx")
+    regenerated = build_application(
+        model,
+        output,
+        name="Regenerated Demo",
+        mesh_width=4,
+        mesh_height=4,
+        num_token_slots=3,
+    )
+
+    assert regenerated == output
+    assert (regenerated / "src/application.c").read_bytes() == customization
+    assert (regenerated / "developer/private/notes.bin").read_bytes() == notes
+    assert (regenerated / "README.md").read_bytes() != previous_readme
+    assert not (regenerated / "src/obsolete_generated.c").exists()
+    manifest = validate_application(regenerated)
+    active_tiles = set(manifest["active_physical_tiles"])
+    assert manifest["execution"]["token_slots"] == 3
+    assert [
+        tensor["original_name"] for tensor in manifest["tensors"]["inputs"]
+    ] == ["lhs/value", "rhs value"]
+    assert active_tiles < previous_tiles
+    assert all(
+        not (regenerated / f"src/tiles/tile_{tile:02d}.c").exists()
+        for tile in previous_tiles - active_tiles
+    )
+    assert not list(tmp_path.glob(".application.staging-*"))
+
+
+def test_build_application_rejects_an_invalid_existing_directory_unchanged(
+    tmp_path: Path,
+) -> None:
+    repository = Path(__file__).parents[2]
+    output = tmp_path / "application"
+    output.mkdir()
+    developer_file = output / "developer.txt"
+    developer_file.write_bytes(b"do not touch\n")
+
+    with pytest.raises(ValueError, match="manifest"):
+        build_application(
+            repository / "examples" / "simple_three_stage.onnx",
+            output,
+            mesh_width=4,
+            mesh_height=4,
+        )
+
+    assert developer_file.read_bytes() == b"do not touch\n"
+    assert set(output.iterdir()) == {developer_file}
+    assert not list(tmp_path.glob(".application.staging-*"))
+
+
+def test_build_application_backend_failure_preserves_existing_application(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    repository = Path(__file__).parents[2]
+    output = build_application(
+        repository / "examples" / "simple_three_stage.onnx",
+        tmp_path / "application",
+        mesh_width=4,
+        mesh_height=4,
+    )
+    before = {
+        path.relative_to(output): path.read_bytes()
+        for path in output.rglob("*")
+        if path.is_file()
+    }
+
+    def fail_backend(*args, **kwargs):
+        raise subprocess.CalledProcessError(1, args[0], stderr="backend failed")
+
+    monkeypatch.setattr(application_module.subprocess, "run", fail_backend)
+
+    with pytest.raises(RuntimeError, match="MAGIA Application generation failed"):
+        build_application(
+            repository / "examples" / "simple_three_stage.onnx",
+            output,
+            mesh_width=4,
+            mesh_height=4,
+        )
+
+    after = {
+        path.relative_to(output): path.read_bytes()
+        for path in output.rglob("*")
+        if path.is_file()
+    }
+    assert after == before
+    assert validate_application(output)
+    assert not list(tmp_path.glob(".application.staging-*"))
+
+
+def test_build_application_verification_failure_preserves_existing_application(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    repository = Path(__file__).parents[2]
+    output = build_application(
+        repository / "examples" / "simple_three_stage.onnx",
+        tmp_path / "application",
+        mesh_width=4,
+        mesh_height=4,
+    )
+    manifest_before = (output / "manifest.json").read_bytes()
+
+    validate_generated_application = (
+        application_module._validate_generated_application
+    )
+    validation_count = 0
+
+    def reject_merged_application(*args, **kwargs):
+        nonlocal validation_count
+        validation_count += 1
+        if validation_count == 2:
+            raise ValueError("generated application verification failed")
+        return validate_generated_application(*args, **kwargs)
+
+    monkeypatch.setattr(
+        application_module,
+        "_validate_generated_application",
+        reject_merged_application,
+    )
+
+    with pytest.raises(ValueError, match="verification failed"):
+        build_application(
+            repository / "examples" / "simple_three_stage.onnx",
+            output,
+            mesh_width=4,
+            mesh_height=4,
+        )
+
+    assert (output / "manifest.json").read_bytes() == manifest_before
+    assert validate_application(output)
+    assert not list(tmp_path.glob(".application.staging-*"))
 
 
 def test_build_application_leaves_no_partial_output_after_validation_failure(

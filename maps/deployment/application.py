@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ctypes
 import os
 from pathlib import Path
 import shutil
@@ -21,6 +22,10 @@ from .application_validation import (
     validate_application as _validate_application,
 )
 from .workflow import build_magia_deployment_bundle
+
+
+_AT_FDCWD = -100
+_RENAME_EXCHANGE = 2
 
 
 def normalize_application_name(value: str) -> str:
@@ -178,6 +183,74 @@ def _prepare_runtime_inputs(
     return (next(iter(token_counts), 1), tuple(supplied))
 
 
+def _generated_file_paths(manifest: dict[str, Any]) -> tuple[Path, ...]:
+    return tuple(
+        Path(*record["path"].split("/"))
+        for record in manifest["files"]["generated"]
+    )
+
+
+def _prepare_regenerated_application(
+    previous: Path,
+    previous_manifest: dict[str, Any],
+    generated: Path,
+    generated_manifest: dict[str, Any],
+    destination: Path,
+) -> None:
+    shutil.copytree(previous, destination, symlinks=True)
+    for relative in _generated_file_paths(previous_manifest):
+        (destination / relative).unlink()
+
+    for relative in _generated_file_paths(generated_manifest):
+        target = destination / relative
+        parent = destination
+        for part in relative.parts[:-1]:
+            parent /= part
+            if parent.is_symlink() or (parent.exists() and not parent.is_dir()):
+                raise ValueError(
+                    f"generated file conflicts with developer path '{relative}'"
+                )
+            parent.mkdir(exist_ok=True)
+        if target.exists() or target.is_symlink():
+            raise ValueError(
+                f"generated file conflicts with developer path '{relative}'"
+            )
+        shutil.copy2(generated / relative, target)
+    shutil.copy2(generated / "manifest.json", destination / "manifest.json")
+
+
+def _publish_application(
+    candidate: Path,
+    output: Path,
+    *,
+    replace_existing: bool,
+) -> None:
+    if not replace_existing:
+        if output.exists() or output.is_symlink():
+            raise FileExistsError(f"application output already exists: {output}")
+        os.replace(candidate, output)
+        return
+
+    renameat2 = ctypes.CDLL(None, use_errno=True).renameat2
+    renameat2.argtypes = (
+        ctypes.c_int,
+        ctypes.c_char_p,
+        ctypes.c_int,
+        ctypes.c_char_p,
+        ctypes.c_uint,
+    )
+    renameat2.restype = ctypes.c_int
+    if renameat2(
+        _AT_FDCWD,
+        os.fsencode(candidate),
+        _AT_FDCWD,
+        os.fsencode(output),
+        _RENAME_EXCHANGE,
+    ) != 0:
+        error = ctypes.get_errno()
+        raise OSError(error, os.strerror(error), output)
+
+
 def build_application(
     model_path: str | Path,
     output_dir: str | Path | None = None,
@@ -203,8 +276,8 @@ def build_application(
         if output_dir is not None
         else Path("build") / application_name
     )
-    if output.exists():
-        raise FileExistsError(f"application output already exists: {output}")
+    output_exists = output.exists() or output.is_symlink()
+    previous_manifest = validate_application(output) if output_exists else None
 
     plan_import = _default_compiler_tool("maps-plan-import")
     codegen = _default_compiler_tool("maps-codegen")
@@ -257,7 +330,7 @@ def build_application(
             for input_name, input_path in runtime_inputs
         )
         _run_backend(codegen_arguments)
-        _validate_generated_application(
+        generated_manifest = _validate_generated_application(
             application,
             name=application_name,
             mesh_width=mesh_width,
@@ -265,9 +338,29 @@ def build_application(
             num_token_slots=num_token_slots,
             execution_tokens=execution_tokens,
         )
-        if output.exists():
-            raise FileExistsError(f"application output already exists: {output}")
-        os.replace(application, output)
+        candidate = application
+        if previous_manifest is not None:
+            candidate = staging_parent / "regenerated-application"
+            _prepare_regenerated_application(
+                output,
+                previous_manifest,
+                application,
+                generated_manifest,
+                candidate,
+            )
+            _validate_generated_application(
+                candidate,
+                name=application_name,
+                mesh_width=mesh_width,
+                mesh_height=mesh_height,
+                num_token_slots=num_token_slots,
+                execution_tokens=execution_tokens,
+            )
+        _publish_application(
+            candidate,
+            output,
+            replace_existing=previous_manifest is not None,
+        )
     finally:
         shutil.rmtree(staging_parent, ignore_errors=True)
     return output
