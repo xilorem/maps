@@ -31,7 +31,13 @@ class _TensorFacts(NamedTuple):
 
 def read_application_manifest(application: Path) -> dict[str, Any]:
     manifest_path = application / "manifest.json"
-    if not manifest_path.is_file():
+    if (
+        application.is_symlink()
+        or not application.is_dir()
+        or not manifest_path.is_file()
+        or manifest_path.is_symlink()
+        or not manifest_path.resolve().is_relative_to(application.resolve())
+    ):
         raise ValueError("generated application has no manifest.json")
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -365,6 +371,22 @@ def _validate_files(
     if actual_tiles != expected_tiles:
         raise ValueError("application active tile files are inconsistent")
     generated_by_path = {record["path"]: record for record in generated}
+    expected_roles = {
+        "CMakeLists.txt": "build_definition",
+        "README.md": "integration_guide",
+        f"include/{name}.h": "model_interface",
+        f"src/{name}.c": "model_data",
+        f"src/{name}_runner.c": "application_runner",
+        f"src/{name}_initializers.S.in": "initializer_assembly",
+        f"data/{name}.initializers.bin": "initializer_data",
+        **{tile: "tile_plan" for tile in expected_tiles},
+        **{supplied: "runtime_input_data" for supplied in supplied_tensor_bytes},
+    }
+    if any(
+        generated_by_path[path]["role"] != role
+        for path, role in expected_roles.items()
+    ):
+        raise ValueError("application generated file roles are inconsistent")
     for supplied_path, tensor_bytes in supplied_tensor_bytes.items():
         record = generated_by_path.get(supplied_path)
         if record is None:

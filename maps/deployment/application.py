@@ -78,10 +78,6 @@ def _run_backend(arguments: list[str]) -> None:
         raise RuntimeError("MAGIA Application generation failed") from exc
 
 
-def _application_manifest(application: Path) -> dict[str, Any]:
-    return read_application_manifest(application)
-
-
 def validate_application(application: str | Path) -> dict[str, Any]:
     return _validate_application(
         application,
@@ -281,7 +277,7 @@ def application_build_summary(application: str | Path) -> str:
     """Return the concise successful-build handoff for an application."""
 
     path = Path(application)
-    manifest = _application_manifest(path)
+    manifest = read_application_manifest(path)
     identity = manifest["application"]
     mesh = manifest["planned_mesh"]
     execution = manifest["execution"]

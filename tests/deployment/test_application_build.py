@@ -254,6 +254,13 @@ def test_validate_application_rejects_inconsistent_input_tokens_and_symlinked_pa
     with pytest.raises(ValueError, match="missing generated file"):
         validate_application(escaped)
 
+    external_manifest = tmp_path / "external-manifest.json"
+    shutil.copy(original / "manifest.json", external_manifest)
+    (original / "manifest.json").unlink()
+    (original / "manifest.json").symlink_to(external_manifest)
+    with pytest.raises(ValueError, match="no manifest.json"):
+        validate_application(original)
+
 
 def test_build_application_derives_tokens_and_embeds_supplied_runtime_input(
     tmp_path: Path,
