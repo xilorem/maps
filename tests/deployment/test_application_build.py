@@ -39,6 +39,15 @@ def test_build_application_publishes_a_named_magia_application(
     assert list(application.rglob("*.json")) == [application / "manifest.json"]
     assert not list(application.rglob("*.mlir"))
     assert not list(tmp_path.glob(".chosen-location.staging-*"))
+    tile_sources = sorted((application / "src" / "tiles").glob("tile_*.c"))
+    assert [source.name for source in tile_sources] == [
+        f"tile_{tile_id:02d}.c"
+        for tile_id in manifest["active_physical_tiles"]
+    ]
+    tile_text = "\n".join(source.read_text() for source in tile_sources)
+    assert "static const slice_desc_t" in tile_text
+    assert "static const op_desc_t" in tile_text
+    assert ".num_token_slots = THREE_STAGE_DEMO_NUM_TOKEN_SLOTS" in tile_text
 
 
 def test_build_command_uses_the_default_output_and_reports_sdk_handoff(
