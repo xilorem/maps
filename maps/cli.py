@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 import subprocess
 import sys
@@ -11,9 +12,11 @@ from types import ModuleType
 from maps.deployment import (
     MAGIA_V2_TARGET,
     application_build_summary,
+    application_summary,
     build_application,
     package_summary,
     validate_deployment_package,
+    validate_application,
     write_deployment_package,
 )
 from maps.deployment.serialization import write_execution_plan_json
@@ -51,7 +54,11 @@ def _build_parser() -> argparse.ArgumentParser:
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("build", help="build a MAGIA Application")
     commands.add_parser("plan", help="plan a model and write an Execution Plan")
-    commands.add_parser("package", help="build, inspect, or verify a deployment package")
+    commands.add_parser("inspect", help="inspect a MAGIA Application")
+    commands.add_parser("verify", help="verify a MAGIA Application")
+    commands.add_parser(
+        "package", help="build, inspect, or verify a deployment package"
+    )
     return parser
 
 
@@ -113,6 +120,14 @@ def _package_read_parser(action: str) -> argparse.ArgumentParser:
     return parser
 
 
+def _application_read_parser(action: str) -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog=f"maps {action}")
+    if action == "inspect":
+        parser.add_argument("--json", action="store_true", dest="as_json")
+    parser.add_argument("application", type=Path)
+    return parser
+
+
 def _mesh_options(shape: tuple[int, int] | None) -> dict[str, int]:
     if shape is None:
         return {}
@@ -165,6 +180,23 @@ def _run_build(arguments: list[str]) -> int:
     return 0
 
 
+def _run_inspect(arguments: list[str]) -> int:
+    options = _application_read_parser("inspect").parse_args(arguments)
+    manifest = validate_application(options.application)
+    if options.as_json:
+        print(json.dumps(manifest, indent=2, sort_keys=True))
+    else:
+        print(application_summary(options.application))
+    return 0
+
+
+def _run_verify(arguments: list[str]) -> int:
+    options = _application_read_parser("verify").parse_args(arguments)
+    validate_application(options.application)
+    print(f"Valid MAGIA Application: {options.application}")
+    return 0
+
+
 def _run_plan(arguments: list[str]) -> int:
     options = _plan_parser().parse_args(arguments)
     target = _TARGETS[options.target]
@@ -195,7 +227,9 @@ def main(arguments: list[str] | None = None) -> int:
     try:
         commands = {
             "build": _run_build,
+            "inspect": _run_inspect,
             "plan": _run_plan,
+            "verify": _run_verify,
             "package": _run_package,
         }
         if arguments and (command := commands.get(arguments[0])) is not None:

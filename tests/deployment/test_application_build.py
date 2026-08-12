@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import shutil
 import subprocess
 
 import onnx
@@ -9,7 +10,7 @@ from onnx import TensorProto, helper
 import pytest
 
 from maps.cli import main
-from maps.deployment import build_application
+from maps.deployment import build_application, validate_application
 import maps.deployment.application as application_module
 
 
@@ -66,6 +67,138 @@ def test_build_application_publishes_a_named_magia_application(
     assert ".num_token_slots = THREE_STAGE_DEMO_NUM_TOKEN_SLOTS" in tile_text
 
 
+def test_validate_application_checks_generated_files_but_permits_user_work(
+    tmp_path: Path,
+) -> None:
+    repository = Path(__file__).parents[2]
+    application = build_application(
+        repository / "examples" / "simple_three_stage.onnx",
+        tmp_path / "application",
+        mesh_width=4,
+        mesh_height=4,
+    )
+    manifest = json.loads((application / "manifest.json").read_text())
+
+    generated = manifest["files"]["generated"]
+    assert generated
+    assert all(set(record) == {"path", "role", "byte_size", "sha256"}
+               for record in generated)
+    assert manifest["files"]["user_owned"] == [
+        {"path": "src/application.c", "role": "application_source"}
+    ]
+
+    (application / "src/application.c").write_text("/* customized */\n")
+    (application / "developer-notes.txt").write_text("keep me\n")
+
+    assert validate_application(application) == manifest
+
+
+def test_inspect_and_verify_application_commands_report_public_facts(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    model = _write_two_input_model(tmp_path / "runtime-inputs.onnx")
+    application = build_application(
+        model,
+        tmp_path / "application",
+        name="Inspection Demo",
+        mesh_width=4,
+        mesh_height=4,
+        num_token_slots=3,
+    )
+    manifest = json.loads((application / "manifest.json").read_text())
+
+    assert main(["inspect", str(application)]) == 0
+    summary = capsys.readouterr().out
+    assert "MAGIA Application: inspection_demo" in summary
+    assert "Target: magia-v2" in summary
+    assert "Mesh: 4x4" in summary
+    assert "Execution Tokens: 1" in summary
+    assert "Token Slots: 3" in summary
+    assert f"Active tiles: {len(manifest['active_physical_tiles'])}" in summary
+    assert "Runtime Input: lhs/value (lhs_value), float32 [2x2], 16 bytes" in summary
+    assert "Graph output: sum (sum), float32 [2x2], 16 bytes" in summary
+    assert "Operation ABI: 1" in summary
+    assert "Descriptor ABI: 1" in summary
+    assert f"Generated files: {len(manifest['files']['generated'])} verified" in summary
+    assert "User-owned files: 1 present (content not verified)" in summary
+
+    assert main(["inspect", "--json", str(application)]) == 0
+    assert json.loads(capsys.readouterr().out) == manifest
+
+    assert main(["verify", str(application)]) == 0
+    assert f"Valid MAGIA Application: {application}" in capsys.readouterr().out
+
+
+def test_validate_application_rejects_invalid_generated_state_with_diagnostics(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    repository = Path(__file__).parents[2]
+    original = build_application(
+        repository / "examples" / "simple_three_stage.onnx",
+        tmp_path / "original",
+        mesh_width=4,
+        mesh_height=4,
+    )
+    cases = (
+        (
+            "corrupt",
+            lambda application, manifest: (
+                application / manifest["files"]["generated"][0]["path"]
+            ).write_text("corrupt\n"),
+            "generated file byte size mismatch",
+        ),
+        (
+            "missing",
+            lambda application, manifest: (
+                application / manifest["files"]["generated"][0]["path"]
+            ).unlink(),
+            "missing generated file",
+        ),
+        (
+            "duplicate",
+            lambda application, manifest: manifest["files"]["generated"].append(
+                dict(manifest["files"]["generated"][0])
+            ),
+            "duplicate application file record",
+        ),
+        (
+            "unsafe",
+            lambda application, manifest: manifest["files"]["generated"][0].update(
+                path="../outside.c"
+            ),
+            "unsafe application file path",
+        ),
+        (
+            "incompatible",
+            lambda application, manifest: manifest["abi"].update(operation=2),
+            "incompatible application ABI",
+        ),
+        (
+            "inconsistent",
+            lambda application, manifest: manifest["active_physical_tiles"].append(
+                manifest["active_physical_tiles"][0]
+            ),
+            "active physical tiles are invalid or duplicate",
+        ),
+    )
+    for directory, mutate, diagnostic in cases:
+        application = tmp_path / directory
+        shutil.copytree(original, application)
+        manifest_path = application / "manifest.json"
+        manifest = json.loads(manifest_path.read_text())
+        mutate(application, manifest)
+        manifest_path.write_text(json.dumps(manifest))
+
+        with pytest.raises(ValueError, match=diagnostic):
+            validate_application(application)
+        if directory == "corrupt":
+            with pytest.raises(SystemExit):
+                main(["verify", str(application)])
+            assert diagnostic in capsys.readouterr().err
+
+
 def test_build_application_derives_tokens_and_embeds_supplied_runtime_input(
     tmp_path: Path,
 ) -> None:
@@ -95,10 +228,9 @@ def test_build_application_derives_tokens_and_embeds_supplied_runtime_input(
     assert inputs["rhs value"]["data"] == {"kind": "synthetic"}
     embedded = application / inputs["lhs/value"]["data"]["path"]
     assert embedded.read_bytes() == supplied.read_bytes()
-    assert (
-        str(embedded.relative_to(application))
-        in manifest["files"]["generated"]
-    )
+    assert str(embedded.relative_to(application)) in {
+        record["path"] for record in manifest["files"]["generated"]
+    }
 
     assembly = (application / "src/runtime_inputs_initializers.S.in").read_text()
     assert (
@@ -364,7 +496,7 @@ def test_build_application_leaves_no_partial_output_after_validation_failure(
                         "source_model": "simple_three_stage",
                         "abi": {"operation": 1, "descriptor": 1},
                         "execution": {"tokens": 1, "token_slots": 2},
-                        "active_physical_tiles": [],
+                        "active_physical_tiles": [0],
                         "tensors": {"inputs": [], "outputs": []},
                         "entry_points": {
                             "run": "simple_three_stage_run",
@@ -378,16 +510,19 @@ def test_build_application_leaves_no_partial_output_after_validation_failure(
                         },
                         "files": {
                             "generated": [
-                                "CMakeLists.txt",
-                                "README.md",
-                                "manifest.json",
-                                "include/simple_three_stage.h",
-                                "src/simple_three_stage.c",
-                                "src/simple_three_stage_runner.c",
-                                "src/simple_three_stage_initializers.S.in",
-                                "data/simple_three_stage.initializers.bin",
+                                {
+                                    "path": "CMakeLists.txt",
+                                    "role": "build_definition",
+                                    "byte_size": 0,
+                                    "sha256": "0" * 64,
+                                }
                             ],
-                            "user_owned": ["src/application.c"],
+                            "user_owned": [
+                                {
+                                    "path": "src/application.c",
+                                    "role": "application_source",
+                                }
+                            ],
                         },
                     }
                 )
@@ -400,7 +535,7 @@ def test_build_application_leaves_no_partial_output_after_validation_failure(
         emit_invalid_application,
     )
 
-    with pytest.raises(ValueError, match="missing 'CMakeLists.txt'"):
+    with pytest.raises(ValueError, match="missing generated file 'CMakeLists.txt'"):
         build_application(
             repository / "examples" / "simple_three_stage.onnx",
             output,
