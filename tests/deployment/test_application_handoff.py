@@ -20,15 +20,24 @@ def _write_representative_model(path: Path) -> Path:
     lhs = helper.make_tensor_value_info("lhs/value", TensorProto.FLOAT, [2, 2])
     rhs = helper.make_tensor_value_info("rhs value", TensorProto.FLOAT, [2, 2])
     total = helper.make_tensor_value_info("sum/value", TensorProto.FLOAT, [2, 2])
+    biased = helper.make_tensor_value_info("biased", TensorProto.FLOAT, [2, 2])
     output = helper.make_tensor_value_info("output-value", TensorProto.FLOAT, [2, 2])
+    bias = helper.make_tensor(
+        "bias",
+        TensorProto.FLOAT,
+        [2, 2],
+        [0.25, -0.5, 0.75, -1.0],
+    )
     graph = helper.make_graph(
         [
             helper.make_node("Add", ["lhs/value", "rhs value"], ["sum/value"]),
-            helper.make_node("Relu", ["sum/value"], ["output-value"]),
+            helper.make_node("Add", ["sum/value", "bias"], ["biased"]),
+            helper.make_node("Relu", ["biased"], ["output-value"]),
         ],
         "application_handoff",
         [lhs, rhs],
         [output],
+        [bias],
     )
     onnx.save(helper.make_model(graph), path)
     return path
@@ -43,7 +52,17 @@ def _generated_files(application: Path) -> dict[str, bytes]:
 
 
 def _compiler_tool(repository: Path, name: str) -> Path:
-    return repository / "maps-ir" / "build" / "tools" / "maps-translate" / name
+    installed = shutil.which(name)
+    return (
+        Path(installed)
+        if installed is not None
+        else repository
+        / "maps-ir"
+        / "build"
+        / "tools"
+        / "maps-translate"
+        / name
+    )
 
 
 def _build_ordinary_application(
@@ -107,7 +126,8 @@ def test_complete_application_handoff_through_ordinary_and_expert_workflows(
         f"tile_{tile_id:02d}.c" for tile_id in active_tiles
     ]
     assert manifest["memory"]["required_l2_bytes"] > 0
-    assert (ordinary / "data/complete_handoff.initializers.bin").is_file()
+    initializer_data = ordinary / "data/complete_handoff.initializers.bin"
+    assert initializer_data.stat().st_size > 0
     assert (
         ordinary / "data/complete_handoff.input_lhs_value.bin"
     ).read_bytes() == lhs.read_bytes()
@@ -120,6 +140,20 @@ def test_complete_application_handoff_through_ordinary_and_expert_workflows(
     public_header = (ordinary / "include/complete_handoff.h").read_text()
     assert "complete_handoff_run" in public_header
     assert "slice_desc_t" not in public_header
+    model_data = (ordinary / "src/complete_handoff.c").read_text()
+    assert "uint8_t complete_handoff_l2_global_" in model_data
+    assembly = (ordinary / "src/complete_handoff_initializers.S.in").read_text()
+    assert (
+        '.incbin "@CMAKE_CURRENT_SOURCE_DIR@/'
+        'data/complete_handoff.initializers.bin"'
+        in assembly
+    )
+    assert (
+        '.incbin "@CMAKE_CURRENT_SOURCE_DIR@/'
+        'data/complete_handoff.input_lhs_value.bin"'
+        in assembly
+    )
+    assert ".global complete_handoff_initializers_start" in assembly
 
     readme = (ordinary / "README.md").read_text()
     cmake = (ordinary / "CMakeLists.txt").read_text()
@@ -187,15 +221,7 @@ def test_generated_application_compiles_in_configured_magia_sdk(
 
     repository = Path(__file__).parents[2]
     model = repository / "examples/simple_three_stage.onnx"
-    application = tmp_path / "sdk-source/tests/magia/mesh/maps_handoff"
-    sdk_copy = tmp_path / "sdk-source"
-    shutil.copytree(
-        sdk_source,
-        sdk_copy,
-        ignore=shutil.ignore_patterns(
-            ".git", ".ccache", "build", "gvsoc", "gvsoc_venv", "gvsoc_work"
-        ),
-    )
+    generated_application = tmp_path / "generated/maps_handoff"
     assert main(
         [
             "build",
@@ -205,9 +231,20 @@ def test_generated_application_compiles_in_configured_magia_sdk(
             "--mesh",
             "4x4",
             "--output",
-            str(application),
+            str(generated_application),
         ]
     ) == 0
+
+    sdk_copy = tmp_path / "sdk-source"
+    shutil.copytree(
+        sdk_source,
+        sdk_copy,
+        ignore=shutil.ignore_patterns(
+            ".git", ".ccache", "build", "gvsoc", "gvsoc_venv", "gvsoc_work"
+        ),
+    )
+    application = sdk_copy / "tests/magia/mesh/maps_handoff"
+    shutil.copytree(generated_application, application)
 
     registration = sdk_copy / "tests/magia/mesh/CMakeLists.txt"
     registration.write_text(
