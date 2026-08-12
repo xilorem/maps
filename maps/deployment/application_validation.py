@@ -374,8 +374,8 @@ def _validate_files(
     expected_roles = {
         "CMakeLists.txt": "build_definition",
         "README.md": "integration_guide",
-        f"include/{name}.h": "model_interface",
-        f"src/{name}.c": "model_data",
+        f"include/{name}.h": "application_interface",
+        f"src/{name}.c": "application_data",
         f"src/{name}_runner.c": "application_runner",
         f"src/{name}_initializers.S.in": "initializer_assembly",
         f"data/{name}.initializers.bin": "initializer_data",
