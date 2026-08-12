@@ -15,8 +15,9 @@ from maps.deployment import (
     PackedWeights,
     build_deployment_bundle,
     pack_weights,
-    validate_execution_plan_bundle_files,
-    write_execution_plan_bundle,
+    validate_deployment_bundle,
+    write_deployment_bundle,
+    write_execution_plan,
 )
 from maps.deployment.serialization import (
     execution_plan_json_payload,
@@ -111,13 +112,13 @@ def _mesh(l2_size: int) -> Mesh:
     )
 
 
-def test_write_execution_plan_bundle_is_deterministic_and_preserves_fp32(
+def test_write_deployment_bundle_is_deterministic_and_preserves_fp32(
     tmp_path,
 ) -> None:
-    first_json, first_weights = write_execution_plan_bundle(
+    first_json, first_weights = write_deployment_bundle(
         _bundle(), tmp_path / "first" / "model.json", tmp_path / "first" / "model.weights.bin"
     )
-    second_json, second_weights = write_execution_plan_bundle(
+    second_json, second_weights = write_deployment_bundle(
         _bundle(), tmp_path / "second" / "model.json", tmp_path / "second" / "model.weights.bin"
     )
 
@@ -152,15 +153,35 @@ def test_write_execution_plan_bundle_is_deterministic_and_preserves_fp32(
     np.testing.assert_array_equal(values, np.array([1.0, -2.0, 3.5, 4.0], dtype="<f4"))
 
 
-def test_write_execution_plan_bundle_rejects_l2_capacity_failure(tmp_path) -> None:
+def test_plain_execution_plan_is_distinct_from_deployment_bundle(tmp_path) -> None:
+    bundle = _bundle()
+    plan_path = write_execution_plan(bundle.execution_plan, tmp_path / "model.plan.json")
+    bundle_path, _ = write_deployment_bundle(
+        bundle,
+        tmp_path / "model.bundle.json",
+        tmp_path / "model.weights.bin",
+    )
+
+    plan_payload = json.loads(plan_path.read_text())
+    bundle_payload = json.loads(bundle_path.read_text())
+
+    assert "bundle" not in plan_payload
+    assert "provenance" not in plan_payload
+    assert "initializer" not in plan_payload["tensors"][0]
+    assert bundle_payload["bundle"]["alignment"] == 16
+    assert bundle_payload["provenance"] == {"rewrite_report": []}
+    assert bundle_payload["tensors"][0]["initializer"]["sha256"]
+
+
+def test_write_deployment_bundle_rejects_l2_capacity_failure(tmp_path) -> None:
     with pytest.raises(ValueError, match="requires 16 L2 bytes"):
-        write_execution_plan_bundle(
+        write_deployment_bundle(
             _bundle(l2_size=15), tmp_path / "model.json", tmp_path / "model.weights.bin"
         )
 
 
 def test_serialized_bundle_validation_detects_weight_corruption(tmp_path) -> None:
-    json_path, weights_path = write_execution_plan_bundle(
+    json_path, weights_path = write_deployment_bundle(
         _bundle(), tmp_path / "model.json", tmp_path / "model.weights.bin"
     )
     corrupted = bytearray(weights_path.read_bytes())
@@ -168,10 +189,19 @@ def test_serialized_bundle_validation_detects_weight_corruption(tmp_path) -> Non
     weights_path.write_bytes(corrupted)
 
     with pytest.raises(ValueError, match="checksum mismatch"):
-        validate_execution_plan_bundle_files(json_path, weights_path)
+        validate_deployment_bundle(json_path, weights_path)
 
 
-def test_write_execution_plan_bundle_rejects_initializer_tensor_dtype_mismatch(
+def test_serialized_bundle_validation_enforces_l2_capacity(tmp_path) -> None:
+    json_path, weights_path = write_deployment_bundle(
+        _bundle(), tmp_path / "model.json", tmp_path / "model.weights.bin"
+    )
+
+    with pytest.raises(ValueError, match="exceeds L2 capacity"):
+        validate_deployment_bundle(json_path, weights_path, l2_capacity=15)
+
+
+def test_write_deployment_bundle_rejects_initializer_tensor_dtype_mismatch(
     tmp_path,
 ) -> None:
     bundle = _bundle()
@@ -186,7 +216,7 @@ def test_write_execution_plan_bundle_rejects_initializer_tensor_dtype_mismatch(
         ValueError,
         match="constant 'weight' dtype does not match Execution Plan tensor",
     ):
-        write_execution_plan_bundle(
+        write_deployment_bundle(
             replace(bundle, execution_plan=execution_plan),
             tmp_path / "model.json",
             tmp_path / "model.weights.bin",

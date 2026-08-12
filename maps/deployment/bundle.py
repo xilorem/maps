@@ -158,12 +158,12 @@ def _bundle_payload(
     return payload
 
 
-def write_execution_plan_bundle(
+def write_deployment_bundle(
     bundle: DeploymentBundle,
-    output_json: str | Path,
-    output_weights: str | Path,
+    output_execution_plan: str | Path,
+    output_initializers: str | Path,
 ) -> tuple[Path, Path]:
-    """Write deterministic Execution Plan JSON and packed weights, then reopen both."""
+    """Write a serialized Deployment Bundle and packed Initializer image."""
 
     validate_constants(bundle.graph, bundle.constants)
     require_valid_execution_plan(
@@ -179,8 +179,8 @@ def write_execution_plan_bundle(
             f"deployment bundle requires {required_l2} L2 bytes but mesh provides {capacity}"
         )
 
-    json_path = Path(output_json)
-    weights_path = Path(output_weights)
+    json_path = Path(output_execution_plan)
+    weights_path = Path(output_initializers)
     if json_path.resolve() == weights_path.resolve():
         raise ValueError("Execution Plan JSON and weights must use different paths")
     json_path.parent.mkdir(parents=True, exist_ok=True)
@@ -191,7 +191,7 @@ def write_execution_plan_bundle(
         json.dumps(payload, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
-    validate_execution_plan_bundle_files(
+    validate_deployment_bundle(
         json_path,
         weights_path,
         l2_capacity=capacity,
@@ -199,16 +199,16 @@ def write_execution_plan_bundle(
     return json_path, weights_path
 
 
-def validate_execution_plan_bundle_files(
-    execution_plan_json: str | Path,
-    weights_file: str | Path,
+def validate_deployment_bundle(
+    execution_plan: str | Path,
+    initializers: str | Path,
     *,
     l2_capacity: int | None = None,
 ) -> None:
-    """Independently validate serialized bundle metadata against its image."""
+    """Independently validate a serialized Deployment Bundle."""
 
-    json_path = Path(execution_plan_json)
-    weights_path = Path(weights_file)
+    json_path = Path(execution_plan)
+    weights_path = Path(initializers)
     payload = json.loads(json_path.read_text(encoding="utf-8"))
     data = weights_path.read_bytes()
     metadata = payload.get("bundle")
@@ -294,3 +294,32 @@ def validate_execution_plan_bundle_files(
             activation_bytes += elements * tensor["elem_bytes"]
         if len(data) + activation_bytes > l2_capacity:
             raise ValueError("deployment bundle exceeds L2 capacity")
+
+
+def write_execution_plan_bundle(
+    bundle: DeploymentBundle,
+    output_json: str | Path,
+    output_weights: str | Path,
+) -> tuple[Path, Path]:
+    """Write deterministic Execution Plan JSON and packed weights, then reopen both."""
+
+    return write_deployment_bundle(
+        bundle,
+        output_json,
+        output_weights,
+    )
+
+
+def validate_execution_plan_bundle_files(
+    execution_plan_json: str | Path,
+    weights_file: str | Path,
+    *,
+    l2_capacity: int | None = None,
+) -> None:
+    """Independently validate serialized bundle metadata against its image."""
+
+    validate_deployment_bundle(
+        execution_plan_json,
+        weights_file,
+        l2_capacity=l2_capacity,
+    )

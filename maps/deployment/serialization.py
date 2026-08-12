@@ -145,11 +145,11 @@ def execution_plan_json_payload(
     return payload
 
 
-def write_execution_plan_json(
+def write_execution_plan(
     execution_plan: ExecutionPlan,
     output_path: str | Path,
 ) -> Path:
-    """Write one Execution Plan to JSON and return its path."""
+    """Write a plain serialized Execution Plan and return its path."""
 
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -161,4 +161,17 @@ def write_execution_plan_json(
     return path
 
 
-__all__ = ["execution_plan_json_payload", "write_execution_plan_json"]
+def write_execution_plan_json(
+    execution_plan: ExecutionPlan,
+    output_path: str | Path,
+) -> Path:
+    """Write one Execution Plan to JSON and return its path."""
+
+    return write_execution_plan(execution_plan, output_path)
+
+
+__all__ = [
+    "execution_plan_json_payload",
+    "write_execution_plan",
+    "write_execution_plan_json",
+]
