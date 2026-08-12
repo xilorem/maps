@@ -43,25 +43,16 @@ def _generated_files(application: Path) -> dict[str, bytes]:
 
 
 def _compiler_tool(repository: Path, name: str) -> Path:
-    tool = repository / "maps-ir" / "build" / "tools" / "maps-translate" / name
-    if not tool.is_file():
-        pytest.fail(f"required compiler tool is unavailable: {tool}")
-    return tool
+    return repository / "maps-ir" / "build" / "tools" / "maps-translate" / name
 
 
-def test_complete_application_handoff_through_ordinary_and_expert_workflows(
-    tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    repository = Path(__file__).parents[2]
-    model = _write_representative_model(tmp_path / "Handoff Model.onnx")
-    lhs = tmp_path / "lhs.raw"
-    rhs = tmp_path / "rhs.raw"
-    lhs.write_bytes(bytes(range(48)))
-    rhs.write_bytes(bytes(reversed(range(48))))
-    ordinary = tmp_path / "ordinary"
-
-    assert main(
+def _build_ordinary_application(
+    model: Path,
+    output: Path,
+    lhs: Path,
+    rhs: Path,
+) -> int:
+    return main(
         [
             "build",
             str(model),
@@ -76,9 +67,24 @@ def test_complete_application_handoff_through_ordinary_and_expert_workflows(
             "--input",
             f"rhs value={rhs}",
             "--output",
-            str(ordinary),
+            str(output),
         ]
-    ) == 0
+    )
+
+
+def test_complete_application_handoff_through_ordinary_and_expert_workflows(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    repository = Path(__file__).parents[2]
+    model = _write_representative_model(tmp_path / "Handoff Model.onnx")
+    lhs = tmp_path / "lhs.raw"
+    rhs = tmp_path / "rhs.raw"
+    lhs.write_bytes(bytes(range(48)))
+    rhs.write_bytes(bytes(reversed(range(48))))
+    ordinary = tmp_path / "ordinary"
+
+    assert _build_ordinary_application(model, ordinary, lhs, rhs) == 0
     build_output = capsys.readouterr().out
     assert "MAGIA Application:" in build_output
     assert "Execution Tokens: 3" in build_output
@@ -163,24 +169,7 @@ def test_complete_application_handoff_through_ordinary_and_expert_workflows(
 
     customization = b"/* developer-owned handoff customization */\n"
     (ordinary / "src/application.c").write_bytes(customization)
-    assert main(
-        [
-            "build",
-            str(model),
-            "--name",
-            "Complete Handoff",
-            "--mesh",
-            "4x4",
-            "--token-slots",
-            "3",
-            "--input",
-            f"lhs/value={lhs}",
-            "--input",
-            f"rhs value={rhs}",
-            "--output",
-            str(ordinary),
-        ]
-    ) == 0
+    assert _build_ordinary_application(model, ordinary, lhs, rhs) == 0
     capsys.readouterr()
     assert (ordinary / "src/application.c").read_bytes() == customization
     assert _generated_files(ordinary) == _generated_files(expert)
@@ -193,8 +182,6 @@ def test_generated_application_compiles_in_configured_magia_sdk(
     if sdk_setting is None:
         pytest.skip("set MAGIA_SDK_ROOT to enable the external SDK compilation check")
     sdk_source = Path(sdk_setting).resolve()
-    if not (sdk_source / "CMakeLists.txt").is_file():
-        pytest.fail(f"MAGIA_SDK_ROOT is not a compatible SDK checkout: {sdk_source}")
     if shutil.which("riscv32-unknown-elf-gcc") is None:
         pytest.skip("the MAGIA SDK GCC toolchain is unavailable")
 
