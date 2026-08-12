@@ -168,4 +168,4 @@ def test_lowercase_cli_starts_successfully() -> None:
     )
 
     assert result.returncode == 0
-    assert "{build,plan,package}" in result.stdout
+    assert "{build,plan,inspect,verify,package}" in result.stdout
