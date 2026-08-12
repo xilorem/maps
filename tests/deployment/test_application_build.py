@@ -86,6 +86,9 @@ def test_validate_application_checks_generated_files_but_permits_user_work(
     assert manifest["files"]["user_owned"] == [
         {"path": "src/application.c", "role": "application_source"}
     ]
+    assert manifest["files"]["trust_root"] == [
+        {"path": "manifest.json", "role": "application_manifest"}
+    ]
 
     (application / "src/application.c").write_text("/* customized */\n")
     (application / "developer-notes.txt").write_text("keep me\n")
@@ -141,13 +144,16 @@ def test_validate_application_rejects_invalid_generated_state_with_diagnostics(
         mesh_width=4,
         mesh_height=4,
     )
+
+    def corrupt_generated_file(application, manifest) -> None:
+        artifact = application / manifest["files"]["generated"][0]["path"]
+        artifact.write_bytes(b"x" * artifact.stat().st_size)
+
     cases = (
         (
             "corrupt",
-            lambda application, manifest: (
-                application / manifest["files"]["generated"][0]["path"]
-            ).write_text("corrupt\n"),
-            "generated file byte size mismatch",
+            corrupt_generated_file,
+            "generated file checksum mismatch",
         ),
         (
             "missing",
@@ -197,6 +203,56 @@ def test_validate_application_rejects_invalid_generated_state_with_diagnostics(
             with pytest.raises(SystemExit):
                 main(["verify", str(application)])
             assert diagnostic in capsys.readouterr().err
+
+
+def test_validate_application_accepts_scalar_tensor_metadata(tmp_path: Path) -> None:
+    repository = Path(__file__).parents[2]
+    application = build_application(
+        repository / "examples" / "simple_three_stage.onnx",
+        tmp_path / "application",
+        mesh_width=4,
+        mesh_height=4,
+    )
+    manifest_path = application / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    output = manifest["tensors"]["outputs"][0]
+    output["shape"] = []
+    output["byte_size"] = 2
+    manifest_path.write_text(json.dumps(manifest))
+
+    assert validate_application(application)["tensors"]["outputs"][0]["shape"] == []
+
+
+def test_validate_application_rejects_inconsistent_input_tokens_and_symlinked_paths(
+    tmp_path: Path,
+) -> None:
+    model = _write_two_input_model(tmp_path / "runtime-inputs.onnx")
+    supplied = tmp_path / "input.raw"
+    supplied.write_bytes(bytes(16))
+    original = build_application(
+        model,
+        tmp_path / "original",
+        mesh_width=4,
+        mesh_height=4,
+        inputs={"lhs/value": supplied},
+    )
+
+    inconsistent = tmp_path / "inconsistent"
+    shutil.copytree(original, inconsistent)
+    manifest_path = inconsistent / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["execution"]["tokens"] = 2
+    manifest_path.write_text(json.dumps(manifest))
+    with pytest.raises(ValueError, match="Runtime Input asset size is inconsistent"):
+        validate_application(inconsistent)
+
+    escaped = tmp_path / "escaped"
+    shutil.copytree(original, escaped)
+    external_data = tmp_path / "external-data"
+    (escaped / "data").rename(external_data)
+    (escaped / "data").symlink_to(external_data, target_is_directory=True)
+    with pytest.raises(ValueError, match="missing generated file"):
+        validate_application(escaped)
 
 
 def test_build_application_derives_tokens_and_embeds_supplied_runtime_input(
@@ -508,7 +564,7 @@ def test_build_application_leaves_no_partial_output_after_validation_failure(
                             "required_l2_bytes": 0,
                             "max_tile_l1_bytes": 0,
                         },
-                        "files": {
+                            "files": {
                             "generated": [
                                 {
                                     "path": "CMakeLists.txt",
@@ -516,7 +572,13 @@ def test_build_application_leaves_no_partial_output_after_validation_failure(
                                     "byte_size": 0,
                                     "sha256": "0" * 64,
                                 }
-                            ],
+                                ],
+                                "trust_root": [
+                                    {
+                                        "path": "manifest.json",
+                                        "role": "application_manifest",
+                                    }
+                                ],
                             "user_owned": [
                                 {
                                     "path": "src/application.c",
