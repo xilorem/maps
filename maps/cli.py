@@ -82,7 +82,21 @@ def _build_application_parser() -> argparse.ArgumentParser:
     parser.add_argument("--token-slots", type=int, default=2)
     parser.add_argument("--name")
     parser.add_argument("--output", type=Path)
+    parser.add_argument(
+        "--input",
+        action="append",
+        default=[],
+        metavar="NAME=FILE",
+        help="supply raw values for one Runtime Input (repeatable)",
+    )
     return parser
+
+
+def _input_assignment(value: str) -> tuple[str, Path]:
+    name, separator, path = value.partition("=")
+    if not separator or not name or not path:
+        raise ValueError("--input must use NAME=FILE")
+    return name, Path(path)
 
 
 def _package_build_parser() -> argparse.ArgumentParser:
@@ -144,6 +158,7 @@ def _run_build(arguments: list[str]) -> int:
         mesh_width=dimensions.get("width", magia.MESH_WIDTH),
         mesh_height=dimensions.get("height", magia.MESH_HEIGHT),
         num_token_slots=options.token_slots,
+        inputs=tuple(_input_assignment(value) for value in options.input),
         progress=lambda message: print(message, flush=True),
     )
     print(application_build_summary(output))

@@ -8,11 +8,11 @@ from pathlib import Path, PurePosixPath
 import shutil
 import subprocess
 import tempfile
-from typing import Any, Callable
+from typing import Any, Callable, Iterable, Mapping
 
 from maps.target import magia
 
-from .bundle import write_deployment_bundle
+from .bundle import DeploymentBundle, write_deployment_bundle
 from .workflow import build_magia_deployment_bundle
 
 
@@ -94,6 +94,7 @@ def _validate_generated_application(
     mesh_width: int,
     mesh_height: int,
     num_token_slots: int,
+    execution_tokens: int,
 ) -> dict[str, Any]:
     manifest = _application_manifest(application)
     if manifest.get("application") != {"name": name, "target": MAGIA_V2_TARGET}:
@@ -113,7 +114,7 @@ def _validate_generated_application(
         manifest.get("schema_version") != 1
         or not isinstance(manifest.get("source_model"), str)
         or not isinstance(execution, dict)
-        or execution.get("tokens") != 1
+        or execution.get("tokens") != execution_tokens
         or execution.get("token_slots") != num_token_slots
         or not isinstance(active_tiles, list)
         or not isinstance(abi, dict)
@@ -176,6 +177,43 @@ def _validate_generated_application(
     return manifest
 
 
+def _prepare_runtime_inputs(
+    bundle: DeploymentBundle,
+    assignments: Mapping[str, str | Path] | Iterable[tuple[str, str | Path]],
+) -> tuple[int, tuple[tuple[str, Path], ...]]:
+    items = assignments.items() if isinstance(assignments, Mapping) else assignments
+    runtime_inputs = {tensor.name: tensor for tensor in bundle.graph.inputs}
+    supplied: list[tuple[str, Path]] = []
+    counts: dict[str, int] = {}
+    assigned_names: set[str] = set()
+    for name, value in items:
+        if name not in runtime_inputs:
+            raise ValueError(f"unknown Runtime Input '{name}'")
+        if name in assigned_names:
+            raise ValueError(f"duplicate Runtime Input assignment '{name}'")
+        assigned_names.add(name)
+        path = Path(value)
+        if not path.is_file():
+            raise ValueError(f"Runtime Input file does not exist: {path}")
+        tensor = runtime_inputs[name]
+        tensor_bytes = tensor.num_elements * tensor.elem_bytes
+        file_bytes = path.stat().st_size
+        if file_bytes == 0 or file_bytes % tensor_bytes:
+            raise ValueError(
+                f"Runtime Input '{name}' must contain a positive whole number "
+                f"of {tensor_bytes}-byte Tensor values"
+            )
+        counts[name] = file_bytes // tensor_bytes
+        supplied.append((name, path))
+    token_counts = set(counts.values())
+    if len(token_counts) > 1:
+        details = ", ".join(f"{name}={count}" for name, count in counts.items())
+        raise ValueError(
+            f"Runtime Input Execution Token counts do not match: {details}"
+        )
+    return (next(iter(token_counts), 1), tuple(supplied))
+
+
 def build_application(
     model_path: str | Path,
     output_dir: str | Path | None = None,
@@ -185,6 +223,7 @@ def build_application(
     mesh_width: int = magia.MESH_WIDTH,
     mesh_height: int = magia.MESH_HEIGHT,
     num_token_slots: int = 2,
+    inputs: Mapping[str, str | Path] | Iterable[tuple[str, str | Path]] = (),
     progress: Callable[[str], None] | None = None,
 ) -> Path:
     """Build, validate, and atomically publish one MAGIA Application."""
@@ -220,6 +259,7 @@ def build_application(
         num_token_slots=num_token_slots,
         progress=None,
     )
+    execution_tokens, runtime_inputs = _prepare_runtime_inputs(bundle, inputs)
 
     output.parent.mkdir(parents=True, exist_ok=True)
     staging_parent = Path(
@@ -234,23 +274,28 @@ def build_application(
         write_deployment_bundle(bundle, deployment_bundle, initializers)
         report("Generating the MAGIA Application...")
         _run_backend([str(plan_import), str(deployment_bundle), "-o", str(maps_mlir)])
-        _run_backend(
-            [
-                str(codegen),
-                str(maps_mlir),
-                "-o",
-                str(application),
-                f"--target={target}",
-                f"--maps-magia-output-stem={application_name}",
-                f"--maps-magia-weights-file={initializers}",
-            ]
+        codegen_arguments = [
+            str(codegen),
+            str(maps_mlir),
+            "-o",
+            str(application),
+            f"--target={target}",
+            f"--maps-magia-output-stem={application_name}",
+            f"--maps-magia-weights-file={initializers}",
+            f"--maps-magia-num-tokens={execution_tokens}",
+        ]
+        codegen_arguments.extend(
+            f"--maps-magia-runtime-input={input_name}={input_path}"
+            for input_name, input_path in runtime_inputs
         )
+        _run_backend(codegen_arguments)
         _validate_generated_application(
             application,
             name=application_name,
             mesh_width=mesh_width,
             mesh_height=mesh_height,
             num_token_slots=num_token_slots,
+            execution_tokens=execution_tokens,
         )
         if output.exists():
             raise FileExistsError(f"application output already exists: {output}")
