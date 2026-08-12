@@ -9,6 +9,9 @@ import sys
 from types import ModuleType
 
 from maps.deployment import (
+    MAGIA_V2_TARGET,
+    application_build_summary,
+    build_application,
     package_summary,
     validate_deployment_package,
     write_deployment_package,
@@ -46,6 +49,7 @@ def _mesh(value: str) -> tuple[int, int]:
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="maps")
     commands = parser.add_subparsers(dest="command", required=True)
+    commands.add_parser("build", help="build a MAGIA Application")
     commands.add_parser("plan", help="plan a model and write an Execution Plan")
     commands.add_parser("package", help="build, inspect, or verify a deployment package")
     return parser
@@ -67,6 +71,17 @@ def _plan_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="maps plan")
     _add_planning_arguments(parser)
     parser.add_argument("--max-stage-operations", type=int, default=0)
+    return parser
+
+
+def _build_application_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="maps build")
+    parser.add_argument("model", type=Path)
+    parser.add_argument("--target", choices=(MAGIA_V2_TARGET,), default=MAGIA_V2_TARGET)
+    parser.add_argument("--mesh", type=_mesh)
+    parser.add_argument("--token-slots", type=int, default=2)
+    parser.add_argument("--name")
+    parser.add_argument("--output", type=Path)
     return parser
 
 
@@ -118,6 +133,23 @@ def _run_package(arguments: list[str]) -> int:
     return 0
 
 
+def _run_build(arguments: list[str]) -> int:
+    options = _build_application_parser().parse_args(arguments)
+    dimensions = _mesh_options(options.mesh)
+    output = build_application(
+        options.model,
+        options.output,
+        name=options.name,
+        target=options.target,
+        mesh_width=dimensions.get("width", magia.MESH_WIDTH),
+        mesh_height=dimensions.get("height", magia.MESH_HEIGHT),
+        num_token_slots=options.token_slots,
+        progress=lambda message: print(message, flush=True),
+    )
+    print(application_build_summary(output))
+    return 0
+
+
 def _run_plan(arguments: list[str]) -> int:
     options = _plan_parser().parse_args(arguments)
     target = _TARGETS[options.target]
@@ -147,6 +179,7 @@ def main(arguments: list[str] | None = None) -> int:
     parser = _build_parser()
     try:
         commands = {
+            "build": _run_build,
             "plan": _run_plan,
             "package": _run_package,
         }

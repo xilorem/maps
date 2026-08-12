@@ -11,17 +11,10 @@ import subprocess
 import tempfile
 from typing import Any, Callable
 
-from maps.graph import import_onnx_model, run_graph_rewrites_with_effects
-from maps.planning import (
-    AllocationOptions,
-    ExecutionContract,
-    PlacementOptions,
-    PlanningOptions,
-    plan,
-)
-from maps.target import SpecializationOptions, magia
+from maps.target import magia
 
-from .bundle import build_deployment_bundle, write_execution_plan_bundle
+from .bundle import write_execution_plan_bundle
+from .workflow import build_magia_deployment_bundle
 
 
 PACKAGE_SCHEMA_VERSION = 1
@@ -305,35 +298,12 @@ def write_deployment_package(
         f"Planning {model.name} for {target} on a "
         f"{mesh_width}x{mesh_height} mesh..."
     )
-    mesh = magia.build_mesh(width=mesh_width, height=mesh_height)
-    rewritten, graph_rewrite_effects = run_graph_rewrites_with_effects(
-        import_onnx_model(model)
-    )
-    specialization = magia.specialize(
-        rewritten,
-        mesh,
-        SpecializationOptions(enable_precision_lowering=False),
-    )
-    execution_plan = plan(
-        specialization.model.graph,
-        mesh,
-        PlanningOptions(
-            execution=ExecutionContract(num_token_slots=num_token_slots),
-            allocation=AllocationOptions(
-                print_progress=progress is not None,
-            ),
-            placement=PlacementOptions(
-                print_progress=progress is not None,
-                print_placement=False,
-                print_costs=False,
-            ),
-            print_execution_plan_cost=False,
-        ),
-    )
-    bundle = build_deployment_bundle(
-        specialization,
-        execution_plan,
-        graph_rewrite_effects=graph_rewrite_effects,
+    bundle = build_magia_deployment_bundle(
+        model,
+        mesh_width=mesh_width,
+        mesh_height=mesh_height,
+        num_token_slots=num_token_slots,
+        progress=progress,
     )
 
     staging_parent = Path(
