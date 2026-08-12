@@ -153,7 +153,14 @@ def test_complete_application_handoff_through_ordinary_and_expert_workflows(
         'data/complete_handoff.input_lhs_value.bin"'
         in assembly
     )
+    assert (
+        '.incbin "@CMAKE_CURRENT_SOURCE_DIR@/'
+        'data/complete_handoff.input_rhs_value.bin"'
+        in assembly
+    )
     assert ".global complete_handoff_initializers_start" in assembly
+    assert ".global complete_handoff_input_lhs_value_start" in assembly
+    assert ".global complete_handoff_input_rhs_value_start" in assembly
 
     readme = (ordinary / "README.md").read_text()
     cmake = (ordinary / "CMakeLists.txt").read_text()
