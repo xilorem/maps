@@ -547,22 +547,22 @@ def test_precision_lowering_serializes_deterministic_artifacts_and_provenance(
         _quiet_magia_options(),
     )
 
-    first_json, first_weights = write_deployment_bundle(
+    first_bundle, first_initializers = write_deployment_bundle(
         first,
-        tmp_path / "first" / "model.json",
-        tmp_path / "first" / "weights.bin",
+        tmp_path / "first" / "model.bundle.json",
+        tmp_path / "first" / "initializers.bin",
     )
-    second_json, second_weights = write_deployment_bundle(
+    second_bundle, second_initializers = write_deployment_bundle(
         second,
-        tmp_path / "second" / "model.json",
-        tmp_path / "second" / "weights.bin",
+        tmp_path / "second" / "model.bundle.json",
+        tmp_path / "second" / "initializers.bin",
     )
 
     assert first.graph == second.graph
     assert first.rewrite_report == second.rewrite_report
-    assert first_json.read_bytes() == second_json.read_bytes()
-    assert first_weights.read_bytes() == second_weights.read_bytes()
-    payload = json.loads(first_json.read_text(encoding="utf-8"))
+    assert first_bundle.read_bytes() == second_bundle.read_bytes()
+    assert first_initializers.read_bytes() == second_initializers.read_bytes()
+    payload = json.loads(first_bundle.read_text(encoding="utf-8"))
     event = payload["provenance"]["rewrite_report"][0]
     assert event == {
         "converted_initializers": ["weight"],

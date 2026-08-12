@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from examples import magia_example
 
 
-def test_magia_example_builds_and_writes_one_execution_plan_bundle(
+def test_magia_example_builds_and_writes_one_deployment_bundle(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
@@ -75,11 +75,11 @@ def test_magia_example_builds_and_writes_one_execution_plan_bundle(
         lambda execution_plan: None,
     )
 
-    def write_bundle(value, execution_plan_path, weights_path):
+    def write_bundle(value, bundle_path, initializers_path):
         calls["written_bundle"] = value
-        calls["execution_plan_path"] = execution_plan_path
-        calls["weights_path"] = weights_path
-        return execution_plan_path, weights_path
+        calls["bundle_path"] = bundle_path
+        calls["initializers_path"] = initializers_path
+        return bundle_path, initializers_path
 
     monkeypatch.setattr(
         magia_example,
@@ -91,11 +91,11 @@ def test_magia_example_builds_and_writes_one_execution_plan_bundle(
 
     assert calls["model_path"] == magia_example.DEFAULT_MODEL_PATH
     assert calls["written_bundle"] is bundle
-    assert calls["execution_plan_path"] == (
-        tmp_path / "generated" / "magia_example.execution-plan.json"
+    assert calls["bundle_path"] == (
+        tmp_path / "generated" / "magia_example.bundle.json"
     )
-    assert calls["weights_path"] == (
-        tmp_path / "generated" / "magia_example.execution-plan.weights.bin"
+    assert calls["initializers_path"] == (
+        tmp_path / "generated" / "magia_example.bundle.initializers.bin"
     )
     assert calls["specialized_model"] is rewritten_model
     assert calls["planned_graph"] is specialized_graph

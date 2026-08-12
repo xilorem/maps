@@ -222,10 +222,10 @@ def test_magia_lowers_fp16_conv_to_auditable_redmule_execution(
     ]
     assert event.converted_initializers == ("weight",)
 
-    output_json = tmp_path / "conv.json"
-    output_weights = tmp_path / "conv.weights.bin"
-    write_deployment_bundle(bundle, output_json, output_weights)
-    payload = json.loads(output_json.read_text(encoding="utf-8"))
+    output_bundle = tmp_path / "conv.json"
+    output_initializers = tmp_path / "conv.initializers.bin"
+    write_deployment_bundle(bundle, output_bundle, output_initializers)
+    payload = json.loads(output_bundle.read_text(encoding="utf-8"))
     assert [
         item["rewrite_name"]
         for item in payload["provenance"]["rewrite_report"]
@@ -324,19 +324,19 @@ def test_magia_composes_fp32_conv_lowering_with_precision_lowering(
     assert first.graph == second.graph
     assert first.constants == second.constants
 
-    first_json, first_weights = write_deployment_bundle(
+    first_bundle, first_initializers = write_deployment_bundle(
         first,
-        tmp_path / "first" / "model.json",
-        tmp_path / "first" / "model.weights.bin",
+        tmp_path / "first" / "model.bundle.json",
+        tmp_path / "first" / "model.initializers.bin",
     )
-    second_json, second_weights = write_deployment_bundle(
+    second_bundle, second_initializers = write_deployment_bundle(
         second,
-        tmp_path / "second" / "model.json",
-        tmp_path / "second" / "model.weights.bin",
+        tmp_path / "second" / "model.bundle.json",
+        tmp_path / "second" / "model.initializers.bin",
     )
-    assert first_json.read_bytes() == second_json.read_bytes()
-    assert first_weights.read_bytes() == second_weights.read_bytes()
-    payload = json.loads(first_json.read_text(encoding="utf-8"))
+    assert first_bundle.read_bytes() == second_bundle.read_bytes()
+    assert first_initializers.read_bytes() == second_initializers.read_bytes()
+    payload = json.loads(first_bundle.read_text(encoding="utf-8"))
     assert [
         event["rewrite_name"]
         for event in payload["provenance"]["rewrite_report"]

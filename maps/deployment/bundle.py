@@ -179,42 +179,44 @@ def write_deployment_bundle(
             f"deployment bundle requires {required_l2} L2 bytes but mesh provides {capacity}"
         )
 
-    json_path = Path(output_execution_plan)
-    weights_path = Path(output_initializers)
-    if json_path.resolve() == weights_path.resolve():
-        raise ValueError("Execution Plan JSON and weights must use different paths")
-    json_path.parent.mkdir(parents=True, exist_ok=True)
-    weights_path.parent.mkdir(parents=True, exist_ok=True)
-    payload = _bundle_payload(bundle, packed, weights_path.name)
-    weights_path.write_bytes(packed.data)
-    json_path.write_text(
+    bundle_path = Path(output_execution_plan)
+    initializers_path = Path(output_initializers)
+    if bundle_path.resolve() == initializers_path.resolve():
+        raise ValueError(
+            "Deployment Bundle document and Initializer image must use different paths"
+        )
+    bundle_path.parent.mkdir(parents=True, exist_ok=True)
+    initializers_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = _bundle_payload(bundle, packed, initializers_path.name)
+    initializers_path.write_bytes(packed.data)
+    bundle_path.write_text(
         json.dumps(payload, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
     validate_deployment_bundle(
-        json_path,
-        weights_path,
+        bundle_path,
+        initializers_path,
         l2_capacity=capacity,
     )
-    return json_path, weights_path
+    return bundle_path, initializers_path
 
 
 def validate_deployment_bundle(
-    execution_plan: str | Path,
+    deployment_bundle: str | Path,
     initializers: str | Path,
     *,
     l2_capacity: int | None = None,
 ) -> None:
     """Independently validate a serialized Deployment Bundle."""
 
-    json_path = Path(execution_plan)
-    weights_path = Path(initializers)
-    payload = json.loads(json_path.read_text(encoding="utf-8"))
-    data = weights_path.read_bytes()
+    bundle_path = Path(deployment_bundle)
+    initializers_path = Path(initializers)
+    payload = json.loads(bundle_path.read_text(encoding="utf-8"))
+    data = initializers_path.read_bytes()
     metadata = payload.get("bundle")
     if not isinstance(metadata, dict) or metadata.get("schema_version") != BUNDLE_SCHEMA_VERSION:
         raise ValueError("unsupported or missing deployment bundle schema")
-    if metadata.get("weights_file") != weights_path.name:
+    if metadata.get("weights_file") != initializers_path.name:
         raise ValueError("bundle weights filename mismatch")
     if metadata.get("endianness") != "little":
         raise ValueError("bundle weights must be little-endian")

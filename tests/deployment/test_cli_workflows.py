@@ -156,6 +156,8 @@ def test_make_exposes_target_neutral_cli_workflows() -> None:
         assert f"{workflow}:" in makefile
     assert "package:" not in makefile
     assert "magia-v2" in makefile
+    assert "EXECUTION_PLAN_OPTION = $(if $(strip $(EXECUTION_PLAN))," in makefile
+    assert "--output $(EXECUTION_PLAN)" not in makefile
     assert "-m maps.cli" in makefile
     assert "--target $(TARGET)" in makefile
     assert "examples/magia_example.py" not in makefile

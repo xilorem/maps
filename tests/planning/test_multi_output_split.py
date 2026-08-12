@@ -263,16 +263,16 @@ def test_imported_split_deploys_three_consumer_branches_deterministically(
             graph_rewrite_effects=rewrite_effects,
         )
         output_dir = tmp_path / f"build_{build_index}"
-        output_json, _ = write_deployment_bundle(
+        output_bundle, _ = write_deployment_bundle(
             bundle,
-            output_dir / "execution_plan.json",
-            output_dir / "weights.bin",
+            output_dir / "deployment_bundle.json",
+            output_dir / "initializers.bin",
         )
         bundles.append(bundle)
         serialized_payloads.append(
-            json.loads(output_json.read_text(encoding="utf-8"))
+            json.loads(output_bundle.read_text(encoding="utf-8"))
         )
-        serialized_bytes.append(output_json.read_bytes())
+        serialized_bytes.append(output_bundle.read_bytes())
 
     first_bundle, second_bundle = bundles
     first_execution_plan = first_bundle.execution_plan

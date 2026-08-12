@@ -8,7 +8,8 @@ MESH ?=
 MESH_OPTION = $(if $(strip $(MESH)),--mesh $(MESH))
 TOKEN_SLOTS ?= 2
 MAX_STAGE_OPERATIONS ?= 0
-EXECUTION_PLAN ?= $(BUILD_DIR)/application.plan.json
+EXECUTION_PLAN ?=
+EXECUTION_PLAN_OPTION = $(if $(strip $(EXECUTION_PLAN)),--output $(EXECUTION_PLAN))
 APPLICATION ?= $(BUILD_DIR)/application
 
 .PHONY: all test build plan inspect verify maps-ir clean-generated
@@ -24,7 +25,7 @@ plan:
 		$(MESH_OPTION) \
 		--token-slots $(TOKEN_SLOTS) \
 		--max-stage-operations $(MAX_STAGE_OPERATIONS) \
-		--output $(EXECUTION_PLAN)
+		$(EXECUTION_PLAN_OPTION)
 
 build:
 	$(PYTHON) -m maps.cli build $(MODEL) \

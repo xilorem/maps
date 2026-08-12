@@ -21,7 +21,6 @@ from maps.deployment import (
 )
 from maps.deployment.serialization import (
     execution_plan_payload,
-    write_execution_plan,
 )
 from maps.planning import ExecutionPlan, Layer, LayerInput, Stage
 from maps.operations.elementwise import UnaryElementwisePayload
@@ -115,16 +114,16 @@ def _mesh(l2_size: int) -> Mesh:
 def test_write_deployment_bundle_is_deterministic_and_preserves_fp32(
     tmp_path,
 ) -> None:
-    first_json, first_weights = write_deployment_bundle(
-        _bundle(), tmp_path / "first" / "model.json", tmp_path / "first" / "model.weights.bin"
+    first_bundle, first_initializers = write_deployment_bundle(
+        _bundle(), tmp_path / "first" / "model.bundle.json", tmp_path / "first" / "model.initializers.bin"
     )
-    second_json, second_weights = write_deployment_bundle(
-        _bundle(), tmp_path / "second" / "model.json", tmp_path / "second" / "model.weights.bin"
+    second_bundle, second_initializers = write_deployment_bundle(
+        _bundle(), tmp_path / "second" / "model.bundle.json", tmp_path / "second" / "model.initializers.bin"
     )
 
-    assert first_json.read_bytes() == second_json.read_bytes()
-    assert first_weights.read_bytes() == second_weights.read_bytes()
-    payload = json.loads(first_json.read_text())
+    assert first_bundle.read_bytes() == second_bundle.read_bytes()
+    assert first_initializers.read_bytes() == second_initializers.read_bytes()
+    payload = json.loads(first_bundle.read_text())
     initializer = payload["tensors"][0]["initializer"]
     assert payload["bundle"]["schema_version"] == 1
     assert initializer["dtype"] == "float32"
@@ -149,7 +148,7 @@ def test_write_deployment_bundle_is_deterministic_and_preserves_fp32(
     assert payload["transitions"] == []
     start = initializer["offset"]
     end = start + initializer["byte_size"]
-    values = np.frombuffer(first_weights.read_bytes()[start:end], dtype="<f4")
+    values = np.frombuffer(first_initializers.read_bytes()[start:end], dtype="<f4")
     np.testing.assert_array_equal(values, np.array([1.0, -2.0, 3.5, 4.0], dtype="<f4"))
 
 
@@ -159,7 +158,7 @@ def test_plain_execution_plan_is_distinct_from_deployment_bundle(tmp_path) -> No
     bundle_path, _ = write_deployment_bundle(
         bundle,
         tmp_path / "model.bundle.json",
-        tmp_path / "model.weights.bin",
+        tmp_path / "model.initializers.bin",
     )
 
     plan_payload = json.loads(plan_path.read_text())
@@ -176,29 +175,29 @@ def test_plain_execution_plan_is_distinct_from_deployment_bundle(tmp_path) -> No
 def test_write_deployment_bundle_rejects_l2_capacity_failure(tmp_path) -> None:
     with pytest.raises(ValueError, match="requires 16 L2 bytes"):
         write_deployment_bundle(
-            _bundle(l2_size=15), tmp_path / "model.json", tmp_path / "model.weights.bin"
+            _bundle(l2_size=15), tmp_path / "model.bundle.json", tmp_path / "model.initializers.bin"
         )
 
 
 def test_serialized_bundle_validation_detects_weight_corruption(tmp_path) -> None:
-    json_path, weights_path = write_deployment_bundle(
-        _bundle(), tmp_path / "model.json", tmp_path / "model.weights.bin"
+    bundle_path, initializers_path = write_deployment_bundle(
+        _bundle(), tmp_path / "model.bundle.json", tmp_path / "model.initializers.bin"
     )
-    corrupted = bytearray(weights_path.read_bytes())
+    corrupted = bytearray(initializers_path.read_bytes())
     corrupted[0] ^= 0xFF
-    weights_path.write_bytes(corrupted)
+    initializers_path.write_bytes(corrupted)
 
     with pytest.raises(ValueError, match="checksum mismatch"):
-        validate_deployment_bundle(json_path, weights_path)
+        validate_deployment_bundle(bundle_path, initializers_path)
 
 
 def test_serialized_bundle_validation_enforces_l2_capacity(tmp_path) -> None:
-    json_path, weights_path = write_deployment_bundle(
-        _bundle(), tmp_path / "model.json", tmp_path / "model.weights.bin"
+    bundle_path, initializers_path = write_deployment_bundle(
+        _bundle(), tmp_path / "model.bundle.json", tmp_path / "model.initializers.bin"
     )
 
     with pytest.raises(ValueError, match="exceeds L2 capacity"):
-        validate_deployment_bundle(json_path, weights_path, l2_capacity=15)
+        validate_deployment_bundle(bundle_path, initializers_path, l2_capacity=15)
 
 
 def test_write_deployment_bundle_rejects_initializer_tensor_dtype_mismatch(
@@ -218,6 +217,6 @@ def test_write_deployment_bundle_rejects_initializer_tensor_dtype_mismatch(
     ):
         write_deployment_bundle(
             replace(bundle, execution_plan=execution_plan),
-            tmp_path / "model.json",
-            tmp_path / "model.weights.bin",
+            tmp_path / "model.bundle.json",
+            tmp_path / "model.initializers.bin",
         )

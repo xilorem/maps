@@ -29,10 +29,8 @@ DEFAULT_MODEL_PATH = PROJECT_ROOT / "examples" / "simple_three_stage.onnx"
 
 def main():
     mesh = magia.build_mesh(width=4, height=4)
-    output_path = (
-        PROJECT_ROOT / "generated" / "magia_example.execution-plan.json"
-    )
-    weights_path = output_path.with_suffix(".weights.bin")
+    bundle_path = PROJECT_ROOT / "generated" / "magia_example.bundle.json"
+    initializers_path = bundle_path.with_suffix(".initializers.bin")
     imported = import_onnx_model(DEFAULT_MODEL_PATH)
     rewritten, graph_rewrite_effects = run_graph_rewrites_with_effects(imported)
     specialization = magia.specialize(
@@ -65,7 +63,7 @@ def main():
     )
     report = validate_execution_plan(execution_plan, PlanningConstraints())
 
-    print(f"Model: {execution_plan.name}")
+    print(f"Execution Plan: {execution_plan.name}")
     print(f"Mesh: {mesh.width}x{mesh.height}")
     print(f"Stages: {len(execution_plan.stages)}")
     print(f"Transitions: {len(execution_plan.transitions)}")
@@ -75,13 +73,13 @@ def main():
         print("Constraint violations:")
         for violation in report.violations:
             print(f"  {violation.kind}: {violation.message}")
-    execution_plan_path, packed_weights_path = write_deployment_bundle(
+    written_bundle, packed_initializers = write_deployment_bundle(
         bundle,
-        output_path,
-        weights_path,
+        bundle_path,
+        initializers_path,
     )
-    print(f"Execution Plan bundle: {execution_plan_path}")
-    print(f"Packed weights: {packed_weights_path}")
+    print(f"Deployment Bundle: {written_bundle}")
+    print(f"Packed Initializers: {packed_initializers}")
 
 
 if __name__ == "__main__":

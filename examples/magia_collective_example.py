@@ -85,11 +85,11 @@ def build_collective_bundle() -> DeploymentBundle:
 
 
 def write_collective_bundle(output_path: Path) -> tuple[Path, Path]:
-    weights_path = output_path.with_suffix(".weights.bin")
+    initializers_path = output_path.with_suffix(".initializers.bin")
     return write_deployment_bundle(
         build_collective_bundle(),
         output_path,
-        weights_path,
+        initializers_path,
     )
 
 
@@ -97,5 +97,5 @@ if __name__ == "__main__":
     write_collective_bundle(
         Path(__file__).resolve().parents[1]
         / "generated"
-        / "magia_collective.execution-plan.json"
+        / "magia_collective.bundle.json"
     )

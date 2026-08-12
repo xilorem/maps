@@ -50,7 +50,7 @@ def main():
     )
     report = validate_execution_plan(execution_plan, PlanningConstraints())
 
-    print(f"Model: {execution_plan.name}")
+    print(f"Execution Plan: {execution_plan.name}")
     print(f"Mesh: {mesh.width}x{mesh.height}")
     print(f"Stages: {len(execution_plan.stages)}")
     print(f"Transitions: {len(execution_plan.transitions)}")
@@ -61,7 +61,7 @@ def main():
         for violation in report.violations:
             print(f"  {violation.kind}: {violation.message}")
     print(
-        "Execution Plan JSON: "
+        "Execution Plan: "
         f"{write_execution_plan(execution_plan, output_path)}"
     )
 
