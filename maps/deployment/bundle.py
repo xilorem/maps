@@ -24,7 +24,7 @@ from maps.planning import (
 from maps.planning.transitions.contracts import InputTransition, OutputTransition
 from maps.target import RewriteEvent, RewriteReport, SpecializationResult
 
-from .serialization import execution_plan_json_payload
+from .serialization import execution_plan_payload
 from .weights import PackedWeights, pack_weights
 
 
@@ -134,7 +134,7 @@ def _bundle_payload(
     packed: PackedWeights,
     weights_file: str,
 ) -> dict[str, Any]:
-    payload = execution_plan_json_payload(bundle.execution_plan)
+    payload = execution_plan_payload(bundle.execution_plan)
     payload["provenance"] = {
         "rewrite_report": _rewrite_report_payload(bundle.rewrite_report),
     }
@@ -294,32 +294,3 @@ def validate_deployment_bundle(
             activation_bytes += elements * tensor["elem_bytes"]
         if len(data) + activation_bytes > l2_capacity:
             raise ValueError("deployment bundle exceeds L2 capacity")
-
-
-def write_execution_plan_bundle(
-    bundle: DeploymentBundle,
-    output_json: str | Path,
-    output_weights: str | Path,
-) -> tuple[Path, Path]:
-    """Write deterministic Execution Plan JSON and packed weights, then reopen both."""
-
-    return write_deployment_bundle(
-        bundle,
-        output_json,
-        output_weights,
-    )
-
-
-def validate_execution_plan_bundle_files(
-    execution_plan_json: str | Path,
-    weights_file: str | Path,
-    *,
-    l2_capacity: int | None = None,
-) -> None:
-    """Independently validate serialized bundle metadata against its image."""
-
-    validate_deployment_bundle(
-        execution_plan_json,
-        weights_file,
-        l2_capacity=l2_capacity,
-    )

@@ -32,8 +32,8 @@ from maps.planning.transitions import (
     build_virtual_transitions,
 )
 from maps.deployment.serialization import (
-    execution_plan_json_payload,
-    write_execution_plan_json,
+    execution_plan_payload,
+    write_execution_plan,
 )
 
 
@@ -88,7 +88,7 @@ def test_execution_plan_serializes_shard_granularity_for_every_layout_axis() -> 
         stages=(stage,),
     )
 
-    serialized_layout = execution_plan_json_payload(execution_plan)["stages"][0][
+    serialized_layout = execution_plan_payload(execution_plan)["stages"][0][
         "layers"
     ][0]["outputs"][0]["layout"]
 
@@ -328,9 +328,9 @@ def test_construct_execution_plan_unifies_communication_and_initializer_residenc
     report = validate_execution_plan(execution_plan, PlanningConstraints())
     assert report.is_valid, report.violations
 
-    payload = execution_plan_json_payload(execution_plan)
-    assert execution_plan_json_payload(execution_plan) == payload
-    written_payload = write_execution_plan_json(
+    payload = execution_plan_payload(execution_plan)
+    assert execution_plan_payload(execution_plan) == payload
+    written_payload = write_execution_plan(
         execution_plan,
         tmp_path / "execution-plan.json",
     ).read_text(encoding="utf-8")

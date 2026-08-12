@@ -19,7 +19,7 @@ from maps.planning import (
     plan,
     validate_execution_plan,
 )
-from maps.deployment.serialization import write_execution_plan_json
+from maps.deployment.serialization import write_execution_plan
 from maps.planning.execution_plan import print_submeshes
 
 DEFAULT_MODEL_PATH = PROJECT_ROOT / "examples" / "simple_three_stage.onnx"
@@ -62,7 +62,7 @@ def main():
             print(f"  {violation.kind}: {violation.message}")
     print(
         "Execution Plan JSON: "
-        f"{write_execution_plan_json(execution_plan, output_path)}"
+        f"{write_execution_plan(execution_plan, output_path)}"
     )
 
 

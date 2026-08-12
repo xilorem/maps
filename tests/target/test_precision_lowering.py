@@ -7,7 +7,7 @@ import pytest
 from maps.hardware import FixedDeviceAssignment, WorkKind, WorkSignature
 from maps.graph import Constant, ConstantStore, Graph, Node, OpKind, Tensor, TensorDType
 from maps.graph import Edge
-from maps.deployment import write_execution_plan_bundle
+from maps.deployment import write_deployment_bundle
 from maps.target.magia import build_mesh as magia_mesh
 from tests.target.workflows import magia_workflow_options, plan_magia_model
 from maps.graph import ImportedModel
@@ -547,12 +547,12 @@ def test_precision_lowering_serializes_deterministic_artifacts_and_provenance(
         _quiet_magia_options(),
     )
 
-    first_json, first_weights = write_execution_plan_bundle(
+    first_json, first_weights = write_deployment_bundle(
         first,
         tmp_path / "first" / "model.json",
         tmp_path / "first" / "weights.bin",
     )
-    second_json, second_weights = write_execution_plan_bundle(
+    second_json, second_weights = write_deployment_bundle(
         second,
         tmp_path / "second" / "model.json",
         tmp_path / "second" / "weights.bin",

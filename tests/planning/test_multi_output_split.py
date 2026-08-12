@@ -3,8 +3,8 @@ from pathlib import Path
 
 import pytest
 
-from maps.deployment import build_deployment_bundle, write_execution_plan_bundle
-from maps.deployment.serialization import execution_plan_json_payload
+from maps.deployment import build_deployment_bundle, write_deployment_bundle
+from maps.deployment.serialization import execution_plan_payload
 from maps.graph import (
     ConstantStore,
     Edge,
@@ -232,8 +232,8 @@ def test_public_planning_retains_one_split_layer_and_all_runtime_outputs() -> No
         for transition in execution_plan.transitions
         if isinstance(transition, OutputTransition)
     ) == model.graph.outputs
-    serialized_plan = execution_plan_json_payload(execution_plan)
-    assert execution_plan_json_payload(bundle.execution_plan) == serialized_plan
+    serialized_plan = execution_plan_payload(execution_plan)
+    assert execution_plan_payload(bundle.execution_plan) == serialized_plan
 
 
 def test_imported_split_deploys_three_consumer_branches_deterministically(
@@ -263,7 +263,7 @@ def test_imported_split_deploys_three_consumer_branches_deterministically(
             graph_rewrite_effects=rewrite_effects,
         )
         output_dir = tmp_path / f"build_{build_index}"
-        output_json, _ = write_execution_plan_bundle(
+        output_json, _ = write_deployment_bundle(
             bundle,
             output_dir / "execution_plan.json",
             output_dir / "weights.bin",

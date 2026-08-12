@@ -20,8 +20,8 @@ from maps.deployment import (
     write_execution_plan,
 )
 from maps.deployment.serialization import (
-    execution_plan_json_payload,
-    write_execution_plan_json,
+    execution_plan_payload,
+    write_execution_plan,
 )
 from maps.planning import ExecutionPlan, Layer, LayerInput, Stage
 from maps.operations.elementwise import UnaryElementwisePayload
@@ -36,8 +36,8 @@ def test_deployment_owns_bundle_packing_and_serialization() -> None:
     assert PackedInitializer.__module__ == "maps.deployment.weights"
     assert PackedWeights.__module__ == "maps.deployment.weights"
     assert pack_weights.__module__ == "maps.deployment.weights"
-    assert execution_plan_json_payload.__module__ == "maps.deployment.serialization"
-    assert write_execution_plan_json.__module__ == "maps.deployment.serialization"
+    assert execution_plan_payload.__module__ == "maps.deployment.serialization"
+    assert write_execution_plan.__module__ == "maps.deployment.serialization"
 
 
 def _bundle(l2_size: int = 4096) -> DeploymentBundle:

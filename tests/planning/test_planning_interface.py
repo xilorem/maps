@@ -60,7 +60,7 @@ from maps.planning.transitions import (
     build_virtual_transitions,
 )
 from maps.deployment import build_deployment_bundle
-from maps.deployment.serialization import execution_plan_json_payload
+from maps.deployment.serialization import execution_plan_payload
 from maps.target import SpecializationOptions, SpecializationResult, magia, n300d
 
 from tests.target.test_precision_lowering import _gemm_model
@@ -224,8 +224,8 @@ def test_magia_fuses_operations_around_decomposed_softmax_with_provenance(
         layer.source_operation
         for layer in execution_plan.stages[0].layers
     ) == ("producer", *("softmax",) * 7, "consumer")
-    payload = execution_plan_json_payload(execution_plan)
-    assert execution_plan_json_payload(execution_plan) == payload
+    payload = execution_plan_payload(execution_plan)
+    assert execution_plan_payload(execution_plan) == payload
     assert tuple(
         layer["source_operation"]
         for layer in payload["stages"][0]["layers"]

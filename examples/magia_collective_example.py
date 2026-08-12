@@ -7,7 +7,7 @@ from pathlib import Path
 from maps.deployment import (
     DeploymentBundle,
     build_deployment_bundle,
-    write_execution_plan_bundle,
+    write_deployment_bundle,
 )
 from maps.graph import (
     ConstantStore,
@@ -86,7 +86,7 @@ def build_collective_bundle() -> DeploymentBundle:
 
 def write_collective_bundle(output_path: Path) -> tuple[Path, Path]:
     weights_path = output_path.with_suffix(".weights.bin")
-    return write_execution_plan_bundle(
+    return write_deployment_bundle(
         build_collective_bundle(),
         output_path,
         weights_path,

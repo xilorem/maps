@@ -14,12 +14,10 @@ from maps.deployment import (
     application_build_summary,
     application_summary,
     build_application,
-    package_summary,
-    validate_deployment_package,
+    normalize_application_name,
     validate_application,
-    write_deployment_package,
+    write_execution_plan,
 )
-from maps.deployment.serialization import write_execution_plan_json
 from maps.graph import import_onnx_model, run_graph_rewrites
 from maps.planning import (
     ExecutionContract,
@@ -32,7 +30,7 @@ from maps.target import SpecializationOptions, magia, n300d
 
 
 _TARGETS: dict[str, ModuleType] = {
-    "magia": magia,
+    MAGIA_V2_TARGET: magia,
     "n300d": n300d,
 }
 
@@ -56,14 +54,13 @@ def _build_parser() -> argparse.ArgumentParser:
     commands.add_parser("plan", help="plan a model and write an Execution Plan")
     commands.add_parser("inspect", help="inspect a MAGIA Application")
     commands.add_parser("verify", help="verify a MAGIA Application")
-    commands.add_parser(
-        "package", help="build, inspect, or verify a deployment package"
-    )
     return parser
 
 
 def _add_target(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--target", choices=tuple(_TARGETS), default="magia")
+    parser.add_argument(
+        "--target", choices=tuple(_TARGETS), default=MAGIA_V2_TARGET
+    )
 
 
 def _add_planning_arguments(parser: argparse.ArgumentParser) -> None:
@@ -71,7 +68,7 @@ def _add_planning_arguments(parser: argparse.ArgumentParser) -> None:
     _add_target(parser)
     parser.add_argument("--mesh", type=_mesh)
     parser.add_argument("--token-slots", type=int, default=2)
-    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--output", type=Path)
 
 
 def _plan_parser() -> argparse.ArgumentParser:
@@ -106,20 +103,6 @@ def _input_assignment(value: str) -> tuple[str, Path]:
     return name, Path(path)
 
 
-def _package_build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="maps package")
-    _add_planning_arguments(parser)
-    parser.add_argument("--pipeline-token-capacity", type=int, default=1)
-    parser.add_argument("--maps-translate", type=Path)
-    return parser
-
-
-def _package_read_parser(action: str) -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog=f"maps package {action}")
-    parser.add_argument("package", type=Path)
-    return parser
-
-
 def _application_read_parser(action: str) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog=f"maps {action}")
     if action == "inspect":
@@ -132,34 +115,6 @@ def _mesh_options(shape: tuple[int, int] | None) -> dict[str, int]:
     if shape is None:
         return {}
     return {"width": shape[0], "height": shape[1]}
-
-
-def _run_package(arguments: list[str]) -> int:
-    if arguments and arguments[0] in {"inspect", "verify"}:
-        action = arguments[0]
-        options = _package_read_parser(action).parse_args(arguments[1:])
-        manifest = validate_deployment_package(options.package)
-        if action == "inspect":
-            print(package_summary(manifest))
-        else:
-            print(f"Valid deployment package: {options.package}")
-        return 0
-
-    options = _package_build_parser().parse_args(arguments)
-    dimensions = _mesh_options(options.mesh)
-    output = write_deployment_package(
-        options.model,
-        options.output,
-        target=options.target,
-        mesh_width=dimensions.get("width", magia.MESH_WIDTH),
-        mesh_height=dimensions.get("height", magia.MESH_HEIGHT),
-        num_token_slots=options.token_slots,
-        pipeline_token_capacity=options.pipeline_token_capacity,
-        maps_translate=options.maps_translate,
-        progress=lambda message: print(message, flush=True),
-    )
-    print(f"Deployment package: {output}")
-    return 0
 
 
 def _run_build(arguments: list[str]) -> int:
@@ -216,8 +171,11 @@ def _run_plan(arguments: list[str]) -> int:
             print_execution_plan_cost=False,
         ),
     )
-    write_execution_plan_json(execution_plan, options.output)
-    print(f"Execution Plan: {options.output}")
+    output = options.output or Path("build") / (
+        f"{normalize_application_name(options.model.stem)}.plan.json"
+    )
+    write_execution_plan(execution_plan, output)
+    print(f"Execution Plan: {output}")
     return 0
 
 
@@ -230,7 +188,6 @@ def main(arguments: list[str] | None = None) -> int:
             "inspect": _run_inspect,
             "plan": _run_plan,
             "verify": _run_verify,
-            "package": _run_package,
         }
         if arguments and (command := commands.get(arguments[0])) is not None:
             return command(arguments[1:])

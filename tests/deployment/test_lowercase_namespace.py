@@ -104,6 +104,7 @@ def test_repository_contains_no_retired_package_paths() -> None:
         repository / "maps" / "hw",
         repository / "maps" / "pipeline",
         repository / "maps" / "planner",
+        repository / "maps" / "deployment" / "package.py",
     )
 
     assert not tuple(path for path in retired_paths if path.exists())
@@ -168,4 +169,4 @@ def test_lowercase_cli_starts_successfully() -> None:
     )
 
     assert result.returncode == 0
-    assert "{build,plan,inspect,verify,package}" in result.stdout
+    assert "{build,plan,inspect,verify}" in result.stdout

@@ -15,7 +15,7 @@ from maps.planning.mapping import LayoutAxis, LayoutAxisMode, TensorLayout
 from maps.planning.mapping import Submesh
 from maps.planning import PlacementOptions, PlanningOptions, plan
 
-from maps.deployment.serialization import execution_plan_json_payload
+from maps.deployment.serialization import execution_plan_payload
 
 
 def _tensor(name: str, dtype: TensorDType, dims: tuple[int, ...]) -> Tensor:
@@ -168,7 +168,7 @@ def test_magia_plans_and_serializes_explicit_cast_on_spatz(
     )
 
     layer = execution_plan.stages[0].layers[0]
-    payload = execution_plan_json_payload(execution_plan)
+    payload = execution_plan_payload(execution_plan)
     layer_payload = payload["stages"][0]["layers"][0]
 
     assert layer.device_name == "spatz"

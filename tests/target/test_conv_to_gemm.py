@@ -4,7 +4,7 @@ import json
 import numpy as np
 import pytest
 
-from maps.deployment import write_execution_plan_bundle
+from maps.deployment import write_deployment_bundle
 from maps.graph import (
     Constant,
     ConstantStore,
@@ -224,7 +224,7 @@ def test_magia_lowers_fp16_conv_to_auditable_redmule_execution(
 
     output_json = tmp_path / "conv.json"
     output_weights = tmp_path / "conv.weights.bin"
-    write_execution_plan_bundle(bundle, output_json, output_weights)
+    write_deployment_bundle(bundle, output_json, output_weights)
     payload = json.loads(output_json.read_text(encoding="utf-8"))
     assert [
         item["rewrite_name"]
@@ -324,12 +324,12 @@ def test_magia_composes_fp32_conv_lowering_with_precision_lowering(
     assert first.graph == second.graph
     assert first.constants == second.constants
 
-    first_json, first_weights = write_execution_plan_bundle(
+    first_json, first_weights = write_deployment_bundle(
         first,
         tmp_path / "first" / "model.json",
         tmp_path / "first" / "model.weights.bin",
     )
-    second_json, second_weights = write_execution_plan_bundle(
+    second_json, second_weights = write_deployment_bundle(
         second,
         tmp_path / "second" / "model.json",
         tmp_path / "second" / "model.weights.bin",

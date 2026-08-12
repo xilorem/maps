@@ -83,7 +83,7 @@ def test_magia_example_builds_and_writes_one_execution_plan_bundle(
 
     monkeypatch.setattr(
         magia_example,
-        "write_execution_plan_bundle",
+        "write_deployment_bundle",
         write_bundle,
     )
 

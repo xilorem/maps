@@ -1,19 +1,17 @@
 PYTHON ?= ./.venv/bin/python
 MAPS_IR_DIR ?= maps-ir
 
-GENERATED_DIR ?= generated
+BUILD_DIR ?= build
 MODEL ?= examples/simple_three_stage.onnx
-TARGET ?= magia
+TARGET ?= magia-v2
 MESH ?=
 MESH_OPTION = $(if $(strip $(MESH)),--mesh $(MESH))
 TOKEN_SLOTS ?= 2
 MAX_STAGE_OPERATIONS ?= 0
-PIPELINE_TOKEN_CAPACITY ?= 1
-EXECUTION_PLAN ?= $(GENERATED_DIR)/$(TARGET).execution-plan.json
-PACKAGE ?= $(GENERATED_DIR)/$(TARGET).maps
-MAPS_TRANSLATE ?= $(MAPS_IR_DIR)/build/tools/maps-translate/maps-translate
+EXECUTION_PLAN ?= $(BUILD_DIR)/application.plan.json
+APPLICATION ?= $(BUILD_DIR)/application
 
-.PHONY: all test plan package inspect verify maps-translate clean-generated
+.PHONY: all test build plan inspect verify maps-ir clean-generated
 
 all: test
 
@@ -28,23 +26,21 @@ plan:
 		--max-stage-operations $(MAX_STAGE_OPERATIONS) \
 		--output $(EXECUTION_PLAN)
 
-package:
-	$(PYTHON) -m maps.cli package $(MODEL) \
+build:
+	$(PYTHON) -m maps.cli build $(MODEL) \
 		--target $(TARGET) \
 		$(MESH_OPTION) \
 		--token-slots $(TOKEN_SLOTS) \
-		--pipeline-token-capacity $(PIPELINE_TOKEN_CAPACITY) \
-		--maps-translate $(MAPS_TRANSLATE) \
-		--output $(PACKAGE)
+		--output $(APPLICATION)
 
 inspect:
-	$(PYTHON) -m maps.cli package inspect $(PACKAGE)
+	$(PYTHON) -m maps.cli inspect $(APPLICATION)
 
 verify:
-	$(PYTHON) -m maps.cli package verify $(PACKAGE)
+	$(PYTHON) -m maps.cli verify $(APPLICATION)
 
-maps-translate:
-	$(MAKE) -C $(MAPS_IR_DIR) maps-translate
+maps-ir:
+	$(MAKE) -C $(MAPS_IR_DIR) tools
 
 clean-generated:
-	$(MAKE) -C $(MAPS_IR_DIR) clean-generated GENERATED_DIR=../$(GENERATED_DIR)
+	$(MAKE) -C $(MAPS_IR_DIR) clean-generated GENERATED_DIR=../$(BUILD_DIR)

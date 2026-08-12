@@ -12,11 +12,12 @@ from maps.cli import main
 
 
 @pytest.mark.parametrize(
-    ("target_name", "mesh_shape"),
-    (("magia", (2, 3)), ("n300d", (8, 8))),
+    ("target_name", "target_module", "mesh_shape"),
+    (("magia-v2", "magia", (2, 3)), ("n300d", "n300d", (8, 8))),
 )
 def test_plan_command_composes_the_selected_target_workflow(
     target_name: str,
+    target_module: str,
     mesh_shape: tuple[int, int],
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -27,7 +28,7 @@ def test_plan_command_composes_the_selected_target_workflow(
     graph = object()
     execution_plan = object()
     mesh = SimpleNamespace(width=mesh_shape[0], height=mesh_shape[1])
-    target = getattr(cli_module, target_name)
+    target = getattr(cli_module, target_module)
 
     monkeypatch.setattr(
         cli_module,
@@ -62,7 +63,7 @@ def test_plan_command_composes_the_selected_target_workflow(
     )
     monkeypatch.setattr(
         cli_module,
-        "write_execution_plan_json",
+        "write_execution_plan",
         lambda value, output: calls.append(("write", value, output)) or output,
     )
     model = tmp_path / "model.onnx"
@@ -89,28 +90,35 @@ def test_plan_command_composes_the_selected_target_workflow(
     assert calls[-1] == ("write", execution_plan, output)
 
 
-def test_n300d_package_request_fails_before_deployment_work(
+def test_plan_command_defaults_to_normalized_build_path(
     tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    with pytest.raises(SystemExit, match="2"):
-        main(
-            [
-                "package",
-                str(tmp_path / "model.onnx"),
-                "--target",
-                "n300d",
-                "--output",
-                str(tmp_path / "model.maps"),
-            ]
-        )
+    written: list[Path] = []
+    imported_model = SimpleNamespace(graph=object())
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli_module, "import_onnx_model", lambda path: imported_model)
+    monkeypatch.setattr(cli_module, "run_graph_rewrites", lambda value: value)
+    monkeypatch.setattr(
+        cli_module.magia,
+        "specialize",
+        lambda model, mesh, options: SimpleNamespace(model=imported_model),
+    )
+    monkeypatch.setattr(cli_module, "plan", lambda graph, mesh, options: object())
+    monkeypatch.setattr(
+        cli_module,
+        "write_execution_plan",
+        lambda execution_plan, output: written.append(output),
+    )
 
-    assert "n300d deployment backend is unsupported" in capsys.readouterr().err
+    assert main(["plan", "Mixed-Case Model.onnx"]) == 0
+
+    assert written == [Path("build/mixed_case_model.plan.json")]
 
 
 @pytest.mark.parametrize(
     ("target_name", "mesh_shape"),
-    (("magia", (4, 4)), ("n300d", (8, 8))),
+    (("magia-v2", (4, 4)), ("n300d", (8, 8))),
 )
 def test_plan_command_plans_a_representative_model_for_each_target(
     target_name: str,
@@ -144,34 +152,30 @@ def test_plan_command_plans_a_representative_model_for_each_target(
 def test_make_exposes_target_neutral_cli_workflows() -> None:
     makefile = (Path(__file__).parents[2] / "Makefile").read_text(encoding="utf-8")
 
-    for workflow in ("test", "plan", "package", "inspect", "verify"):
+    for workflow in ("test", "build", "plan", "inspect", "verify"):
         assert f"{workflow}:" in makefile
+    assert "package:" not in makefile
+    assert "magia-v2" in makefile
     assert "-m maps.cli" in makefile
     assert "--target $(TARGET)" in makefile
     assert "examples/magia_example.py" not in makefile
     assert "-m MAPS.cli" not in makefile
 
 
-@pytest.mark.parametrize(
-    ("target_name", "mesh"),
-    (("magia", "4x4"), ("n300d", "8x8")),
-)
-def test_make_plan_executes_the_cli_for_each_target(
-    target_name: str,
-    mesh: str,
+def test_make_plan_executes_the_cli_for_magia_v2(
     tmp_path: Path,
 ) -> None:
     repository = Path(__file__).parents[2]
-    output = tmp_path / f"{target_name}.json"
+    output = tmp_path / "magia-v2.json"
 
     result = subprocess.run(
         [
             "make",
             "plan",
-            f"TARGET={target_name}",
-            f"MESH={mesh}",
+            "TARGET=magia-v2",
+            "MESH=4x4",
             f"EXECUTION_PLAN={output}",
-            "MAX_STAGE_OPERATIONS=1",
+            "MODEL=examples/simple_three_stage.onnx",
         ],
         cwd=repository,
         check=False,
@@ -181,22 +185,3 @@ def test_make_plan_executes_the_cli_for_each_target(
 
     assert result.returncode == 0, result.stderr
     assert output.is_file()
-
-
-def test_make_package_reports_the_n300d_deployment_limitation(
-    tmp_path: Path,
-) -> None:
-    repository = Path(__file__).parents[2]
-    output = tmp_path / "n300d.maps"
-
-    result = subprocess.run(
-        ["make", "package", "TARGET=n300d", f"PACKAGE={output}"],
-        cwd=repository,
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-
-    assert result.returncode != 0
-    assert "n300d deployment backend is unsupported" in result.stderr
-    assert not output.exists()

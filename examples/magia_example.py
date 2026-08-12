@@ -9,7 +9,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from maps.deployment import build_deployment_bundle, write_execution_plan_bundle
+from maps.deployment import build_deployment_bundle, write_deployment_bundle
 from maps.graph import import_onnx_model, run_graph_rewrites_with_effects
 from maps.target import SpecializationOptions, magia
 from maps.planning import (
@@ -75,7 +75,7 @@ def main():
         print("Constraint violations:")
         for violation in report.violations:
             print(f"  {violation.kind}: {violation.message}")
-    execution_plan_path, packed_weights_path = write_execution_plan_bundle(
+    execution_plan_path, packed_weights_path = write_deployment_bundle(
         bundle,
         output_path,
         weights_path,

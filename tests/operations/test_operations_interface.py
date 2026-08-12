@@ -78,7 +78,7 @@ from maps.planning.mapping import Submesh
 from maps.target.magia import build_mesh as magia_mesh
 from maps.planning import PlacementOptions, PlanningOptions, plan
 
-from maps.deployment.serialization import execution_plan_json_payload
+from maps.deployment.serialization import execution_plan_payload
 
 
 def test_operations_exposes_shared_planning_contracts() -> None:
@@ -372,7 +372,7 @@ def test_each_imported_vertical_family_plans_with_stable_observable_results(
     assert layer.device_name == device_name
     assert tuple(layer.outputs[0].layout.submesh.tile_ids) == (0,)
     if serialized_operation_name is not None:
-        serialized = execution_plan_json_payload(execution_plan)
+        serialized = execution_plan_payload(execution_plan)
         assert serialized["stages"][0]["layers"][0]["node"]["payload"][
             "op_name"
         ] == serialized_operation_name

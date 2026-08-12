@@ -134,7 +134,7 @@ def _transition_payload(
     }
 
 
-def execution_plan_json_payload(
+def execution_plan_payload(
     execution_plan: ExecutionPlan,
 ) -> dict[str, Any]:
     """Return the runtime-facing unified Execution Plan representation."""
@@ -153,7 +153,7 @@ def write_execution_plan(
 
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    payload = execution_plan_json_payload(execution_plan)
+    payload = execution_plan_payload(execution_plan)
     path.write_text(
         json.dumps(payload, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
@@ -161,17 +161,7 @@ def write_execution_plan(
     return path
 
 
-def write_execution_plan_json(
-    execution_plan: ExecutionPlan,
-    output_path: str | Path,
-) -> Path:
-    """Write one Execution Plan to JSON and return its path."""
-
-    return write_execution_plan(execution_plan, output_path)
-
-
 __all__ = [
-    "execution_plan_json_payload",
+    "execution_plan_payload",
     "write_execution_plan",
-    "write_execution_plan_json",
 ]
