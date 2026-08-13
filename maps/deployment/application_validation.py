@@ -265,6 +265,18 @@ def _validate_manifest_contract(
         or memory["runtime_region"] != "l2_arena"
     ):
         raise ValueError("application memory regions are invalid")
+    if identity["target"] == MAGIA_V3_TARGET:
+        provenance = manifest.get("provenance")
+        if (
+            not isinstance(provenance, dict)
+            or set(provenance) != {"rewrite_report"}
+            or not isinstance(provenance["rewrite_report"], list)
+            or any(
+                not isinstance(event, dict)
+                for event in provenance["rewrite_report"]
+            )
+        ):
+            raise ValueError("application rewrite provenance is invalid")
     return name, active_tiles, execution["tokens"], input_facts
 
 

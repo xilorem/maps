@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ctypes
+import json
 import os
 from pathlib import Path
 import shutil
@@ -82,6 +83,17 @@ def _run_backend(arguments: list[str]) -> None:
         )
     except (OSError, subprocess.CalledProcessError) as exc:
         raise RuntimeError("MAGIA Application generation failed") from exc
+
+
+def _record_rewrite_provenance(application: Path, bundle_path: Path) -> None:
+    manifest_path = application / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    bundle = json.loads(bundle_path.read_text(encoding="utf-8"))
+    manifest["provenance"] = bundle["provenance"]
+    manifest_path.write_text(
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
 
 
 def validate_application(application: str | Path) -> dict[str, Any]:
@@ -340,6 +352,8 @@ def build_application(
             for input_name, input_path in runtime_inputs
         )
         _run_backend(codegen_arguments)
+        if target == MAGIA_V3_TARGET:
+            _record_rewrite_provenance(application, deployment_bundle)
         generated_manifest = _validate_generated_application(
             application,
             name=application_name,
@@ -436,6 +450,21 @@ def application_summary(application: str | Path) -> str:
             (
                 f"Kernel ABI: {abi['kernel']}",
                 f"Task bundle: {abi['task_bundle']}",
+            )
+        )
+    memory = manifest["memory"]
+    lines.extend(
+        (
+            f"Packed Initializers: {memory['initializers_bytes']} bytes",
+            f"Required L2: {memory['required_l2_bytes']} bytes",
+            f"Maximum tile L1: {memory['max_tile_l1_bytes']} bytes",
+        )
+    )
+    if identity["target"] == MAGIA_V3_TARGET:
+        lines.extend(
+            (
+                f"Initializer region: {memory['initializers_region']}",
+                f"Runtime region: {memory['runtime_region']}",
             )
         )
     lines.extend(

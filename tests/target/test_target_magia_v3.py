@@ -1,8 +1,13 @@
+import os
 from pathlib import Path
+import re
+import shutil
+import subprocess
 
 import numpy as np
 import onnx
 from onnx import TensorProto, helper, numpy_helper
+import pytest
 
 from maps.cli import main
 from maps.deployment import validate_application
@@ -136,6 +141,9 @@ def test_magia_v3_identity_travels_through_the_ordinary_workflow(
     }
     assert manifest["memory"]["initializers_region"] == "l2_bulk"
     assert manifest["memory"]["runtime_region"] == "l2_arena"
+    assert manifest["provenance"]["rewrite_report"][0]["rewrite_name"] == (
+        "whole_graph_precision_specialization"
+    )
     generated_data = (application / "src/baseline.c").read_text()
     assert 'section(".l2_arena.maps_application")' in generated_data
     initializers = (application / "src/baseline_initializers.S.in").read_text()
@@ -151,4 +159,107 @@ def test_magia_v3_identity_travels_through_the_ordinary_workflow(
     assert "Target: magia-v3" in inspection
     assert "Kernel ABI: 1" in inspection
     assert "Task bundle: 1" in inspection
+    assert "Packed Initializers: 8 bytes" in inspection
+    assert "Required L2:" in inspection
+    assert "Maximum tile L1:" in inspection
+    assert "Initializer region: l2_bulk" in inspection
+    assert "Runtime region: l2_arena" in inspection
     assert main(["verify", str(application)]) == 0
+
+
+def test_generated_magia_v3_application_runs_in_configured_sdk(
+    tmp_path: Path,
+) -> None:
+    sdk_setting = os.environ.get("MAGIA_V3_SDK_ROOT")
+    if sdk_setting is None:
+        pytest.skip(
+            "set MAGIA_V3_SDK_ROOT to enable the MAGIA-v3 GVSoC acceptance check"
+        )
+    sdk = Path(sdk_setting).resolve()
+    gvrun = sdk / "gvsoc/install/bin/gvrun"
+    bootrom = sdk / "build/bin/bootrom/spatz_init.bin"
+    if not gvrun.is_file():
+        pytest.skip("the configured MAGIA-v3 SDK has no built GVSoC target")
+    if shutil.which("riscv32-unknown-elf-gcc") is None:
+        pytest.skip("the MAGIA SDK GCC toolchain is unavailable")
+    if not bootrom.is_file():
+        bootrom = tmp_path / "unused_spatz_bootrom.bin"
+        bootrom.write_bytes(bytes(256))
+
+    model = _write_float_model_with_integer_control(tmp_path / "e2e.onnx")
+    application = tmp_path / "maps_v3_e2e"
+    assert main(
+        [
+            "build",
+            str(model),
+            "--target",
+            "magia-v3",
+            "--mesh",
+            "2x2",
+            "--token-slots",
+            "1",
+            "--name",
+            "maps_v3_e2e",
+            "--output",
+            str(application),
+        ]
+    ) == 0
+
+    build = tmp_path / "sdk-build"
+    subprocess.run(
+        [
+            "cmake",
+            "-S",
+            str(sdk),
+            "-B",
+            str(build),
+            "-DTARGET_PLATFORM=magia_v3",
+            "-DTILES=2",
+            "-DPULP_CORE_COUNT=8",
+            "-DCOMPILER=GCC_PULP",
+            "-DUSE_CCACHE=OFF",
+            f"-DMAPS_APPLICATION_DIR={application}",
+        ],
+        check=True,
+    )
+    subprocess.run(
+        ["cmake", "--build", str(build), "--target", "maps_v3_e2e", "-j", "8"],
+        check=True,
+    )
+    executable = build / "bin/maps_v3_e2e"
+    sections = subprocess.run(
+        ["riscv32-unknown-elf-readelf", "-S", str(executable)],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    assert re.search(r"\.l2_bulk\s+PROGBITS\s+c0000000", sections)
+    assert re.search(r"\.l2_arena\s+NOBITS\s+cc020000", sections)
+    assert re.search(r"\.vectors\s+PROGBITS\s+cc000000", sections)
+
+    simulation = subprocess.run(
+        [
+            str(gvrun),
+            "--target",
+            "magia_v3",
+            "--param",
+            f"binary={executable}",
+            "--work-dir",
+            str(tmp_path / "gvsoc-work"),
+            "--attr",
+            "magia_v3/n_tiles_x=2",
+            "--attr",
+            "magia_v3/n_tiles_y=2",
+            "--attr",
+            "magia_v3/nb_pulp_cores=8",
+            "--attr",
+            f"magia_v3/spatz_romfile={bootrom}",
+            "run",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert "maps_v3_e2e token 0 output output checksum: af8d639d" in (
+        simulation.stdout + simulation.stderr
+    )
