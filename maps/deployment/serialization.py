@@ -140,6 +140,8 @@ def execution_plan_payload(
     """Return the runtime-facing unified Execution Plan representation."""
 
     payload = _to_jsonable(execution_plan)
+    if execution_plan.target is None:
+        payload.pop("target")
     for tensor_payload, tensor in zip(payload["tensors"], execution_plan.tensors):
         tensor_payload["is_initializer"] = tensor.is_initializer
     return payload
