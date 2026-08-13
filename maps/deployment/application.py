@@ -17,6 +17,7 @@ from .application_validation import (
     APPLICATION_SCHEMA_VERSION,
     DESCRIPTOR_ABI_VERSION,
     MAGIA_V2_TARGET,
+    MAGIA_V3_TARGET,
     OPERATION_ABI_VERSION,
     read_application_manifest,
     validate_application as _validate_application,
@@ -98,9 +99,10 @@ def _validate_generated_application(
     mesh_height: int,
     num_token_slots: int,
     execution_tokens: int,
+    target: str,
 ) -> dict[str, Any]:
     manifest = validate_application(application)
-    if manifest.get("application") != {"name": name, "target": MAGIA_V2_TARGET}:
+    if manifest.get("application") != {"name": name, "target": target}:
         raise ValueError("generated application identity does not match the build")
     if manifest.get("planned_mesh") != {
         "width": mesh_width,
@@ -121,9 +123,7 @@ def _validate_generated_application(
         or execution.get("token_slots") != num_token_slots
         or not isinstance(active_tiles, list)
         or not isinstance(abi, dict)
-        or not all(
-            isinstance(abi.get(key), int) for key in ("operation", "descriptor")
-        )
+        or not all(isinstance(value, int) for value in abi.values())
         or not isinstance(tensors, dict)
         or not all(
             isinstance(tensors.get(key), list) for key in ("inputs", "outputs")
@@ -265,7 +265,7 @@ def build_application(
 ) -> Path:
     """Build, validate, and atomically publish one MAGIA Application."""
 
-    if target != MAGIA_V2_TARGET:
+    if target not in {MAGIA_V2_TARGET, MAGIA_V3_TARGET}:
         raise ValueError(f"unsupported application Target '{target}'")
     model = Path(model_path)
     if not model.is_file():
@@ -295,6 +295,7 @@ def build_application(
     )
     bundle = build_magia_deployment_bundle(
         model,
+        target=target,
         mesh_width=mesh_width,
         mesh_height=mesh_height,
         num_token_slots=num_token_slots,
@@ -325,6 +326,15 @@ def build_application(
             f"--maps-magia-weights-file={initializers}",
             f"--maps-magia-num-tokens={execution_tokens}",
         ]
+        if target == MAGIA_V3_TARGET:
+            from maps.target import magia_v3
+
+            codegen_arguments.extend(
+                (
+                    f"--maps-magia-l2-base={magia_v3.L2_ARENA_BASE}",
+                    f"--maps-magia-l2-end={magia_v3.L2_ARENA_END}",
+                )
+            )
         codegen_arguments.extend(
             f"--maps-magia-runtime-input={input_name}={input_path}"
             for input_name, input_path in runtime_inputs
@@ -337,6 +347,7 @@ def build_application(
             mesh_height=mesh_height,
             num_token_slots=num_token_slots,
             execution_tokens=execution_tokens,
+            target=target,
         )
         candidate = application
         if previous_manifest is not None:
@@ -355,6 +366,7 @@ def build_application(
                 mesh_height=mesh_height,
                 num_token_slots=num_token_slots,
                 execution_tokens=execution_tokens,
+                target=target,
             )
         _publish_application(
             candidate,
@@ -417,6 +429,17 @@ def application_summary(application: str | Path) -> str:
         (
             f"Operation ABI: {abi['operation']}",
             f"Descriptor ABI: {abi['descriptor']}",
+        )
+    )
+    if identity["target"] == MAGIA_V3_TARGET:
+        lines.extend(
+            (
+                f"Kernel ABI: {abi['kernel']}",
+                f"Task bundle: {abi['task_bundle']}",
+            )
+        )
+    lines.extend(
+        (
             f"Generated files: {len(manifest['files']['generated'])} verified",
             f"User-owned files: {len(manifest['files']['user_owned'])} present "
             "(content not verified)",
@@ -429,6 +452,7 @@ __all__ = [
     "APPLICATION_SCHEMA_VERSION",
     "DESCRIPTOR_ABI_VERSION",
     "MAGIA_V2_TARGET",
+    "MAGIA_V3_TARGET",
     "OPERATION_ABI_VERSION",
     "application_build_summary",
     "application_summary",

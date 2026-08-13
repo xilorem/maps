@@ -7,7 +7,7 @@ from .contracts import (
     SpecializationOptions,
     SpecializationResult,
 )
-from . import magia, n300d
+from . import magia, magia_v3, n300d
 
 __all__ = [
     "PrecisionLoweringRecipe",
@@ -16,5 +16,6 @@ __all__ = [
     "SpecializationOptions",
     "SpecializationResult",
     "magia",
+    "magia_v3",
     "n300d",
 ]

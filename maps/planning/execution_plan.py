@@ -224,6 +224,7 @@ class ExecutionPlan:
     stages: tuple[Stage, ...] = field(default_factory=tuple)
     transitions: tuple[Transition, ...] = field(default_factory=tuple)
     execution: ExecutionContract = field(default_factory=ExecutionContract)
+    target: str | None = None
 
     def __post_init__(self) -> None:
         if not self.name:
@@ -319,6 +320,7 @@ def construct_execution_plan(
     virtual_transitions: tuple[VirtualTransition, ...],
     *,
     execution: ExecutionContract = ExecutionContract(),
+    target: str | None = None,
 ) -> ExecutionPlan:
     """Combine retained decisions into one complete physical Execution Plan."""
 
@@ -350,6 +352,7 @@ def construct_execution_plan(
     return ExecutionPlan(
         name=graph.name,
         mesh=mesh,
+        target=target,
         tensors=tuple(
             replace(tensor, is_initializer=id(tensor) in initializer_ids)
             for tensor in graph.tensors

@@ -40,6 +40,7 @@ class PlacementOptions:
 class PlanningOptions:
     """Complete configuration for planning a target-specialized Graph."""
 
+    target: str | None = None
     stage_formation: StageFormationOptions = field(
         default_factory=StageFormationOptions
     )

@@ -13,7 +13,7 @@ from maps.planning import (
     PlanningOptions,
     plan,
 )
-from maps.target import SpecializationOptions, magia
+from maps.target import SpecializationOptions, magia, magia_v3
 
 from .bundle import DeploymentBundle, build_deployment_bundle
 
@@ -21,6 +21,7 @@ from .bundle import DeploymentBundle, build_deployment_bundle
 def build_magia_deployment_bundle(
     model: Path,
     *,
+    target: str = "magia-v2",
     mesh_width: int,
     mesh_height: int,
     num_token_slots: int,
@@ -28,11 +29,12 @@ def build_magia_deployment_bundle(
 ) -> DeploymentBundle:
     """Compose rewriting, Target Specialization, Planning, and bundling."""
 
-    mesh = magia.build_mesh(width=mesh_width, height=mesh_height)
+    target_module = magia if target == "magia-v2" else magia_v3
+    mesh = target_module.build_mesh(width=mesh_width, height=mesh_height)
     rewritten, graph_rewrite_effects = run_graph_rewrites_with_effects(
         import_onnx_model(model)
     )
-    specialization = magia.specialize(
+    specialization = target_module.specialize(
         rewritten,
         mesh,
         SpecializationOptions(enable_precision_lowering=False),
@@ -42,6 +44,7 @@ def build_magia_deployment_bundle(
         mesh,
         PlanningOptions(
             execution=ExecutionContract(num_token_slots=num_token_slots),
+            target=target,
             allocation=AllocationOptions(print_progress=progress is not None),
             placement=PlacementOptions(
                 print_progress=progress is not None,

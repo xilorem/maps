@@ -11,6 +11,7 @@ from types import ModuleType
 
 from maps.deployment import (
     MAGIA_V2_TARGET,
+    MAGIA_V3_TARGET,
     application_build_summary,
     application_summary,
     build_application,
@@ -26,11 +27,12 @@ from maps.planning import (
     StageFormationOptions,
     plan,
 )
-from maps.target import SpecializationOptions, magia, n300d
+from maps.target import SpecializationOptions, magia, magia_v3, n300d
 
 
 _TARGETS: dict[str, ModuleType] = {
     MAGIA_V2_TARGET: magia,
+    MAGIA_V3_TARGET: magia_v3,
     "n300d": n300d,
 }
 
@@ -81,7 +83,11 @@ def _plan_parser() -> argparse.ArgumentParser:
 def _build_application_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="maps build")
     parser.add_argument("model", type=Path)
-    parser.add_argument("--target", choices=(MAGIA_V2_TARGET,), default=MAGIA_V2_TARGET)
+    parser.add_argument(
+        "--target",
+        choices=(MAGIA_V2_TARGET, MAGIA_V3_TARGET),
+        default=MAGIA_V2_TARGET,
+    )
     parser.add_argument("--mesh", type=_mesh)
     parser.add_argument("--token-slots", type=int, default=2)
     parser.add_argument("--name")
@@ -125,8 +131,8 @@ def _run_build(arguments: list[str]) -> int:
         options.output,
         name=options.name,
         target=options.target,
-        mesh_width=dimensions.get("width", magia.MESH_WIDTH),
-        mesh_height=dimensions.get("height", magia.MESH_HEIGHT),
+        mesh_width=dimensions.get("width", _TARGETS[options.target].MESH_WIDTH),
+        mesh_height=dimensions.get("height", _TARGETS[options.target].MESH_HEIGHT),
         num_token_slots=options.token_slots,
         inputs=tuple(_input_assignment(value) for value in options.input),
         progress=lambda message: print(message, flush=True),
@@ -163,6 +169,7 @@ def _run_plan(arguments: list[str]) -> int:
         specialization.model.graph,
         mesh,
         PlanningOptions(
+            target=options.target,
             execution=ExecutionContract(num_token_slots=options.token_slots),
             stage_formation=StageFormationOptions(
                 max_stage_operations=options.max_stage_operations

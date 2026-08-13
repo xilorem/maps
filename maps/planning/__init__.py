@@ -86,6 +86,7 @@ def plan(
         placements,
         virtual_transitions,
         execution=options.execution,
+        target=options.target,
     )
     require_valid_execution_plan(
         execution_plan,

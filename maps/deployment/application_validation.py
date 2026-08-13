@@ -12,6 +12,7 @@ APPLICATION_SCHEMA_VERSION = 1
 OPERATION_ABI_VERSION = 1
 DESCRIPTOR_ABI_VERSION = 1
 MAGIA_V2_TARGET = "magia-v2"
+MAGIA_V3_TARGET = "magia-v3"
 _TENSOR_DTYPE_BYTES = {
     "bool": 1,
     "uint8": 1,
@@ -180,7 +181,7 @@ def _validate_manifest_contract(
         not isinstance(identity, dict)
         or not isinstance(identity.get("name"), str)
         or identity["name"] != normalize_name(identity["name"])
-        or identity.get("target") != MAGIA_V2_TARGET
+        or identity.get("target") not in {MAGIA_V2_TARGET, MAGIA_V3_TARGET}
     ):
         raise ValueError("application identity or Target is invalid")
     name = identity["name"]
@@ -195,10 +196,13 @@ def _validate_manifest_contract(
         or not _positive_integer(mesh.get("height"))
     ):
         raise ValueError("application planned Mesh is invalid")
-    if abi != {
+    expected_abi = {
         "operation": OPERATION_ABI_VERSION,
         "descriptor": DESCRIPTOR_ABI_VERSION,
-    }:
+    }
+    if identity["target"] == MAGIA_V3_TARGET:
+        expected_abi.update(kernel=1, task_bundle=1)
+    if abi != expected_abi:
         raise ValueError("incompatible application ABI")
     if (
         not isinstance(execution, dict)
@@ -236,17 +240,31 @@ def _validate_manifest_contract(
     }:
         raise ValueError("application entry points are inconsistent")
     memory = manifest.get("memory")
+    expected_memory_keys = {
+        "initializers_bytes",
+        "required_l2_bytes",
+        "max_tile_l1_bytes",
+    }
+    if identity["target"] == MAGIA_V3_TARGET:
+        expected_memory_keys.update({"initializers_region", "runtime_region"})
     if (
         not isinstance(memory, dict)
-        or set(memory)
-        != {
-            "initializers_bytes",
-            "required_l2_bytes",
-            "max_tile_l1_bytes",
-        }
-        or not all(_nonnegative_integer(value) for value in memory.values())
+        or set(memory) != expected_memory_keys
+        or not all(
+            _nonnegative_integer(memory.get(key))
+            for key in (
+                "initializers_bytes",
+                "required_l2_bytes",
+                "max_tile_l1_bytes",
+            )
+        )
     ):
         raise ValueError("application memory requirements are invalid")
+    if identity["target"] == MAGIA_V3_TARGET and (
+        memory["initializers_region"] != "l2_bulk"
+        or memory["runtime_region"] != "l2_arena"
+    ):
+        raise ValueError("application memory regions are invalid")
     return name, active_tiles, execution["tokens"], input_facts
 
 
