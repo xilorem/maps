@@ -246,17 +246,22 @@ def _validate_manifest_contract(
         "max_tile_l1_bytes",
     }
     if identity["target"] == MAGIA_V3_TARGET:
-        expected_memory_keys.update({"initializers_region", "runtime_region"})
+        expected_memory_keys.update(
+            {"initializers_region", "runtime_region", "task_scratch_bytes"}
+        )
+    numeric_memory_keys = [
+        "initializers_bytes",
+        "required_l2_bytes",
+        "max_tile_l1_bytes",
+    ]
+    if identity["target"] == MAGIA_V3_TARGET:
+        numeric_memory_keys.append("task_scratch_bytes")
     if (
         not isinstance(memory, dict)
         or set(memory) != expected_memory_keys
         or not all(
             _nonnegative_integer(memory.get(key))
-            for key in (
-                "initializers_bytes",
-                "required_l2_bytes",
-                "max_tile_l1_bytes",
-            )
+            for key in numeric_memory_keys
         )
     ):
         raise ValueError("application memory requirements are invalid")
@@ -266,6 +271,14 @@ def _validate_manifest_contract(
     ):
         raise ValueError("application memory regions are invalid")
     if identity["target"] == MAGIA_V3_TARGET:
+        tasks = manifest.get("tasks")
+        if (
+            not isinstance(tasks, list)
+            or any(not isinstance(task, str) or not task for task in tasks)
+            or len(tasks) != len(set(tasks))
+            or bool(tasks) != (memory["task_scratch_bytes"] > 0)
+        ):
+            raise ValueError("application task bundle is invalid")
         provenance = manifest.get("provenance")
         if (
             not isinstance(provenance, dict)
