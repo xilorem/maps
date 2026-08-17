@@ -160,6 +160,12 @@ def test_mobilevit_slice_uses_the_ordinary_8x8_application_workflow(
     )
     assert ".kind = OP_SPLIT" in tile_sources
     assert ".num_outputs = 3u" in tile_sources
+    split_tile = (application / "src/tiles/tile_33.c").read_text()
+    split_op = split_tile.split("static const op_desc_t", 1)[1].split(
+        "static const fifo_send_desc_t", 1
+    )[0]
+    assert split_op.count(".slice_id =") == 4
+    assert split_op.count(".shape = {1, 128, 2, 3, 0, 0}") == 2
     runner = (application / "src/mobilevit_slice_runner.c").read_text()
     assert "MAPS_OP_ABI_VERSION == 2u" in runner
     assert "MAPS_KERNEL_ABI_VERSION == 2u" in runner
