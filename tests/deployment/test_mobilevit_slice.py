@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 import numpy as np
@@ -166,6 +167,21 @@ def test_mobilevit_slice_uses_the_ordinary_8x8_application_workflow(
     )[0]
     assert split_op.count(".slice_id =") == 4
     assert split_op.count(".shape = {1, 128, 2, 3, 0, 0}") == 2
+    group_normalize_tile = (application / "src/tiles/tile_00.c").read_text()
+    group_normalize_op = group_normalize_tile.split(
+        ".kind = OP_GROUP_NORMALIZE", 1
+    )[1].split(".params =", 1)[0]
+    assert ".num_inputs = 5u" in group_normalize_op
+    assert group_normalize_op.count(".slice_id =") == 6
+    qkv_tile = (application / "src/tiles/tile_16.c").read_text()
+    qkv_recvs = qkv_tile.split("static const fifo_recv_desc_t", 1)[1].split(
+        "static const op_desc_t", 1
+    )[0]
+    assert len(set(re.findall(r"\.slice_id = (\d+)", qkv_recvs))) == 1
+    qkv_matmul = qkv_tile.split(".kind = OP_MATMUL", 1)[1].split(
+        ".params =", 1
+    )[0]
+    assert ".num_inputs = 3u" in qkv_matmul
     runner = (application / "src/mobilevit_slice_runner.c").read_text()
     assert "MAPS_OP_ABI_VERSION == 2u" in runner
     assert "MAPS_KERNEL_ABI_VERSION == 2u" in runner
