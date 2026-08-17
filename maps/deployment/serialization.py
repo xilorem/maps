@@ -32,6 +32,7 @@ _RUNTIME_ELEMENTWISE_NAMES = {
     "add": "Add",
     "div": "Div",
     "exp": "Exp",
+    "softmaxexp": "SoftmaxExp",
     "log": "Log",
     "mul": "Mul",
     "neg": "Neg",

@@ -44,6 +44,7 @@ _UNARY_CORE_WORK = (
     WorkKind.ABS,
     WorkKind.EXP,
     WorkKind.GROUP_REDUCE,
+    WorkKind.SOFTMAX_EXP,
     WorkKind.IM2COL,
     WorkKind.LOG,
     WorkKind.NEG,
@@ -63,6 +64,7 @@ _BINARY_CORE_WORK = (
     WorkKind.MUL,
     WorkKind.POW,
     WorkKind.SUB,
+    WorkKind.GROUP_CENTERED_REDUCE,
 )
 
 
@@ -113,12 +115,14 @@ CORE_DEVICE = ScalarDevice(
         WorkKind.GEMM: 1,
         WorkKind.GROUP_NORMALIZE: 1,
         WorkKind.GROUP_REDUCE: 1,
+        WorkKind.GROUP_CENTERED_REDUCE: 1,
         WorkKind.ABS: 1,
         WorkKind.ADD: 1 / (1 + 3 * L1_CORE_TRANSFER_LATENCY),
         WorkKind.DIV: 1,
         WorkKind.CONV2D: 1,
         WorkKind.DEPTHWISE_CONV: 1,
         WorkKind.EXP: 1,
+        WorkKind.SOFTMAX_EXP: 1,
         WorkKind.LOG: 1 / 176,
         WorkKind.MUL: 1,
         WorkKind.NEG: 1,
@@ -183,22 +187,39 @@ _KERNEL_PROFILES = {
     WorkKind.DIV: _KernelProfile(1),
     WorkKind.RELU: _KernelProfile(1),
     WorkKind.EXP: _KernelProfile(5),
+    WorkKind.SOFTMAX_EXP: _KernelProfile(5),
+    WorkKind.GROUP_REDUCE: _KernelProfile(1, reduction=True),
+    WorkKind.GROUP_CENTERED_REDUCE: _KernelProfile(3, reduction=True),
+    WorkKind.GROUP_NORMALIZE: _KernelProfile(5),
     WorkKind.SIGMOID: _KernelProfile(6),
     WorkKind.REDUCE_SUM: _KernelProfile(1, reduction=True),
     WorkKind.REDUCE_MAX: _KernelProfile(1, reduction=True),
 }
 _CAST_PROFILE = _KernelProfile(1)
-_BINARY_SPATZ_WORK = frozenset({WorkKind.ADD, WorkKind.SUB, WorkKind.DIV})
+_SPATZ_INPUT_COUNTS = {
+    WorkKind.ADD: 2,
+    WorkKind.SUB: 2,
+    WorkKind.DIV: 2,
+    WorkKind.GROUP_CENTERED_REDUCE: 2,
+    WorkKind.GROUP_NORMALIZE: 5,
+}
 
 
 def _spatz_capabilities() -> frozenset[WorkSignature]:
     capabilities = {
         WorkSignature(
             work_kind,
-            (dtype, dtype) if work_kind in _BINARY_SPATZ_WORK else (dtype,),
+            (dtype,) * _SPATZ_INPUT_COUNTS.get(work_kind, 1),
             (dtype,),
         )
         for work_kind in _KERNEL_PROFILES
+        if work_kind
+        not in {
+            WorkKind.SOFTMAX_EXP,
+            WorkKind.GROUP_REDUCE,
+            WorkKind.GROUP_CENTERED_REDUCE,
+            WorkKind.GROUP_NORMALIZE,
+        }
         for dtype in _FLOAT_DTYPES
     }
     capabilities.update(

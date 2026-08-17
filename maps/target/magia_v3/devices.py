@@ -3,7 +3,7 @@
 from dataclasses import replace
 
 from maps.graph import TensorDType
-from maps.hardware import FixedDeviceAssignment
+from maps.hardware import FixedDeviceAssignment, WorkKind, WorkSignature
 from maps.target.magia.devices import (
     CORE_DEVICE,
     IDMA_READ_DEVICE,
@@ -22,6 +22,28 @@ SPATZ_DEVICE = replace(
         if all(
             dtype is TensorDType.FLOAT16
             for dtype in signature.input_dtypes + signature.output_dtypes
+        )
+        and signature.work_kind
+        in {
+            WorkKind.ADD,
+            WorkKind.RELU,
+            WorkKind.SOFTMAX_EXP,
+            WorkKind.GROUP_REDUCE,
+            WorkKind.GROUP_CENTERED_REDUCE,
+            WorkKind.GROUP_NORMALIZE,
+        }
+    )
+    | frozenset(
+        WorkSignature(
+            work_kind,
+            (TensorDType.FLOAT16,) * input_count,
+            (TensorDType.FLOAT16,),
+        )
+        for work_kind, input_count in (
+            (WorkKind.SOFTMAX_EXP, 1),
+            (WorkKind.GROUP_REDUCE, 1),
+            (WorkKind.GROUP_CENTERED_REDUCE, 2),
+            (WorkKind.GROUP_NORMALIZE, 5),
         )
     ),
 )

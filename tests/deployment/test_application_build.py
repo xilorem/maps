@@ -122,7 +122,7 @@ def test_inspect_and_verify_application_commands_report_public_facts(
     assert f"Active tiles: {len(manifest['active_physical_tiles'])}" in summary
     assert "Runtime Input: lhs/value (lhs_value), float32 [2x2], 16 bytes" in summary
     assert "Graph output: sum (sum), float32 [2x2], 16 bytes" in summary
-    assert "Operation ABI: 1" in summary
+    assert "Operation ABI: 2" in summary
     assert "Descriptor ABI: 1" in summary
     assert f"Generated files: {len(manifest['files']['generated'])} verified" in summary
     assert "User-owned files: 1 present (content not verified)" in summary
@@ -179,7 +179,7 @@ def test_validate_application_rejects_invalid_generated_state_with_diagnostics(
         ),
         (
             "incompatible",
-            lambda application, manifest: manifest["abi"].update(operation=2),
+            lambda application, manifest: manifest["abi"].update(operation=3),
             "incompatible application ABI",
         ),
         (
@@ -728,7 +728,7 @@ def test_build_application_leaves_no_partial_output_after_validation_failure(
                         },
                         "planned_mesh": {"width": 4, "height": 4},
                         "source_model": "simple_three_stage",
-                        "abi": {"operation": 1, "descriptor": 1},
+                        "abi": {"operation": 2, "descriptor": 1},
                         "execution": {"tokens": 1, "token_slots": 2},
                         "active_physical_tiles": [0],
                         "tensors": {"inputs": [], "outputs": []},

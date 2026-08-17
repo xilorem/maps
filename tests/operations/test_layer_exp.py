@@ -84,6 +84,12 @@ def test_exp_cost_uses_exp_capable_device() -> None:
 
 
 def test_elementwise_work_kinds_preserve_operation_identity() -> None:
+    softmax_exp = UnaryElementwisePayload(
+        op_name="SoftmaxExp",
+        x=_make_exp_op().x,
+        output=_make_exp_op().output,
+    )
+    assert softmax_exp.work_kind is WorkKind.SOFTMAX_EXP
     assert UNARY_ELEMENTWISE_OPS["sigmoid"] is WorkKind.SIGMOID
     assert UNARY_ELEMENTWISE_OPS["sqrt"] is WorkKind.SQRT
     assert UNARY_ELEMENTWISE_OPS["log"] is WorkKind.LOG

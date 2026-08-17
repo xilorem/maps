@@ -86,7 +86,7 @@ def decompose_softmax_node(node: Node) -> tuple[tuple[Tensor, ...], tuple[Node, 
     )
 
     shifted = _same_shape_tensor(f"{node.name}__shifted", x)
-    exp = _same_shape_tensor(f"{node.name}__exp", x)
+    exp = _same_shape_tensor(f"{node.name}__softmax_exp", x)
     sum_local = _reduced_tensor(f"{node.name}__sum_local", x, axis)
     new_tensors.extend((shifted, exp, sum_local))
     nodes.extend(
@@ -106,15 +106,15 @@ def decompose_softmax_node(node: Node) -> tuple[tuple[Tensor, ...], tuple[Node, 
                 attributes={**attributes, "softmax_step": "sub"},
             ),
             Node(
-                name=f"{node.name}__exp",
+                name=f"{node.name}__softmax_exp",
                 kind=OpKind.ELEMENTWISE,
                 inputs=(shifted,),
                 outputs=(exp,),
                 payload=UnaryElementwisePayload(
-                    op_name="Exp",
+                    op_name="SoftmaxExp",
                     x=shifted,
                     output=exp,
-                    work_kind=WorkKind.EXP,
+                    work_kind=WorkKind.SOFTMAX_EXP,
                 ),
                 attributes={**attributes, "softmax_step": "exp"},
             ),

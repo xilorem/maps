@@ -133,7 +133,7 @@ def test_graph_rewrites_reject_generated_node_name_collisions(tmp_path: Path) ->
                     "Relu",
                     ("intermediate",),
                     ("output",),
-                    name="softmax__exp",
+                    name="softmax__softmax_exp",
                 ),
             ),
             "collision",
@@ -147,6 +147,6 @@ def test_graph_rewrites_reject_generated_node_name_collisions(tmp_path: Path) ->
 
     with pytest.raises(
         ValueError,
-        match="generated node name collision: 'softmax__exp'",
+        match="generated node name collision: 'softmax__softmax_exp'",
     ):
         run_graph_rewrites(import_onnx_model(model_path))

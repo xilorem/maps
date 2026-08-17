@@ -9,7 +9,7 @@ from typing import Any, Callable, NamedTuple
 
 
 APPLICATION_SCHEMA_VERSION = 1
-OPERATION_ABI_VERSION = 1
+OPERATION_ABI_VERSION = 2
 DESCRIPTOR_ABI_VERSION = 1
 MAGIA_V2_TARGET = "magia-v2"
 MAGIA_V3_TARGET = "magia-v3"
@@ -201,7 +201,7 @@ def _validate_manifest_contract(
         "descriptor": DESCRIPTOR_ABI_VERSION,
     }
     if identity["target"] == MAGIA_V3_TARGET:
-        expected_abi.update(kernel=1, task_bundle=1)
+        expected_abi.update(kernel=2, task_bundle=2)
     if abi != expected_abi:
         raise ValueError("incompatible application ABI")
     if (

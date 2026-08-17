@@ -180,9 +180,9 @@ def test_magia_v3_identity_travels_through_the_ordinary_workflow(
     assert manifest["tensors"]["outputs"][0]["dtype"] == "float16"
     assert manifest["abi"] == {
         "descriptor": 1,
-        "kernel": 1,
-        "operation": 1,
-        "task_bundle": 1,
+        "kernel": 2,
+        "operation": 2,
+        "task_bundle": 2,
     }
     assert manifest["memory"]["initializers_region"] == "l2_bulk"
     assert manifest["memory"]["runtime_region"] == "l2_arena"
@@ -204,8 +204,8 @@ def test_magia_v3_identity_travels_through_the_ordinary_workflow(
     assert main(["inspect", str(application)]) == 0
     inspection = capsys.readouterr().out
     assert "Target: magia-v3" in inspection
-    assert "Kernel ABI: 1" in inspection
-    assert "Task bundle: 1" in inspection
+    assert "Kernel ABI: 2" in inspection
+    assert "Task bundle: 2" in inspection
     assert "Packed Initializers: 8 bytes" in inspection
     assert "Required L2:" in inspection
     assert "Maximum tile L1:" in inspection
@@ -307,18 +307,22 @@ def test_magia_v2_add_application_does_not_use_magia_v3_task_bundle(
     assert "add_task_bin.h" not in runner
 
 
-def test_magia_v3_rejects_spatz_assignment_without_tile_local_task(
+def test_magia_v3_executes_sub_through_the_core_adapter(
     tmp_path: Path,
 ) -> None:
-    with pytest.raises(RuntimeError, match="generation failed"):
-        build_application(
-            _write_fp16_sub_model(tmp_path / "sub.onnx"),
-            tmp_path / "sub",
-            target="magia-v3",
-            mesh_width=1,
-            mesh_height=1,
-            num_token_slots=1,
-        )
+    application = build_application(
+        _write_fp16_sub_model(tmp_path / "sub.onnx"),
+        tmp_path / "sub",
+        target="magia-v3",
+        mesh_width=1,
+        mesh_height=1,
+        num_token_slots=1,
+    )
+
+    assert validate_application(application)["tasks"] == []
+    assert ".kind = OP_SUB" in (
+        application / "src/tiles/tile_00.c"
+    ).read_text()
 
 
 def test_generated_magia_v3_application_runs_in_configured_sdk(
@@ -534,7 +538,7 @@ def test_generated_magia_v3_application_executes_multiple_tile_local_spatz_tasks
             "-DCOMPILER=GCC_PULP",
             "-DUSE_CCACHE=OFF",
             "-DSPATZ_TESTS=ON",
-            "-DCMAKE_C_FLAGS=-DMAPS_TASK_BUNDLE_ABI_VERSION=2",
+            "-DCMAKE_C_FLAGS=-DMAPS_TASK_BUNDLE_ABI_VERSION=3",
             f"-DMAPS_APPLICATION_DIR={application}",
         ],
         check=True,

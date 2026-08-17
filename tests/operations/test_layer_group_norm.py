@@ -5,8 +5,9 @@ from maps.graph import Tensor
 from maps.target.magia import build_mesh as magia_mesh
 from maps.operations.collective import AllReducePayload
 from maps.operations.normalization import (
+    GroupCenteredReducePayload,
     GroupNormalizationPayload,
-    GroupNormalizeFromMomentsPayload,
+    GroupNormalizeFromStatsPayload,
     GroupReducePayload,
     decompose_group_normalization_node,
 )
@@ -32,18 +33,19 @@ def test_group_normalization_decomposes_like_softmax_with_collectives() -> None:
 
     tensors, nodes = decompose_group_normalization_node(node)
 
-    assert len(tensors) == 5
+    assert len(tensors) == 4
     assert tuple(item.name for item in nodes) == (
-        "group_norm__square",
-        "group_norm__reduce_sum",
-        "group_norm__reduce_sumsq",
+        "group_norm__scaled_sum",
         "group_norm__allreduce_sum",
-        "group_norm__allreduce_sumsq",
+        "group_norm__scaled_centered_sumsq",
+        "group_norm__allreduce_variance",
         "group_norm__normalize",
     )
-    assert isinstance(nodes[1].payload, GroupReducePayload)
+    assert isinstance(nodes[0].payload, GroupReducePayload)
+    assert isinstance(nodes[1].payload, AllReducePayload)
+    assert isinstance(nodes[2].payload, GroupCenteredReducePayload)
     assert isinstance(nodes[3].payload, AllReducePayload)
-    assert isinstance(nodes[-1].payload, GroupNormalizeFromMomentsPayload)
+    assert isinstance(nodes[-1].payload, GroupNormalizeFromStatsPayload)
     assert all("stage_group_id" not in item.attributes for item in nodes)
     assert nodes[-1].payload.element_count_per_group == 8
 
@@ -57,7 +59,13 @@ def test_group_normalization_tile_work_uses_owned_values_and_channel_affine() ->
     bias = _tensor("bias", (4,))
     output = _tensor("output", x.dims)
     reduce = GroupReducePayload(x, stats, num_groups=2)
-    normalize = GroupNormalizeFromMomentsPayload(
+    centered_reduce = GroupCenteredReducePayload(
+        x,
+        stats,
+        stats,
+        num_groups=2,
+    )
+    normalize = GroupNormalizeFromStatsPayload(
         x,
         stats,
         stats,
@@ -72,6 +80,10 @@ def test_group_normalization_tile_work_uses_owned_values_and_channel_affine() ->
         reduce.output_layouts(submesh),
         submesh.tiles[1],
     )
+    centered_work = centered_reduce.build_tile_work(
+        centered_reduce.output_layouts(submesh),
+        submesh.tiles[1],
+    )
     normalize_work = normalize.build_tile_work(
         normalize.output_layouts(submesh),
         submesh.tiles[1],
@@ -84,6 +96,7 @@ def test_group_normalization_tile_work_uses_owned_values_and_channel_affine() ->
         TensorRange(0, 1),
         TensorRange(0, 1),
     )
+    assert centered_work.input_slices[1].tensor_slice == reduce_work.output_slice
     assert normalize_work.output_slice.dims[-1] == TensorRange(2, 2)
     assert normalize_work.input_tile_slices[3].dims[0] == TensorRange(0, 4)
     assert normalize_work.input_tile_slices[4].dims[0] == TensorRange(0, 4)

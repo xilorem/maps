@@ -566,7 +566,7 @@ def test_decompose_graph_lowers_softmax_to_grouped_internal_nodes() -> None:
         "softmax_0__reduce_max",
         "softmax_0__allreduce_max",
         "softmax_0__sub",
-        "softmax_0__exp",
+        "softmax_0__softmax_exp",
         "softmax_0__reduce_sum",
         "softmax_0__allreduce_sum",
         "softmax_0__div",
@@ -585,7 +585,7 @@ def test_decompose_graph_lowers_softmax_to_grouped_internal_nodes() -> None:
         "softmax_0__max_local",
         "softmax_0__max_global",
         "softmax_0__shifted",
-        "softmax_0__exp",
+        "softmax_0__softmax_exp",
         "softmax_0__sum_local",
         "softmax_0__sum_global",
     }.issubset({tensor.name for tensor in lowered_graph.tensors})
@@ -597,10 +597,14 @@ def test_decompose_graph_lowers_softmax_to_grouped_internal_nodes() -> None:
     assert edges_by_dst["softmax_0__reduce_max"] == {"x"}
     assert edges_by_dst["softmax_0__allreduce_max"] == {"softmax_0__max_local"}
     assert edges_by_dst["softmax_0__sub"] == {"x", "softmax_0__max_global"}
-    assert edges_by_dst["softmax_0__exp"] == {"softmax_0__shifted"}
-    assert edges_by_dst["softmax_0__reduce_sum"] == {"softmax_0__exp"}
+    assert lowered_graph.nodes[3].payload.work_kind is WorkKind.SOFTMAX_EXP
+    assert edges_by_dst["softmax_0__softmax_exp"] == {"softmax_0__shifted"}
+    assert edges_by_dst["softmax_0__reduce_sum"] == {"softmax_0__softmax_exp"}
     assert edges_by_dst["softmax_0__allreduce_sum"] == {"softmax_0__sum_local"}
-    assert edges_by_dst["softmax_0__div"] == {"softmax_0__exp", "softmax_0__sum_global"}
+    assert edges_by_dst["softmax_0__div"] == {
+        "softmax_0__softmax_exp",
+        "softmax_0__sum_global",
+    }
 
     output_edges = [edge for edge in lowered_graph.edges if edge.dst is None]
     assert len(output_edges) == 1
@@ -625,7 +629,7 @@ def test_decompose_graph_keeps_explicit_singleton_collectives_for_unsharded_axis
         "softmax_0__reduce_max",
         "softmax_0__allreduce_max",
         "softmax_0__sub",
-        "softmax_0__exp",
+        "softmax_0__softmax_exp",
         "softmax_0__reduce_sum",
         "softmax_0__allreduce_sum",
         "softmax_0__div",

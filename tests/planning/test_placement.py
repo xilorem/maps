@@ -1,3 +1,5 @@
+import pytest
+
 from maps.hardware import L2Memory, Mesh
 from maps.graph import Edge, Graph, Node, OpKind, TensorDType, decompose_graph
 from maps.planning.mapping import Submesh
@@ -17,6 +19,31 @@ from maps.planning.placement.evaluation import build_virtual_traffic
 from maps.planning.transitions import VirtualIntermediateTransition, build_virtual_transitions
 from tests.noc_utils import rectangular_test_noc, rectangular_test_tiles
 from maps.target import magia
+
+
+def test_serpentine_fallback_partitions_a_full_mesh_into_connected_regions() -> None:
+    mesh = _test_mesh(4, 2)
+
+    regions = placement_topology.snake_stage_regions(
+        mesh,
+        ordered_stage_ids=(3, 7, 9),
+        tile_counts={3: 3, 7: 2, 9: 3},
+    )
+
+    assert regions == {3: {0, 1, 2}, 7: {3, 7}, 9: {4, 5, 6}}
+    assert _share_boundary(mesh, regions[3], regions[7])
+    assert _share_boundary(mesh, regions[7], regions[9])
+
+
+def test_serpentine_fallback_rejects_sparse_allocations() -> None:
+    mesh = _test_mesh(4, 2)
+
+    with pytest.raises(ValueError, match="full-mesh allocation"):
+        placement_topology.snake_stage_regions(
+            mesh,
+            ordered_stage_ids=(0, 1),
+            tile_counts={0: 2, 1: 2},
+        )
 
 
 def _test_mesh(width: int, height: int) -> Mesh:

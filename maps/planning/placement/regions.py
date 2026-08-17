@@ -37,16 +37,27 @@ def build_initial_stage_placements(
             for other_stage_id in ordered_stage_ids[stage_idx + 1:]
         }
         target = stage_target_point(stage_id, mesh, placed_regions, traffic)
-        region = grow_stage_region(
-            stage_id=stage_id,
-            mesh=mesh,
-            allowed_tile_ids=free_tile_ids,
-            tile_count=tile_counts[stage_id],
-            target=target,
-            traffic=traffic,
-            placed_regions=placed_regions,
-            remaining_tile_counts=remaining_tile_counts,
-        )
+        try:
+            region = grow_stage_region(
+                stage_id=stage_id,
+                mesh=mesh,
+                allowed_tile_ids=free_tile_ids,
+                tile_count=tile_counts[stage_id],
+                target=target,
+                traffic=traffic,
+                placed_regions=placed_regions,
+                remaining_tile_counts=remaining_tile_counts,
+            )
+        except ValueError:
+            if sum(tile_counts.values()) != mesh.num_tiles:
+                raise
+            # Any consecutive interval of a serpentine mesh traversal is
+            # connected.  It is therefore a complete feasibility fallback
+            # when communication-aware region growth paints itself into a
+            # corner on a densely allocated mesh.
+            placed_regions = snake_stage_regions(mesh, ordered_stage_ids, tile_counts)
+            _debug(debug, "[placement] initial growth used serpentine fallback")
+            return placements_from_regions(mesh, stage_plans, placed_regions)
         placed_regions[stage_id] = region
         free_tile_ids -= region
         _debug(
@@ -56,6 +67,33 @@ def build_initial_stage_placements(
             f"tiles={sorted(region)}",
         )
     return placements_from_regions(mesh, stage_plans, placed_regions)
+
+
+def snake_stage_regions(
+    mesh: Mesh,
+    ordered_stage_ids: tuple[int, ...],
+    tile_counts: dict[int, int],
+) -> dict[int, set[int]]:
+    """Partition a serpentine Hamiltonian path into connected stage regions."""
+
+    traversal = tuple(
+        mesh.tile(x, y).tile_id
+        for y in range(mesh.height)
+        for x in (
+            range(mesh.width)
+            if y % 2 == 0
+            else range(mesh.width - 1, -1, -1)
+        )
+    )
+    regions: dict[int, set[int]] = {}
+    offset = 0
+    for stage_id in ordered_stage_ids:
+        next_offset = offset + tile_counts[stage_id]
+        regions[stage_id] = set(traversal[offset:next_offset])
+        offset = next_offset
+    if offset != mesh.num_tiles:
+        raise ValueError("serpentine fallback requires full-mesh allocation")
+    return regions
 
 
 def grow_stage_region(

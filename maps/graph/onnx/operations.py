@@ -560,7 +560,7 @@ ONNX_OPERATION_CONVERTERS: dict[str, OperationConversion] = {
     },
 }
 
-assert set(UNARY_ELEMENTWISE_OPS) == {
+assert set(UNARY_ELEMENTWISE_OPS) - {"softmaxexp"} == {
     "abs", "exp", "log", "neg", "relu", "sigmoid", "sqrt"
 }
 assert set(BINARY_ELEMENTWISE_OPS) == {"add", "div", "mul", "pow", "sub"}

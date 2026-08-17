@@ -27,6 +27,7 @@ UNARY_ELEMENTWISE_OPS: dict[str, WorkKind] = {
     "relu": WorkKind.RELU,
     "sigmoid": WorkKind.SIGMOID,
     "sqrt": WorkKind.SQRT,
+    "softmaxexp": WorkKind.SOFTMAX_EXP,
 }
 
 BINARY_ELEMENTWISE_OPS: dict[str, WorkKind] = {
