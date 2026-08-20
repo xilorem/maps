@@ -224,6 +224,33 @@ def test_validate_application_accepts_scalar_tensor_metadata(tmp_path: Path) -> 
     assert validate_application(application)["tensors"]["outputs"][0]["shape"] == []
 
 
+def test_validate_application_accepts_tile_ids_padded_to_the_mesh_width(
+    tmp_path: Path,
+) -> None:
+    repository = Path(__file__).parents[2]
+    application = build_application(
+        repository / "examples" / "simple_three_stage.onnx",
+        tmp_path / "application",
+        mesh_width=1,
+        mesh_height=1,
+    )
+    manifest_path = application / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    original = application / "src/tiles/tile_00.c"
+    padded = application / "src/tiles/tile_0000.c"
+    original.rename(padded)
+    manifest["planned_mesh"] = {"width": 32, "height": 32}
+    tile_record = next(
+        record
+        for record in manifest["files"]["generated"]
+        if record["role"] == "tile_plan"
+    )
+    tile_record["path"] = "src/tiles/tile_0000.c"
+    manifest_path.write_text(json.dumps(manifest))
+
+    assert validate_application(application)["active_physical_tiles"] == [0]
+
+
 def test_validate_application_rejects_inconsistent_input_tokens_and_symlinked_paths(
     tmp_path: Path,
 ) -> None:

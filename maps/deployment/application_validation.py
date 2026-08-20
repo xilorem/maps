@@ -405,7 +405,12 @@ def _validate_files(
         f"src/{name}_initializers.S.in",
         f"data/{name}.initializers.bin",
     }
-    expected_tiles = {f"src/tiles/tile_{tile:02d}.c" for tile in active_tiles}
+    planned_mesh = manifest["planned_mesh"]
+    physical_tile_count = planned_mesh["width"] * planned_mesh["height"]
+    tile_id_width = max(2, len(str(physical_tile_count - 1)))
+    expected_tiles = {
+        f"src/tiles/tile_{tile:0{tile_id_width}d}.c" for tile in active_tiles
+    }
     if not required_generated.issubset(generated_paths):
         raise ValueError("application generated file contract is incomplete")
     actual_tiles = {

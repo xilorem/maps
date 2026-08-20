@@ -5,7 +5,7 @@ from dataclasses import replace
 from maps.graph import TensorDType
 from maps.hardware import FixedDeviceAssignment, WorkKind, WorkSignature
 from maps.target.magia.devices import (
-    CORE_DEVICE,
+    CORE_DEVICE as MAGIA_V2_CORE_DEVICE,
     IDMA_READ_DEVICE,
     IDMA_WRITE_DEVICE,
     REDMULE_DEVICE,
@@ -46,6 +46,10 @@ SPATZ_DEVICE = replace(
             (WorkKind.GROUP_NORMALIZE, 5),
         )
     ),
+)
+CORE_DEVICE = replace(
+    MAGIA_V2_CORE_DEVICE,
+    capabilities=MAGIA_V2_CORE_DEVICE.capabilities - SPATZ_DEVICE.capabilities,
 )
 TILE_DEVICES = (
     IDMA_READ_DEVICE,

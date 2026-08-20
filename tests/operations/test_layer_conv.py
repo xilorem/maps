@@ -84,3 +84,24 @@ def test_depthwise_conv_shards_matching_input_weight_and_bias_channels() -> None
         submesh.tiles[1],
         MAGIA_CORE_DEVICE,
     ) == 162
+
+
+def test_depthwise_conv_rebases_unaligned_channel_multiplier_shards() -> None:
+    mesh = magia_mesh()
+    submesh = Submesh(mesh=mesh, submesh_id=0, x0=0, y0=0, width=3, height=1)
+    x = Tensor(name="x", rank=4, dims=(1, 4, 5, 5), elem_bytes=2)
+    w = Tensor(name="w", rank=4, dims=(8, 1, 3, 3), elem_bytes=2)
+    b = Tensor(name="b", rank=1, dims=(8,), elem_bytes=2)
+    output = Tensor(name="out", rank=4, dims=(1, 8, 3, 3), elem_bytes=2)
+    op = DepthwiseConvPayload(x=x, w=w, b=b, output=output)
+
+    tile_work = op.build_tile_work(
+        output_layouts=op.output_layouts(submesh),
+        tile=submesh.tiles[1],
+    )
+
+    assert tile_work.output_slice.dims[1] == TensorRange(start=3, length=3)
+    assert tile_work.input_slice.dims[1] == TensorRange(start=1, length=2)
+    assert tile_work.weight_slice.dims[0] == TensorRange(start=3, length=3)
+    assert tile_work.bias_slice is not None
+    assert tile_work.bias_slice.dims[0] == TensorRange(start=3, length=3)

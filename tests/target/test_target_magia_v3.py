@@ -11,7 +11,7 @@ import pytest
 
 from maps.cli import main
 from maps.deployment import build_application, validate_application
-from maps.graph import TensorDType, import_onnx_model
+from maps.graph import TensorDType, import_onnx_model, run_graph_rewrites
 from maps.hardware import WorkKind, WorkSignature
 from maps.operations.cast import CastPayload
 from maps.target import magia, magia_v3
@@ -90,6 +90,38 @@ def _write_fp16_sub_model(path: Path) -> Path:
     return path
 
 
+def _write_fp16_padded_conv_model(path: Path) -> Path:
+    runtime_input = helper.make_tensor_value_info(
+        "input", TensorProto.FLOAT16, [1, 1, 5, 5]
+    )
+    output = helper.make_tensor_value_info(
+        "output", TensorProto.FLOAT16, [1, 2, 3, 3]
+    )
+    weights = numpy_helper.from_array(
+        np.arange(18, dtype=np.float16).reshape(2, 1, 3, 3),
+        name="weights",
+    )
+    bias = numpy_helper.from_array(np.zeros(2, dtype=np.float16), name="bias")
+    graph = helper.make_graph(
+        [
+            helper.make_node(
+                "Conv",
+                ["input", "weights", "bias"],
+                ["output"],
+                kernel_shape=[3, 3],
+                strides=[2, 2],
+                pads=[1, 1, 1, 1],
+            )
+        ],
+        "padded_conv",
+        [runtime_input],
+        [output],
+        [weights, bias],
+    )
+    onnx.save(helper.make_model(graph), path)
+    return path
+
+
 def test_magia_v3_is_distinct_and_specializes_runtime_floats_to_fp16(
     tmp_path: Path,
 ) -> None:
@@ -131,6 +163,23 @@ def test_magia_v3_is_distinct_and_specializes_runtime_floats_to_fp16(
     assert magia_v3.build_mesh(width=1, height=1).tiles[0].assigned_device(
         signature
     ) is magia_v3.REDMULE_DEVICE
+
+
+def test_complete_mobilevit_has_one_magia_v3_implementation_per_signature() -> None:
+    mesh = magia_v3.build_mesh(width=1, height=1)
+    specialized = magia_v3.specialize(
+        run_graph_rewrites(import_onnx_model(Path("examples/mobilenet.onnx"))),
+        mesh,
+    ).model
+
+    for node in specialized.graph.nodes:
+        signature = WorkSignature.from_node(node)
+        capable_devices = [
+            device for device in mesh.tiles[0].devices if device.supports(signature)
+        ]
+        assert [device.name for device in capable_devices] == [
+            mesh.tiles[0].assigned_device(signature).name
+        ], f"{node.name} has an ambiguous {signature}"
 
 
 def test_magia_v3_identity_travels_through_the_ordinary_workflow(
@@ -286,6 +335,25 @@ def test_generated_magia_v3_application_resolves_multiple_spatz_tasks(
     assert "runtime.relu_fp16_task = RELU_FP16_SPATZ_TASK" in runner
     assert runner.count("maps_operation_runtime_init(&runtime)") == 1
     assert "incompatible Spatz task-bundle ABI" in runner
+
+
+def test_generated_magia_v3_im2col_preserves_complete_convolution_geometry(
+    tmp_path: Path,
+) -> None:
+    application = build_application(
+        _write_fp16_padded_conv_model(tmp_path / "padded_conv.onnx"),
+        tmp_path / "padded_conv",
+        target="magia-v3",
+        mesh_width=1,
+        mesh_height=1,
+        num_token_slots=1,
+    )
+
+    tile = (application / "src/tiles/tile_00.c").read_text()
+    im2col = tile.split(".kind = OP_IM2COL", 1)[1].split(
+        "static const op_desc_t", 1
+    )[0]
+    assert ".params = {196611u, 131074u, 65537u, 65537u, 65537u" in im2col
 
 
 def test_magia_v2_add_application_does_not_use_magia_v3_task_bundle(
