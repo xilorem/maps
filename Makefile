@@ -7,6 +7,10 @@ TARGET ?= magia-v2
 MESH ?=
 MESH_OPTION = $(if $(strip $(MESH)),--mesh $(MESH))
 TOKEN_SLOTS ?= 2
+NAME ?=
+NAME_OPTION = $(if $(strip $(NAME)),--name $(NAME))
+INPUT ?=
+INPUT_OPTION = $(if $(strip $(INPUT)),--input $(INPUT))
 MAX_STAGE_OPERATIONS ?= 0
 EXECUTION_PLAN ?=
 EXECUTION_PLAN_OPTION = $(if $(strip $(EXECUTION_PLAN)),--output $(EXECUTION_PLAN))
@@ -32,6 +36,8 @@ build:
 		--target $(TARGET) \
 		$(MESH_OPTION) \
 		--token-slots $(TOKEN_SLOTS) \
+		$(NAME_OPTION) \
+		$(INPUT_OPTION) \
 		--output $(APPLICATION)
 
 inspect:
