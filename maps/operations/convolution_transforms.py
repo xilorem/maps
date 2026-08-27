@@ -75,6 +75,26 @@ def _spatial_matrix_layout(
     )
 
 
+def _spatial_im2col_layout(
+    tensor: Tensor,
+    submesh: Submesh,
+    logical_shape: tuple[int, int] | None,
+    row_granularity: int,
+) -> TensorLayout:
+    logical_width, logical_height = _logical_dims(logical_shape)
+    return TensorLayout(
+        submesh=submesh,
+        mesh_x=LayoutAxis(mode=LayoutAxisMode.REPLICATE),
+        mesh_y=LayoutAxis(
+            mode=LayoutAxisMode.SHARD,
+            tensor_axis=1,
+            shard_granularity=row_granularity,
+        ),
+        logical_width=logical_width,
+        logical_height=logical_height,
+    )
+
+
 def _spatial_activation_layout(
     tensor: Tensor,
     submesh: Submesh,
@@ -157,7 +177,7 @@ class _TransformPayload(OpPayload):
 
 @dataclass(frozen=True)
 class Im2ColPayload(_TransformPayload):
-    """Extract flattened convolution patches for one local matrix multiply."""
+    """Extract convolution patches as the GEMM's K-by-N operand."""
 
     x: Tensor
     output: Tensor
@@ -165,6 +185,7 @@ class Im2ColPayload(_TransformPayload):
     strides: tuple[int, int] = (1, 1)
     pads: tuple[int, int, int, int] = (0, 0, 0, 0)
     dilations: tuple[int, int] = (1, 1)
+    channels_first: bool = False
     op_name: str = field(default="Im2Col", init=False)
 
     def __post_init__(self) -> None:
@@ -186,7 +207,12 @@ class Im2ColPayload(_TransformPayload):
         dh, dw = self.dilations
         oh = (h + pt + pb - dh * (kh - 1) - 1) // sh + 1
         ow = (w + pl + pr - dw * (kw - 1) - 1) // sw + 1
-        if self.output.dims != (n * oh * ow, c * kh * kw):
+        expected = (
+            (c * kh * kw, n * oh * ow)
+            if self.channels_first
+            else (n * oh * ow, c * kh * kw)
+        )
+        if self.output.dims != expected:
             raise ValueError("Im2Col output shape does not match convolution geometry")
         if self.x.elem_bytes != self.output.elem_bytes:
             raise ValueError("Im2Col tensors must agree on element size")
@@ -197,8 +223,13 @@ class Im2ColPayload(_TransformPayload):
         logical_shape: tuple[int, int] | None = None,
     ) -> tuple[TensorLayout, ...]:
         output_width = self._output_spatial_dims()[1]
+        layout = (
+            _spatial_im2col_layout
+            if self.channels_first
+            else _spatial_activation_layout
+        )
         return (
-            _spatial_activation_layout(
+            layout(
                 self.output,
                 submesh,
                 logical_shape,
@@ -214,7 +245,7 @@ class Im2ColPayload(_TransformPayload):
         output_layout = self.single_output_layout(output_layouts)
         output_slice = tile_tensor_slice(self.output, output_layout, tile)
         output_width = self._output_spatial_dims()[1]
-        output_rows = output_slice.dims[0]
+        output_rows = output_slice.dims[1 if self.channels_first else 0]
         if output_rows.length == 0:
             input_height = TensorRange(0, 0)
             input_width = TensorRange(0, 0)
@@ -362,6 +393,117 @@ class ChannelShardedGemmPayload(GemmPayload):
                 logical_shape,
                 self.row_granularity,
             ),
+        )
+
+
+@dataclass(frozen=True)
+class ConvGemmTileWork(TileWork):
+    """One tile's channel and output-height shard of a dense Conv GEMM."""
+
+    weight: Tensor
+    im2col: Tensor
+    bias: Tensor | None
+    output: Tensor
+    weight_slice: TensorSlice
+    im2col_slice: TensorSlice
+    bias_slice: TensorSlice | None
+    output_slice: TensorSlice
+
+    @property
+    def work_kind(self) -> WorkKind:
+        return WorkKind.GEMM
+
+    @property
+    def input_slices(self) -> tuple[TensorSliceRef, ...]:
+        values = [
+            TensorSliceRef(self.weight, self.weight_slice),
+            TensorSliceRef(self.im2col, self.im2col_slice),
+        ]
+        if self.bias is not None and self.bias_slice is not None:
+            values.append(TensorSliceRef(self.bias, self.bias_slice))
+        return tuple(values)
+
+    @property
+    def output_slices(self) -> tuple[TensorSliceRef, ...]:
+        return (TensorSliceRef(self.output, self.output_slice),)
+
+    def dimensions(self) -> tuple[int, int, int, int]:
+        return (
+            1,
+            self.output_slice.dims[1].length,
+            self.output_slice.dims[2].length * self.output_slice.dims[3].length,
+            self.weight_slice.dims[1].length,
+        )
+
+    def operation_count(self) -> int:
+        _, m_size, n_size, k_size = self.dimensions()
+        return m_size * n_size * k_size
+
+
+@dataclass(frozen=True)
+class ConvGemmPayload(GemmPayload):
+    """Dense Conv GEMM whose row-major result is already NCHW-compatible."""
+
+    def __post_init__(self) -> None:
+        if self.x.rank != 2 or self.w.rank != 2 or self.output.rank != 4:
+            raise ValueError("Conv GEMM requires [M,K], [K,N], and NCHW tensors")
+        if self.output.dims[0] != 1:
+            raise ValueError("Conv GEMM supports only batch size 1")
+        if self.x.dims[1] != self.w.dims[0]:
+            raise ValueError("Conv GEMM tensors must agree on K dimension")
+        if self.x.dims[0] != self.output.dims[1]:
+            raise ValueError("Conv GEMM weights and output must agree on channels")
+        if self.w.dims[1] != self.output.dims[2] * self.output.dims[3]:
+            raise ValueError("Conv GEMM im2col and output must agree on spatial size")
+        if self.y is not None and self.y.dims != (self.output.dims[1],):
+            raise ValueError("Conv GEMM bias must contain one value per output channel")
+        if any(
+            tensor.elem_bytes != self.output.elem_bytes
+            for tensor in (self.x, self.w) + ((self.y,) if self.y is not None else ())
+        ):
+            raise ValueError("Conv GEMM tensors must agree on element size")
+
+    def output_layouts(
+        self,
+        submesh: Submesh,
+        logical_shape: tuple[int, int] | None = None,
+    ) -> tuple[TensorLayout, ...]:
+        return (_spatial_output_layout(self.output, submesh, logical_shape),)
+
+    def build_tile_work(
+        self,
+        output_layouts: tuple[TensorLayout, ...],
+        tile: Tile,
+    ) -> ConvGemmTileWork:
+        output_slice = tile_tensor_slice(
+            self.output, self.single_output_layout(output_layouts), tile
+        )
+        channels = output_slice.dims[1]
+        output_width = self.output.dims[3]
+        spatial = TensorRange(
+            output_slice.dims[2].start * output_width,
+            output_slice.dims[2].length * output_width,
+        )
+        weight_slice = TensorSlice(
+            rank=2,
+            dims=(channels, TensorRange(0, self.x.dims[1])),
+        )
+        im2col_slice = TensorSlice(
+            rank=2,
+            dims=(TensorRange(0, self.w.dims[0]), spatial),
+        )
+        bias_slice = (
+            TensorSlice(rank=1, dims=(channels,)) if self.y is not None else None
+        )
+        return ConvGemmTileWork(
+            weight=self.x,
+            im2col=self.w,
+            bias=self.y,
+            output=self.output,
+            weight_slice=weight_slice,
+            im2col_slice=im2col_slice,
+            bias_slice=bias_slice,
+            output_slice=output_slice,
         )
 
 

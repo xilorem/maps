@@ -37,6 +37,8 @@ from .convolution import (
 from .convolution_transforms import (
     ChannelShardedBiasAddPayload,
     ChannelShardedGemmPayload,
+    ConvGemmPayload,
+    ConvGemmTileWork,
     ConvTransformCostModel,
     Im2ColPayload,
     OutputReformatPayload,
@@ -78,6 +80,8 @@ __all__ = [
     "ConvTransformCostModel",
     "ChannelShardedBiasAddPayload",
     "ChannelShardedGemmPayload",
+    "ConvGemmPayload",
+    "ConvGemmTileWork",
     "DepthwiseConvPayload",
     "DepthwiseConvTileWork",
     "ElementwiseCostModel",

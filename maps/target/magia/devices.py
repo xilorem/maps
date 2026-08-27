@@ -182,7 +182,9 @@ class _MemoryAction(Enum):
 
 
 _KERNEL_PROFILES = {
+    WorkKind.GEMM: _KernelProfile(1),
     WorkKind.ADD: _KernelProfile(1),
+    WorkKind.MUL: _KernelProfile(1),
     WorkKind.SUB: _KernelProfile(1),
     WorkKind.DIV: _KernelProfile(1),
     WorkKind.RELU: _KernelProfile(1),
@@ -215,6 +217,8 @@ def _spatz_capabilities() -> frozenset[WorkSignature]:
         for work_kind in _KERNEL_PROFILES
         if work_kind
         not in {
+            WorkKind.GEMM,
+            WorkKind.MUL,
             WorkKind.SOFTMAX_EXP,
             WorkKind.GROUP_REDUCE,
             WorkKind.GROUP_CENTERED_REDUCE,

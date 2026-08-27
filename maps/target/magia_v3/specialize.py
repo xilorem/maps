@@ -123,7 +123,7 @@ def specialize(
         ),
         converted_initializers=converted_initializers,
     )
-    convolution = lower_convolutions(specialized)
+    convolution = lower_convolutions(specialized, spatz_conv_gemm=True)
     convolution.model.validate()
     return SpecializationResult(
         convolution.model,

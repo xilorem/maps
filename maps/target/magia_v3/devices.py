@@ -7,11 +7,22 @@ from maps.hardware import FixedDeviceAssignment, WorkKind, WorkSignature
 from maps.target.magia.devices import (
     CORE_DEVICE as MAGIA_V2_CORE_DEVICE,
     IDMA_READ_DEVICE,
-    IDMA_WRITE_DEVICE,
-    REDMULE_DEVICE,
+    IDMA_WRITE_DEVICE as MAGIA_V2_IDMA_WRITE_DEVICE,
+    REDMULE_DEVICE as MAGIA_V2_REDMULE_DEVICE,
     SPATZ_DEVICE as MAGIA_V2_SPATZ_DEVICE,
 )
 
+_FP16_IM2COL = WorkSignature(
+    WorkKind.IM2COL,
+    (TensorDType.FLOAT16,),
+    (TensorDType.FLOAT16,),
+)
+
+IDMA_WRITE_DEVICE = replace(
+    MAGIA_V2_IDMA_WRITE_DEVICE,
+    throughput={**MAGIA_V2_IDMA_WRITE_DEVICE.throughput, WorkKind.IM2COL: 6.0},
+    capabilities=frozenset({_FP16_IM2COL}),
+)
 
 SPATZ_DEVICE = replace(
     MAGIA_V2_SPATZ_DEVICE,
@@ -26,11 +37,13 @@ SPATZ_DEVICE = replace(
         and signature.work_kind
         in {
             WorkKind.ADD,
+            WorkKind.MUL,
             WorkKind.RELU,
             WorkKind.SOFTMAX_EXP,
             WorkKind.GROUP_REDUCE,
             WorkKind.GROUP_CENTERED_REDUCE,
             WorkKind.GROUP_NORMALIZE,
+            WorkKind.GEMM,
         }
     )
     | frozenset(
@@ -40,16 +53,27 @@ SPATZ_DEVICE = replace(
             (TensorDType.FLOAT16,),
         )
         for work_kind, input_count in (
+            (WorkKind.MUL, 2),
             (WorkKind.SOFTMAX_EXP, 1),
             (WorkKind.GROUP_REDUCE, 1),
             (WorkKind.GROUP_CENTERED_REDUCE, 2),
             (WorkKind.GROUP_NORMALIZE, 5),
+            (WorkKind.GEMM, 2),
+            (WorkKind.GEMM, 3),
         )
     ),
 )
+REDMULE_DEVICE = replace(
+    MAGIA_V2_REDMULE_DEVICE,
+    capabilities=MAGIA_V2_REDMULE_DEVICE.capabilities - SPATZ_DEVICE.capabilities,
+)
 CORE_DEVICE = replace(
     MAGIA_V2_CORE_DEVICE,
-    capabilities=MAGIA_V2_CORE_DEVICE.capabilities - SPATZ_DEVICE.capabilities,
+    capabilities=(
+        MAGIA_V2_CORE_DEVICE.capabilities
+        - SPATZ_DEVICE.capabilities
+        - IDMA_WRITE_DEVICE.capabilities
+    ),
 )
 TILE_DEVICES = (
     IDMA_READ_DEVICE,
@@ -61,7 +85,7 @@ TILE_DEVICES = (
 DEVICE_ASSIGNMENT = FixedDeviceAssignment(
     {
         signature: device.name
-        for device in (REDMULE_DEVICE, CORE_DEVICE, SPATZ_DEVICE)
+        for device in (IDMA_WRITE_DEVICE, REDMULE_DEVICE, CORE_DEVICE, SPATZ_DEVICE)
         for signature in device.capabilities
     }
 )

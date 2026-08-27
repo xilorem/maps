@@ -25,6 +25,7 @@ from maps.operations.cast import CastPayload
 from maps.operations.convolution import Conv2DPayload
 from maps.operations.convolution_transforms import (
     ChannelShardedGemmPayload,
+    ConvGemmPayload,
     Im2ColPayload,
     OutputReformatPayload,
 )
@@ -116,7 +117,11 @@ class RewriteTransformResult:
     effects: tuple[RewriteEffect, ...] = ()
 
 
-def lower_convolutions(model: ImportedModel) -> RewriteTransformResult:
+def lower_convolutions(
+    model: ImportedModel,
+    *,
+    spatz_conv_gemm: bool = False,
+) -> RewriteTransformResult:
     """Pack immutable OIHW filters and expose dense Conv execution explicitly."""
 
     tensors = {tensor.name: tensor for tensor in model.graph.tensors}
@@ -177,6 +182,7 @@ def lower_convolutions(model: ImportedModel) -> RewriteTransformResult:
                 op.w,
                 model.constants.get(op.w.name),
                 packed_name,
+                spatz_conv_gemm=spatz_conv_gemm,
             )
             if replace_initializer:
                 tensors[packed_weight.name] = packed_weight
@@ -201,24 +207,15 @@ def lower_convolutions(model: ImportedModel) -> RewriteTransformResult:
                 x_dtype,
             ),
             rank=2,
-            dims=(matrix_rows, matrix_depth),
+            dims=(
+                (matrix_depth, matrix_rows)
+                if spatz_conv_gemm
+                else (matrix_rows, matrix_depth)
+            ),
             elem_bytes=op.x.elem_bytes,
             dtype=x_dtype,
         )
-        gemm_output = Tensor(
-            name=_generated_name(
-                node.name,
-                "output_0",
-                "gemm_result",
-                output_dtype,
-            ),
-            rank=2,
-            dims=(matrix_rows, output_channels),
-            elem_bytes=op.output.elem_bytes,
-            dtype=output_dtype,
-        )
         add_generated_tensor(im2col_output, tensors)
-        add_generated_tensor(gemm_output, tensors)
 
         im2col = Node(
             name=_generated_name(
@@ -237,13 +234,31 @@ def lower_convolutions(model: ImportedModel) -> RewriteTransformResult:
                 strides=op.strides,
                 pads=op.pads,
                 dilations=op.dilations,
+                channels_first=spatz_conv_gemm,
             ),
             attributes={"conv_step": "im2col"},
             source_operation=node.source_operation,
         )
-        gemm_inputs = (im2col_output, packed_weight) + (
-            (op.b,) if op.b is not None else ()
-        )
+        gemm_output = op.output
+        if not spatz_conv_gemm:
+            gemm_output = Tensor(
+                name=_generated_name(
+                    node.name,
+                    "output_0",
+                    "gemm_result",
+                    output_dtype,
+                ),
+                rank=2,
+                dims=(matrix_rows, output_channels),
+                elem_bytes=op.output.elem_bytes,
+                dtype=output_dtype,
+            )
+            add_generated_tensor(gemm_output, tensors)
+        gemm_inputs = (
+            (packed_weight, im2col_output)
+            if spatz_conv_gemm
+            else (im2col_output, packed_weight)
+        ) + ((op.b,) if op.b is not None else ())
         gemm = Node(
             name=_generated_name(
                 node.name,
@@ -254,31 +269,42 @@ def lower_convolutions(model: ImportedModel) -> RewriteTransformResult:
             kind=OpKind.GEMM,
             inputs=gemm_inputs,
             outputs=(gemm_output,),
-            payload=ChannelShardedGemmPayload(
-                x=im2col_output,
-                w=packed_weight,
-                y=op.b,
-                output=gemm_output,
-                row_granularity=output_w,
+            payload=(
+                ConvGemmPayload(
+                    x=packed_weight,
+                    w=im2col_output,
+                    y=op.b,
+                    output=op.output,
+                )
+                if spatz_conv_gemm
+                else ChannelShardedGemmPayload(
+                    x=im2col_output,
+                    w=packed_weight,
+                    y=op.b,
+                    output=gemm_output,
+                    row_granularity=output_w,
+                )
             ),
             attributes={"conv_step": "gemm"},
             source_operation=node.source_operation,
         )
-        output_reformat = Node(
-            name=_generated_name(
-                node.name,
-                "output_0",
-                "reformat",
-                output_dtype,
-            ),
-            kind=OpKind.TRANSFORM,
-            inputs=(gemm_output,),
-            outputs=(op.output,),
-            payload=OutputReformatPayload(x=gemm_output, output=op.output),
-            attributes={"conv_step": "output_reformat"},
-            source_operation=node.source_operation,
-        )
-        replacements = (im2col, gemm, output_reformat)
+        replacements = (im2col, gemm)
+        if not spatz_conv_gemm:
+            output_reformat = Node(
+                name=_generated_name(
+                    node.name,
+                    "output_0",
+                    "reformat",
+                    output_dtype,
+                ),
+                kind=OpKind.TRANSFORM,
+                inputs=(gemm_output,),
+                outputs=(op.output,),
+                payload=OutputReformatPayload(x=gemm_output, output=op.output),
+                attributes={"conv_step": "output_reformat"},
+                source_operation=node.source_operation,
+            )
+            replacements += (output_reformat,)
         for replacement in replacements:
             reserve_generated_node_name(replacement.name, node_names)
         lowered_nodes.extend(replacements)
@@ -337,15 +363,25 @@ def _pack_weight(
     weight: Tensor,
     constant: Constant,
     packed_name: str,
+    *,
+    spatz_conv_gemm: bool = False,
 ) -> tuple[Tensor, Constant]:
     output_channels, input_channels, kernel_h, kernel_w = weight.dims
-    packed_shape = (input_channels * kernel_h * kernel_w, output_channels)
+    packed_shape = (
+        (output_channels, input_channels * kernel_h * kernel_w)
+        if spatz_conv_gemm
+        else (input_channels * kernel_h * kernel_w, output_channels)
+    )
     numpy_dtype = {
         TensorDType.FLOAT16: np.dtype("<f2"),
         TensorDType.FLOAT32: np.dtype("<f4"),
     }[cast(TensorDType, weight.dtype)]
     values = np.frombuffer(constant.data, dtype=numpy_dtype).reshape(weight.dims)
-    packed = values.transpose(1, 2, 3, 0).reshape(packed_shape)
+    packed = (
+        values.reshape(packed_shape)
+        if spatz_conv_gemm
+        else values.transpose(1, 2, 3, 0).reshape(packed_shape)
+    )
     return (
         replace(weight, name=packed_name, rank=2, dims=packed_shape),
         replace(

@@ -263,7 +263,7 @@ class ScalarDevice(Device):
 
 @dataclass(frozen=True)
 class DMADevice(Device):
-    """DMA device model using throughput-based timing."""
+    """DMA device model for transfers and explicit data-transform work."""
 
     job: DMAJob = DMAJob.READJOB
     burst_bytes: int | None = None
@@ -278,7 +278,9 @@ class DMADevice(Device):
             raise ValueError("DMA burst_bytes must be > 0 when specified")
 
     def cycles(self, work: Any) -> int:
-        raise ValueError("DMA device cannot perform compute operations")
+        if work.work_kind is WorkKind.DMA:
+            raise ValueError("DMA transfer cycles require a concrete transport model")
+        return self._throughput_cycles(work.work_kind, work.operation_count())
 
 
 
