@@ -43,6 +43,7 @@ SPATZ_DEVICE = replace(
             WorkKind.GROUP_REDUCE,
             WorkKind.GROUP_CENTERED_REDUCE,
             WorkKind.GROUP_NORMALIZE,
+            WorkKind.REDUCE_SUM,
             WorkKind.GEMM,
         }
     )
@@ -58,6 +59,7 @@ SPATZ_DEVICE = replace(
             (WorkKind.GROUP_REDUCE, 1),
             (WorkKind.GROUP_CENTERED_REDUCE, 2),
             (WorkKind.GROUP_NORMALIZE, 5),
+            (WorkKind.REDUCE_SUM, 1),
             (WorkKind.GEMM, 2),
             (WorkKind.GEMM, 3),
         )
