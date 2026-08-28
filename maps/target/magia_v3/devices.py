@@ -38,6 +38,8 @@ SPATZ_DEVICE = replace(
         in {
             WorkKind.ADD,
             WorkKind.MUL,
+            WorkKind.SUB,
+            WorkKind.DIV,
             WorkKind.RELU,
             WorkKind.SOFTMAX_EXP,
             WorkKind.GROUP_REDUCE,
@@ -55,6 +57,8 @@ SPATZ_DEVICE = replace(
         )
         for work_kind, input_count in (
             (WorkKind.MUL, 2),
+            (WorkKind.SUB, 2),
+            (WorkKind.DIV, 2),
             (WorkKind.SOFTMAX_EXP, 1),
             (WorkKind.GROUP_REDUCE, 1),
             (WorkKind.GROUP_CENTERED_REDUCE, 2),
