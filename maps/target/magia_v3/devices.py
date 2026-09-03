@@ -3,7 +3,7 @@
 from dataclasses import replace
 
 from maps.graph import TensorDType
-from maps.hardware import FixedDeviceAssignment, WorkKind, WorkSignature
+from maps.hardware import CollectiveCost, FixedDeviceAssignment, WorkKind, WorkSignature
 from maps.target.magia.devices import (
     CORE_DEVICE as MAGIA_V2_CORE_DEVICE,
     IDMA_READ_DEVICE,
@@ -27,6 +27,16 @@ IDMA_WRITE_DEVICE = replace(
 SPATZ_DEVICE = replace(
     MAGIA_V2_SPATZ_DEVICE,
     vlen_bits=256,
+    collective_costs={
+        WorkKind.ALL_REDUCE_SUM: CollectiveCost(
+            participant_rounds=2,
+            hop_cycles=1,
+        ),
+        WorkKind.ALL_REDUCE_MAX: CollectiveCost(
+            participant_rounds=2,
+            hop_cycles=1,
+        ),
+    },
     capabilities=frozenset(
         signature
         for signature in MAGIA_V2_SPATZ_DEVICE.capabilities
@@ -46,6 +56,8 @@ SPATZ_DEVICE = replace(
             WorkKind.GROUP_CENTERED_REDUCE,
             WorkKind.GROUP_NORMALIZE,
             WorkKind.REDUCE_SUM,
+            WorkKind.ALL_REDUCE_SUM,
+            WorkKind.ALL_REDUCE_MAX,
             WorkKind.GEMM,
         }
     )
@@ -64,6 +76,8 @@ SPATZ_DEVICE = replace(
             (WorkKind.GROUP_CENTERED_REDUCE, 2),
             (WorkKind.GROUP_NORMALIZE, 5),
             (WorkKind.REDUCE_SUM, 1),
+            (WorkKind.ALL_REDUCE_SUM, 1),
+            (WorkKind.ALL_REDUCE_MAX, 1),
             (WorkKind.GEMM, 2),
             (WorkKind.GEMM, 3),
         )

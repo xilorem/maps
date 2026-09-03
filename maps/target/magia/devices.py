@@ -196,6 +196,8 @@ _KERNEL_PROFILES = {
     WorkKind.SIGMOID: _KernelProfile(6),
     WorkKind.REDUCE_SUM: _KernelProfile(1, reduction=True),
     WorkKind.REDUCE_MAX: _KernelProfile(1, reduction=True),
+    WorkKind.ALL_REDUCE_SUM: _KernelProfile(1, reduction=True),
+    WorkKind.ALL_REDUCE_MAX: _KernelProfile(1, reduction=True),
 }
 _CAST_PROFILE = _KernelProfile(1)
 _SPATZ_INPUT_COUNTS = {
@@ -223,6 +225,8 @@ def _spatz_capabilities() -> frozenset[WorkSignature]:
             WorkKind.GROUP_REDUCE,
             WorkKind.GROUP_CENTERED_REDUCE,
             WorkKind.GROUP_NORMALIZE,
+            WorkKind.ALL_REDUCE_SUM,
+            WorkKind.ALL_REDUCE_MAX,
         }
         for dtype in _FLOAT_DTYPES
     }
