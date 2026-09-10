@@ -55,6 +55,7 @@ SPATZ_DEVICE = replace(
             WorkKind.GROUP_REDUCE,
             WorkKind.GROUP_CENTERED_REDUCE,
             WorkKind.GROUP_NORMALIZE,
+            WorkKind.REDUCE_MAX,
             WorkKind.REDUCE_SUM,
             WorkKind.ALL_REDUCE_SUM,
             WorkKind.ALL_REDUCE_MAX,

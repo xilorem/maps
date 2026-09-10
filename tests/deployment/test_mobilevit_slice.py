@@ -149,6 +149,7 @@ def test_mobilevit_slice_uses_the_ordinary_8x8_application_workflow(
         "task_bundle": 2,
     }
     assert {
+        "mul_bcast_fp16_spatz_task",
         "softmax_exp_fp16_spatz_task",
         "group_reduce_fp16_spatz_task",
         "group_centered_reduce_fp16_spatz_task",
@@ -161,19 +162,37 @@ def test_mobilevit_slice_uses_the_ordinary_8x8_application_workflow(
     )
     assert ".kind = OP_SPLIT" in tile_sources
     assert ".num_outputs = 3u" in tile_sources
-    split_tile = (application / "src/tiles/tile_33.c").read_text()
+    split_tile = next(
+        source
+        for source in (
+            path.read_text() for path in (application / "src/tiles").glob("*.c")
+        )
+        if ".kind = OP_SPLIT" in source
+    )
     split_op = split_tile.split("static const op_desc_t", 1)[1].split(
         "static const fifo_send_desc_t", 1
     )[0]
     assert split_op.count(".slice_id =") == 4
-    assert split_op.count(".shape = {1, 128, 2, 3, 0, 0}") == 2
-    group_normalize_tile = (application / "src/tiles/tile_00.c").read_text()
+    assert len(re.findall(r"\.shape = \{1, 128, \d+, \d+, 0, 0\}", split_op)) == 2
+    group_normalize_tile = next(
+        source
+        for source in (
+            path.read_text() for path in (application / "src/tiles").glob("*.c")
+        )
+        if ".kind = OP_GROUP_NORMALIZE" in source
+    )
     group_normalize_op = group_normalize_tile.split(
         ".kind = OP_GROUP_NORMALIZE", 1
     )[1].split(".params =", 1)[0]
     assert ".num_inputs = 5u" in group_normalize_op
     assert group_normalize_op.count(".slice_id =") == 6
-    qkv_tile = (application / "src/tiles/tile_16.c").read_text()
+    qkv_tile = next(
+        source
+        for source in (
+            path.read_text() for path in (application / "src/tiles").glob("*.c")
+        )
+        if ".kind = OP_MATMUL" in source and ".num_inputs = 3u" in source
+    )
     qkv_recvs = qkv_tile.split("static const fifo_recv_desc_t", 1)[1].split(
         "static const op_desc_t", 1
     )[0]

@@ -14,6 +14,7 @@ from maps.deployment import build_application, validate_application
 from maps.graph import TensorDType, import_onnx_model, run_graph_rewrites
 from maps.hardware import WorkKind, WorkSignature
 from maps.operations.cast import CastPayload
+from maps.operations.convolution_transforms import ConvGemmPayload, Im2ColPayload
 from maps.target import magia, magia_v3
 
 
@@ -70,6 +71,32 @@ def _write_fp16_add_relu_model(path: Path) -> Path:
         ],
         "two_local_tasks",
         [lhs, rhs],
+        [output],
+    )
+    onnx.save(helper.make_model(graph), path)
+    return path
+
+
+def _write_fp16_broadcast_mul_model(path: Path) -> Path:
+    lhs = helper.make_tensor_value_info(
+        "lhs", TensorProto.FLOAT16, [1, 2, 2, 4]
+    )
+    row = helper.make_tensor_value_info(
+        "row", TensorProto.FLOAT16, [1, 1, 2, 4]
+    )
+    scalar = helper.make_tensor_value_info(
+        "scalar", TensorProto.FLOAT16, [1, 2, 2, 1]
+    )
+    output = helper.make_tensor_value_info(
+        "output", TensorProto.FLOAT16, [1, 2, 2, 4]
+    )
+    graph = helper.make_graph(
+        [
+            helper.make_node("Mul", ["lhs", "row"], ["weighted"]),
+            helper.make_node("Mul", ["weighted", "scalar"], ["output"]),
+        ],
+        "two_broadcast_muls",
+        [lhs, row, scalar],
         [output],
     )
     onnx.save(helper.make_model(graph), path)
@@ -159,10 +186,44 @@ def test_magia_v3_is_distinct_and_specializes_runtime_floats_to_fp16(
         for device in magia_v3.TILE_DEVICES
         if signature in device.capabilities
     ]
-    assert capable == ["redmule"]
+    assert capable == ["spatz"]
     assert magia_v3.build_mesh(width=1, height=1).tiles[0].assigned_device(
         signature
-    ) is magia_v3.REDMULE_DEVICE
+    ) is magia_v3.SPATZ_DEVICE
+
+
+def test_magia_v3_conv_uses_idma_k_by_n_and_direct_spatz_nchw(
+    tmp_path: Path,
+) -> None:
+    imported = run_graph_rewrites(
+        import_onnx_model(_write_fp16_padded_conv_model(tmp_path / "conv.onnx"))
+    )
+    mesh = magia_v3.build_mesh(width=1, height=1)
+    result = magia_v3.specialize(imported, mesh)
+
+    assert [node.name for node in result.model.graph.nodes] == [
+        "Conv_0__input_0_im2col_float16",
+        "Conv_0__output_0_gemm_float16",
+    ]
+    im2col, gemm = result.model.graph.nodes
+    assert isinstance(im2col.payload, Im2ColPayload)
+    assert im2col.payload.channels_first
+    assert im2col.outputs[0].dims == (9, 9)
+    assert isinstance(gemm.payload, ConvGemmPayload)
+    assert gemm.inputs[0].dims == (2, 9)
+    assert gemm.inputs[1] == im2col.outputs[0]
+    assert gemm.outputs == result.model.graph.outputs
+    assert mesh.tiles[0].assigned_device(WorkSignature.from_node(im2col)).name == (
+        "idma_write"
+    )
+    assert mesh.tiles[0].assigned_device(WorkSignature.from_node(gemm)).name == (
+        "spatz"
+    )
+    packed = result.model.constants.get("weights")
+    np.testing.assert_array_equal(
+        np.frombuffer(packed.data, dtype="<f2").reshape(2, 9),
+        np.arange(18, dtype=np.float16).reshape(2, 9),
+    )
 
 
 def test_complete_mobilevit_has_one_magia_v3_implementation_per_signature() -> None:
@@ -235,8 +296,8 @@ def test_magia_v3_identity_travels_through_the_ordinary_workflow(
     }
     assert manifest["memory"]["initializers_region"] == "l2_bulk"
     assert manifest["memory"]["runtime_region"] == "l2_arena"
-    assert manifest["memory"]["task_scratch_bytes"] == 0
-    assert manifest["tasks"] == []
+    assert manifest["memory"]["task_scratch_bytes"] == 65536
+    assert manifest["tasks"] == ["matmul_fp16_spatz_task"]
     assert manifest["provenance"]["rewrite_report"][0]["rewrite_name"] == (
         "whole_graph_precision_specialization"
     )
@@ -337,6 +398,41 @@ def test_generated_magia_v3_application_resolves_multiple_spatz_tasks(
     assert "incompatible Spatz task-bundle ABI" in runner
 
 
+def test_generated_magia_v3_broadcast_muls_share_the_spatz_task(
+    tmp_path: Path,
+) -> None:
+    signature = WorkSignature(
+        WorkKind.MUL,
+        (TensorDType.FLOAT16, TensorDType.FLOAT16),
+        (TensorDType.FLOAT16,),
+    )
+    mesh = magia_v3.build_mesh(width=1, height=1)
+    assert mesh.tiles[0].assigned_device(signature) is magia_v3.SPATZ_DEVICE
+    assert magia_v3.SPATZ_DEVICE.supports(signature)
+    assert not magia_v3.CORE_DEVICE.supports(signature)
+
+    application = build_application(
+        _write_fp16_broadcast_mul_model(tmp_path / "mul.onnx"),
+        tmp_path / "mul",
+        target="magia-v3",
+        mesh_width=1,
+        mesh_height=1,
+        num_token_slots=1,
+    )
+
+    manifest = validate_application(application)
+    assert manifest["tasks"] == ["mul_bcast_fp16_spatz_task"]
+    cmake = (application / "CMakeLists.txt").read_text()
+    assert cmake.count("mul/spatz_task/mul_bcast_fp16_spatz_task.c") == 1
+    assert "MAPS_HAS_MUL_SPATZ_TASK=1" in cmake
+    runner = (application / "src/mul_runner.c").read_text()
+    assert (
+        "runtime.mul_bcast_fp16_task = MUL_BCAST_FP16_SPATZ_TASK" in runner
+    )
+    tile = (application / "src/tiles/tile_00.c").read_text()
+    assert tile.count(".kind = OP_MUL") == 2
+
+
 def test_generated_magia_v3_im2col_preserves_complete_convolution_geometry(
     tmp_path: Path,
 ) -> None:
@@ -354,6 +450,10 @@ def test_generated_magia_v3_im2col_preserves_complete_convolution_geometry(
         "static const op_desc_t", 1
     )[0]
     assert ".params = {196611u, 131074u, 65537u, 65537u, 65537u" in im2col
+    assert "OP_OUTPUT_REFORMAT" not in tile
+    assert ".kind = OP_MATMUL" in tile
+    manifest = validate_application(application)
+    assert manifest["tasks"] == ["matmul_fp16_spatz_task"]
 
 
 def test_magia_v2_add_application_does_not_use_magia_v3_task_bundle(
@@ -375,7 +475,7 @@ def test_magia_v2_add_application_does_not_use_magia_v3_task_bundle(
     assert "add_task_bin.h" not in runner
 
 
-def test_magia_v3_executes_sub_through_the_core_adapter(
+def test_magia_v3_executes_sub_through_the_spatz_adapter(
     tmp_path: Path,
 ) -> None:
     application = build_application(
@@ -387,7 +487,14 @@ def test_magia_v3_executes_sub_through_the_core_adapter(
         num_token_slots=1,
     )
 
-    assert validate_application(application)["tasks"] == []
+    assert validate_application(application)["tasks"] == [
+        "binary_bcast_fp16_spatz_task"
+    ]
+    runner = (application / "src/sub_runner.c").read_text()
+    assert (
+        "runtime.binary_bcast_fp16_task = BINARY_BCAST_FP16_SPATZ_TASK"
+        in runner
+    )
     assert ".kind = OP_SUB" in (
         application / "src/tiles/tile_00.c"
     ).read_text()
