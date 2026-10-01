@@ -1,6 +1,6 @@
 """MAGIA-v3 Mesh construction and deployment memory contracts."""
 
-from maps.hardware import L1Memory, L2Memory, Mesh, Tile
+from maps.hardware import DMARuntimeCost, L1Memory, L2Memory, Mesh, Tile
 from maps.target.magia.mesh import (
     L1_BANDWIDTH_BYTES,
     MESH_HEIGHT,
@@ -39,6 +39,14 @@ def build_mesh(width: int = MESH_WIDTH, height: int = MESH_HEIGHT) -> Mesh:
         height=height,
         l2_memory=L2Memory(L2_SIZE_BYTES, L2_BANDWIDTH_BYTES),
         noc=_noc(width, height),
+        # Conservative runtime floor from the 2026-09-30 MobileViT 4x4/8x8
+        # traces: small payloads take at least about 2,000 cycles per copy. This is
+        # not a fitted contention or credit-wait model. Keep the coefficients
+        # separate so isolated DMA measurements can refine them.
+        dma_runtime_cost=DMARuntimeCost(
+            submission_cycles=2_000,
+            packed_intermediates=True,
+        ),
         tiles=tuple(
             Tile(
                 tile_id=y * width + x,

@@ -357,6 +357,9 @@ def test_generated_magia_v3_add_application_bundles_its_spatz_task(
     runner = (application / "src/add_runner.c").read_text()
     assert '#include "add_task_bin.h"' in runner
     assert runner.count("maps_operation_runtime_init(&runtime)") == 1
+    assert "if (maps_operation_runtime_init(&runtime) != 0)" in runner
+    assert "if (active && maps_operation_runtime_init" not in runner
+    assert "if (active)\n    maps_fifo_init(&plan);" in runner
     assert "runtime.add_fp16_task = ADD_FP16_SPATZ_TASK" in runner
     tile = (application / "src/tiles/tile_00.c").read_text()
     assert ".kind = OP_ADD" in tile

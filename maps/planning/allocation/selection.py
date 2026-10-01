@@ -1,4 +1,4 @@
-"""L1-feasible seeding and greedy virtual tile-allocation growth."""
+"""L1-feasible seeding and whole-plan virtual allocation search."""
 
 from __future__ import annotations
 
@@ -56,6 +56,26 @@ def seed_stage_candidates(
     return candidates
 
 
+def candidate_tile_counts(current: int, budget: int) -> tuple[int, ...]:
+    """Probe coarse counts and their neighbors, then refine around the current size.
+
+    A linear sweep spends most analysis on large unused allocations. Powers of
+    two cross non-monotone regions, while adjacent counts refine a useful
+    allocation and permit one-tile growth or removal. Endpoints retain the
+    minimum and maximum budget choices. This is O(log budget) per sweep.
+    """
+
+    counts = {
+        1, budget, current - 1, current, current + 1,
+        current // 2, current * 2,
+    }
+    count = 1
+    while count <= budget:
+        counts.update((count - 1, count, count + 1))
+        count *= 2
+    return tuple(sorted(count for count in counts if 1 <= count <= budget))
+
+
 def grow_stage_candidates(
     context: AllocationContext,
     mesh: Mesh,
@@ -65,141 +85,94 @@ def grow_stage_candidates(
     communication_weight: float,
     debug: bool,
 ) -> tuple[dict[int, StageCandidate], SelectionEvaluation]:
-    """Spend remaining tiles while improving the global bottleneck objective.
+    """Best-improvement local search over counts, layouts, and tile exchanges.
 
-    On each iteration stages are ordered by their current bottleneck metric.
-    Before a stage participates in one growth step, doubling its current tile
-    count must improve the objective. A failed doubling probe permanently
-    removes that stage from growth consideration.
-    The first stage with a feasible allocation growth that lexicographically
-    improves all ordered bottlenecks receives the smallest such growth.  Search
-    stops when the mesh is full or no globally improving allocation exists.
+    Counts are explored with logarithmic coarse probes and local refinement;
+    every feasible layout at those counts is considered, including shrinking
+    and same-count layout changes. Exchanges transfer a donor's released tiles
+    to another stage atomically, so a full mesh can escape an overgrown stage.
+    Stage formation stays fixed. Strict objective descent guarantees termination;
+    this neighborhood search does not guarantee the global optimum.
     """
 
     selected_candidates = dict(selected_candidates)
-    used_tiles = _used_tile_count(selected_candidates)
-    active_stage_ids = set(context.stage_formation)
+    evaluations: dict[tuple[tuple[int, int, tuple[int, int]], ...], SelectionEvaluation] = {}
 
-    _debug(debug, f"[allocation] start used_tiles={used_tiles}/{mesh.num_tiles}")
-    _debug(
-        debug,
-        "[allocation] "
-        f"initial_tile_counts={_candidate_tile_counts(selected_candidates)}",
-    )
-    _debug(debug, "[allocation] phase=greedy_growth")
-
-    current_evaluation = evaluate_candidate_selection(
-        selected_candidates,
-        mesh=mesh,
-        stage_latency_weight=stage_latency_weight,
-        communication_weight=communication_weight,
-        graph=context.graph,
-    )
-    while used_tiles < mesh.num_tiles:
-        current_metrics = current_evaluation.metrics
-
-        stage_order = tuple(
-            sorted(
-                active_stage_ids,
-                key=lambda stage_id: (-current_metrics[stage_id], stage_id),
-            )
+    def evaluate(selection: dict[int, StageCandidate]) -> SelectionEvaluation:
+        key = tuple(
+            (stage, candidate.plan.tile_count, candidate.plan.logical_shape)
+            for stage, candidate in selection.items()
         )
-
-        _debug(debug, f"[allocation] used_tiles={used_tiles}/{mesh.num_tiles}")
-        _debug(debug, f"[allocation] current_selection_metrics={_format_metrics(current_metrics)}")
-        _debug(debug, f"[allocation] stage_order_by_bottleneck={stage_order}")
-
-        chosen_stage_id: int | None = None
-        chosen_tile_count: int | None = None
-
-        for stage_id in stage_order:
-            _debug(
-                debug,
-                "[allocation] "
-                f"try_stage={stage_id} nodes={_stage_label(context.stage_formation[stage_id])} "
-                f"current_tile_count={selected_candidates[stage_id].plan.tile_count} "
-                f"current_logical_shape={selected_candidates[stage_id].plan.logical_shape} "
-                f"current_metric={current_metrics[stage_id]}",
-            )
-
-            growth_arguments = dict(
-                stage_id=stage_id,
-                mesh=mesh,
-                selected_candidates=selected_candidates,
-                analyzer=analyzer,
-                used_tiles=used_tiles,
-                current_metric=current_metrics[stage_id],
-                debug=debug,
+        if key not in evaluations:
+            evaluations[key] = evaluate_candidate_selection(
+                selection, mesh=mesh, graph=context.graph,
                 stage_latency_weight=stage_latency_weight,
                 communication_weight=communication_weight,
-                graph=context.graph,
-                current_selection_metrics=current_metrics,
             )
-            current_tile_count = selected_candidates[stage_id].plan.tile_count
-            doubled_current_count = current_tile_count * 2
-            doubled_added_tiles = doubled_current_count - current_tile_count
-            remaining_tiles = mesh.num_tiles - used_tiles
-            if doubled_added_tiles <= remaining_tiles:
-                doubling_growth = _growth_candidate_for_stage(
-                    **growth_arguments,
-                    candidate_counts=(doubled_current_count,),
-                )
-                if doubling_growth is None:
-                    active_stage_ids.remove(stage_id)
-                    _debug(
-                        debug,
-                        "[allocation] "
-                        f"stage={stage_id} doubled_current_tile_count="
-                        f"{doubled_current_count} no_improvement prune_stage",
-                    )
-                    continue
-                _debug(
-                    debug,
-                    "[allocation] "
-                    f"stage={stage_id} doubled_current_tile_count="
-                    f"{doubled_current_count} improvement_available",
-                )
-            else:
-                _debug(
-                    debug,
-                    "[allocation] "
-                    f"stage={stage_id} doubled_current_tile_count="
-                    f"{doubled_current_count} outside_remaining_budget",
-                )
+        return evaluations[key]
 
-            growth = _growth_candidate_for_stage(**growth_arguments)
+    def objective(
+        selection: dict[int, StageCandidate],
+        evaluation: SelectionEvaluation,
+    ) -> tuple[tuple[float, ...], int]:
+        # Throughput bottleneck first, then other stage service times. On an
+        # exact cycle tie prefer fewer tiles, allowing unused capacity.
+        return selection_objective(evaluation.metrics), _used_tile_count(selection)
 
-            if growth is not None:
-                chosen_stage_id = stage_id
-                candidate, candidate_evaluation = growth
-                chosen_tile_count = candidate.plan.tile_count
-                selected_candidates[stage_id] = candidate
-                current_evaluation = candidate_evaluation
-                break
-
-            _debug(debug, f"[allocation] stage={stage_id} no_valid_growth")
-
-        if chosen_stage_id is None or chosen_tile_count is None:
-            _debug(debug, "[allocation] no_global_improvement_available")
-            break
-
-        previous_count = used_tiles
+    current_evaluation = evaluate(selected_candidates)
+    sweep = 0
+    while True:
+        sweep += 1
         used_tiles = _used_tile_count(selected_candidates)
-
+        best_selection = selected_candidates
+        best_evaluation = current_evaluation
+        best_objective = objective(best_selection, best_evaluation)
         _debug(
             debug,
-            "[allocation] "
-            f"choose worst_stage={chosen_stage_id} new_tile_count={chosen_tile_count}",
+            f"[allocation] sweep={sweep} objective={best_objective} "
+            f"used_tiles={used_tiles}/{mesh.num_tiles}",
         )
 
-        assert used_tiles > previous_count
+        def consider(replacements: dict[int, StageCandidate]) -> None:
+            nonlocal best_selection, best_evaluation, best_objective
+            trial = selected_candidates | replacements
+            evaluation = evaluate(trial)
+            trial_objective = objective(trial, evaluation)
+            if trial_objective < best_objective:
+                best_selection, best_evaluation, best_objective = trial, evaluation, trial_objective
+
+        for stage, current in selected_candidates.items():
+            budget = mesh.num_tiles - used_tiles + current.plan.tile_count
+            counts = candidate_tile_counts(current.plan.tile_count, budget)
+            _debug(debug, f"[allocation] sweep={sweep} stage={stage} tile_counts={counts}")
+            for count in counts:
+                for candidate in analyzer.candidates(stage, count):
+                    if candidate is not current:
+                        consider({stage: candidate})
+
+        _debug(debug, f"[allocation] sweep={sweep} phase=tile_exchanges")
+        for donor, current in selected_candidates.items():
+            for count in candidate_tile_counts(current.plan.tile_count, current.plan.tile_count - 1):
+                released = current.plan.tile_count - count
+                for recipient, recipient_current in selected_candidates.items():
+                    if recipient == donor:
+                        continue
+                    for smaller in analyzer.candidates(donor, count):
+                        for larger in analyzer.candidates(
+                            recipient, recipient_current.plan.tile_count + released,
+                        ):
+                            consider({donor: smaller, recipient: larger})
+
+        if best_selection is selected_candidates:
+            _debug(debug, "[allocation] no_global_improvement_available")
+            return selected_candidates, current_evaluation
+        selected_candidates, current_evaluation = best_selection, best_evaluation
         _debug(
             debug,
-            "[allocation] "
-            f"updated_tile_counts={_candidate_tile_counts(selected_candidates)}",
+            f"[allocation] selected_tile_counts={_candidate_tile_counts(selected_candidates)} "
+            f"objective={best_objective} "
+            f"used_tiles={_used_tile_count(selected_candidates)}/{mesh.num_tiles}",
         )
-
-    return selected_candidates, current_evaluation
 
 
 def initial_candidate_for_stage(
@@ -238,89 +211,6 @@ def initial_candidate_for_stage(
     )
 
 
-def _growth_candidate_for_stage(
-    stage_id: int,
-    mesh: Mesh,
-    selected_candidates: dict[int, StageCandidate],
-    analyzer: StageCandidateAnalyzer,
-    used_tiles: int,
-    current_metric: float,
-    graph: Graph,
-    debug: bool = False,
-    stage_latency_weight: float = 1.0,
-    communication_weight: float = 1.0,
-    current_selection_metrics: dict[int, float] | None = None,
-    candidate_counts: tuple[int, ...] | None = None,
-) -> tuple[StageCandidate, SelectionEvaluation] | None:
-    """Return the first improving replacement candidate for one stage."""
-
-    current_tile_count = selected_candidates[stage_id].plan.tile_count
-    remaining_tiles = mesh.num_tiles - used_tiles
-    if candidate_counts is None:
-        candidate_counts = tuple(
-            current_tile_count + added_tiles
-            for added_tiles in range(1, remaining_tiles + 1)
-        )
-    else:
-        candidate_counts = tuple(
-            candidate_count
-            for candidate_count in candidate_counts
-            if current_tile_count < candidate_count
-            and candidate_count - current_tile_count <= remaining_tiles
-        )
-    _debug(
-        debug,
-        "[allocation] "
-        f"stage={stage_id} candidate_tile_counts={candidate_counts}",
-    )
-
-    for candidate_count in candidate_counts:
-        candidate = analyzer.candidate(stage_id, candidate_count)
-        if candidate is None:
-            _debug(
-                debug,
-                "[allocation] "
-                f"stage={stage_id} candidate_tile_count={candidate_count} "
-                "skip=L1-infeasible",
-            )
-            continue
-        candidate_selection = dict(selected_candidates)
-        candidate_selection[stage_id] = candidate
-        candidate_evaluation = evaluate_candidate_selection(
-            candidate_selection,
-            mesh=mesh,
-            stage_latency_weight=stage_latency_weight,
-            communication_weight=communication_weight,
-            graph=graph,
-        )
-        candidate_metrics = candidate_evaluation.metrics
-        candidate_metric = candidate_metrics[stage_id]
-        if current_selection_metrics is None:
-            improved = candidate_metric < current_metric
-        else:
-            improved = (
-                selection_objective(candidate_metrics)
-                < selection_objective(current_selection_metrics)
-            )
-        if not improved:
-            _debug(
-                debug,
-                "[allocation] "
-                f"stage={stage_id} candidate_tile_count={candidate_count} "
-                f"skip=no_metric_improvement candidate_metric={candidate_metric} "
-                f"current_metric={current_metric}",
-            )
-            continue
-        _debug(
-            debug,
-            "[allocation] "
-            f"stage={stage_id} candidate_tile_count={candidate_count} "
-            f"accepted_improvement={current_metric - candidate_metric}",
-        )
-        return candidate, candidate_evaluation
-    return None
-
-
 def _candidate_tile_counts(
     candidates: dict[int, StageCandidate],
 ) -> dict[int, int]:
@@ -351,7 +241,7 @@ def _debug(enabled: bool, message: str) -> None:
     """Print one allocation trace line when diagnostics are enabled."""
 
     if enabled:
-        print(message)
+        print(message, flush=True)
 
 
 def _format_metrics(metrics: dict[int, float]) -> str:
@@ -389,7 +279,12 @@ def build_allocation_context(
 
 @dataclass(frozen=True)
 class StageMetricBreakdown:
-    """Canonical intrinsic and communication costs for one selected Stage."""
+    """Intrinsic cycles (including collectives) and external transfer service.
+
+    The sum is a conservative service estimate: overlap, runtime scheduling,
+    and physical contention are not modeled here. Unit weights compare cycles
+    directly; explicit legacy weights remain available for callers.
+    """
 
     stage_latency: int
     communication_cycles: int
@@ -404,7 +299,7 @@ class SelectionEvaluation:
 
     @property
     def metrics(self) -> dict[int, float]:
-        """Return the weighted bottleneck used to order each Stage."""
+        """Return the combined stage service used to order bottlenecks."""
 
         return {
             stage_id: breakdown.weighted_bottleneck
@@ -434,10 +329,10 @@ def evaluate_candidate_selection(
                     virtual_communication[stage_id].values(),
                     default=0,
                 ),
-                weighted_bottleneck=max(
-                    stage_latency_weight * candidate.stage_latency,
-                    communication_weight
-                    * max(virtual_communication[stage_id].values(), default=0),
+                weighted_bottleneck=(
+                    stage_latency_weight * candidate.stage_latency
+                    + communication_weight
+                    * max(virtual_communication[stage_id].values(), default=0)
                 ),
             )
             for stage_id, candidate in candidates.items()
@@ -450,7 +345,20 @@ def _virtual_communication_cycles(
     mesh: Mesh,
     plans: dict[int, StagePlan],
 ) -> dict[int, dict[int, int]]:
-    """Estimate producer-side virtual-tile communication cycles."""
+    """Estimate communication service for each virtual tile."""
+
+    runtime = mesh.dma_runtime_cost
+    if any((runtime.submission_cycles, runtime.setup_cycles, runtime.publication_cycles)):
+        from maps.planning.transitions.dma import virtual_communication_cycles
+
+        return virtual_communication_cycles(
+            mesh,
+            build_virtual_transitions(graph, plans),
+            {
+                stage_id: virtual_submesh(plan).tile_ids
+                for stage_id, plan in plans.items()
+            },
+        )
 
     # Virtual traffic is a pre-placement analysis shared by Allocation estimation
     # and Placement; it does not depend on physical mapping decisions.
@@ -519,7 +427,8 @@ def print_stage_metric_breakdown(
         print(
             f"  stage={stage_id} nodes={_stage_label(stage_nodes)} "
             f"stage_latency={breakdown.stage_latency} "
-            f"communication={breakdown.communication_cycles}"
+            f"communication={breakdown.communication_cycles} "
+            f"service_cycles={breakdown.weighted_bottleneck}"
         )
         for label in dict.fromkeys(
             getattr(node.payload.cost_model, "diagnostic_label", None)
@@ -548,9 +457,8 @@ def allocate(
 
     Behavior:
         The pass validates and classifies the graph, seeds each stage with its
-        smallest L1-feasible tile count, greedily spends remaining mesh tiles to
-        improve the ordered global bottleneck, then chooses the best logical
-        layout for every final allocation.
+        smallest L1-feasible tile count, searches counts, layouts, and tile exchanges to improve the ordered
+        whole-plan service bottleneck. Unused tiles are permitted.
 
     Returns:
         A stage-id mapping of virtual ``StagePlan`` objects.  Their layouts are

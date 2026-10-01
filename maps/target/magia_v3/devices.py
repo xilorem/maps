@@ -45,6 +45,7 @@ class MagiaV3SpatzDevice(SpatzDevice):
     kernel_startup_cycles: Mapping[WorkKind, int] = MappingProxyType({})
     gemm_loop_cycles: float = 0.0
     mul_vector_block_cycles: tuple[float, float] = (0.0, 0.0)
+    mul_vector_element_cycles: float = 0.0
     broadcast_vector_block_cycles: Mapping[WorkKind, float] = MappingProxyType({})
     broadcast_scalar_element_cycles: Mapping[WorkKind, float] = MappingProxyType({})
     reduction_output_cycles: float = 0.0
@@ -111,10 +112,14 @@ class MagiaV3SpatzDevice(SpatzDevice):
             vector_blocks = rows * ceil(row_len / vector_elements)
             if work_kind is WorkKind.MUL:
                 block_cycles = self.mul_vector_block_cycles[scalar_broadcast]
+                element_cycles = (
+                    0.0 if scalar_broadcast else self.mul_vector_element_cycles
+                )
             else:
                 block_cycles = self.broadcast_vector_block_cycles[work_kind]
+                element_cycles = 0.0
             return self.kernel_startup_cycles[work_kind] + ceil(
-                block_cycles * vector_blocks
+                block_cycles * vector_blocks + element_cycles * operation_count
             )
         elif work_kind is WorkKind.REDUCE_SUM:
             output_elements = work.output_slices[0].tensor_slice.num_elements
@@ -140,23 +145,24 @@ class MagiaV3SpatzDevice(SpatzDevice):
         )
 
 
-# Fitted to warm tile-local task timings from the checked-in 4x4 MobileViT GVSoC
-# calibration, subtracting event_imiss stalls during analysis. Communication-bearing
-# IM2COL and collective costs remain separate.
+# Fitted to the Spatz task window, from its first retired instruction through IRQ
+# exit, after subtracting event_imiss stalls. This excludes the placement-dependent
+# CV32-to-Spatz launch path seen on the 8x8 mesh. Communication-bearing IM2COL and
+# collective costs remain separate.
 _KERNEL_STARTUP_CYCLES = MappingProxyType(
     {
-        WorkKind.GEMM: 3_500,
-        WorkKind.ADD: 2_400,
-        WorkKind.MUL: 2_200,
-        WorkKind.SUB: 2_818,
-        WorkKind.DIV: 3_156,
-        WorkKind.RELU: 2_200,
-        WorkKind.SOFTMAX_EXP: 2_500,
-        WorkKind.GROUP_REDUCE: 2_100,
-        WorkKind.GROUP_CENTERED_REDUCE: 2_100,
-        WorkKind.GROUP_NORMALIZE: 2_500,
-        WorkKind.REDUCE_SUM: 2_060,
-        WorkKind.REDUCE_MAX: 2_200,
+        WorkKind.GEMM: 581,
+        WorkKind.ADD: 69,
+        WorkKind.MUL: 56,
+        WorkKind.SUB: 47,
+        WorkKind.DIV: 47,
+        WorkKind.RELU: 805,
+        WorkKind.SOFTMAX_EXP: 69,
+        WorkKind.GROUP_REDUCE: 1_692,
+        WorkKind.GROUP_CENTERED_REDUCE: 1_685,
+        WorkKind.GROUP_NORMALIZE: 7_794,
+        WorkKind.REDUCE_SUM: 92,
+        WorkKind.REDUCE_MAX: 45,
     }
 )
 
@@ -166,17 +172,17 @@ SPATZ_DEVICE = MagiaV3SpatzDevice(
     throughput={
         **MAGIA_V2_SPATZ_DEVICE.throughput,
         WorkKind.GEMM: 7.45,
-        WorkKind.ADD: 2.25,
+        WorkKind.ADD: 2.472,
         WorkKind.MUL: 3.0,
-        WorkKind.SUB: 0.196,
-        WorkKind.DIV: 0.1135,
+        WorkKind.SUB: 1.0,
+        WorkKind.DIV: 1.0,
         WorkKind.RELU: 5.10,
-        WorkKind.SOFTMAX_EXP: 0.107,
-        WorkKind.GROUP_REDUCE: 4.0,
-        WorkKind.GROUP_CENTERED_REDUCE: 1.484,
-        WorkKind.GROUP_NORMALIZE: 0.583,
-        WorkKind.REDUCE_SUM: 1 / 7.4,
-        WorkKind.REDUCE_MAX: 0.0922,
+        WorkKind.SOFTMAX_EXP: 0.039,
+        WorkKind.GROUP_REDUCE: 6.63,
+        WorkKind.GROUP_CENTERED_REDUCE: 1 / 0.5234375,
+        WorkKind.GROUP_NORMALIZE: 4 / 3,
+        WorkKind.REDUCE_SUM: 0.125,
+        WorkKind.REDUCE_MAX: 0.05,
     },
     startup_cycles=0,
     vlen_bits=256,
@@ -195,15 +201,18 @@ SPATZ_DEVICE = MagiaV3SpatzDevice(
     # The task's GEMM loop has both fixed scalar/load work for each MxK
     # iteration and per-lane FMA work. It repeats both for every LMUL=8
     # output-vector block.
-    gemm_loop_cycles=5.8,
+    gemm_loop_cycles=5.658,
     # The broadcast tasks execute one vector loop per row and vector block. Short
     # rows therefore cost almost as much as a full LMUL=8 vector. Tuple entries
     # distinguish row-vector and per-row-scalar broadcast modes.
-    mul_vector_block_cycles=(37.6, 20.3),
+    mul_vector_block_cycles=(18.5, 20.0),
+    # Row-vector MUL also performs useful work proportional to active lanes;
+    # short rows still pay the block cost above, while long rows add this term.
+    mul_vector_element_cycles=0.256,
     broadcast_vector_block_cycles=MappingProxyType(
         {
-            WorkKind.SUB: 77.33,
-            WorkKind.DIV: 52.0,
+            WorkKind.SUB: 63.5,
+            WorkKind.DIV: 63.5,
         }
     ),
     # Odd row lengths use the SDK's scalar fallback to avoid a Spatz VLSU
@@ -217,7 +226,7 @@ SPATZ_DEVICE = MagiaV3SpatzDevice(
         }
     ),
     # Each ReduceSum output owns a separately initialized accumulator.
-    reduction_output_cycles=33.5,
+    reduction_output_cycles=25.0,
 )
 SPATZ_DEVICE = replace(
     SPATZ_DEVICE,

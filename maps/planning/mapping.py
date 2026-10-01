@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import cached_property
 from enum import IntEnum
 
 from maps.graph import TENSOR_MAX_DIMS, Tensor
@@ -257,8 +258,7 @@ def tile_tensor_slice(tensor: Tensor, layout: TensorLayout, tile: Tile) -> Tenso
 
     logical_width = layout.effective_logical_width
     logical_height = layout.effective_logical_height
-    tile_ids = tuple(candidate.tile_id for candidate in layout.submesh.tiles)
-    tile_ordinal = tile_ids.index(tile.tile_id)
+    tile_ordinal = layout.submesh.tile_ordinal(tile.tile_id)
     logical_x = tile_ordinal % logical_width
     logical_y = tile_ordinal // logical_width
     dims = [TensorRange(start=0, length=dim) for dim in tensor.dims]
@@ -369,7 +369,7 @@ class Submesh:
         """Return the number of tiles covered by this submesh."""
         return len(self.tile_ids)
 
-    @property
+    @cached_property
     def tiles(self) -> tuple[Tile, ...]:
         """Return mesh tiles covered by this submesh in row-major order."""
         return tuple(
@@ -382,6 +382,15 @@ class Submesh:
                 ),
             )
         )
+
+    @cached_property
+    def _tile_ordinals(self) -> dict[int, int]:
+        return {tile.tile_id: ordinal for ordinal, tile in enumerate(self.tiles)}
+
+    def tile_ordinal(self, tile_id: int) -> int:
+        """Return one tile's ordinal in row-major ownership order."""
+
+        return self._tile_ordinals[tile_id]
 
     @property
     def tile_mask(self) -> int:

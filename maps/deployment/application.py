@@ -23,6 +23,7 @@ from .application_validation import (
     read_application_manifest,
     validate_application as _validate_application,
 )
+from .serialization import write_execution_plan
 from .workflow import build_magia_deployment_bundle
 
 
@@ -272,10 +273,13 @@ def build_application(
     mesh_width: int = magia.MESH_WIDTH,
     mesh_height: int = magia.MESH_HEIGHT,
     num_token_slots: int = 2,
+    stage_latency_weight: float = 1.0,
+    communication_weight: float = 1.0,
     inputs: Mapping[str, str | Path] | Iterable[tuple[str, str | Path]] = (),
+    execution_plan_output: str | Path | None = None,
     progress: Callable[[str], None] | None = None,
 ) -> Path:
-    """Build, validate, and atomically publish one MAGIA Application."""
+    """Atomically publish an application and optionally export its Execution Plan."""
 
     if target not in {MAGIA_V2_TARGET, MAGIA_V3_TARGET}:
         raise ValueError(f"unsupported application Target '{target}'")
@@ -311,6 +315,8 @@ def build_application(
         mesh_width=mesh_width,
         mesh_height=mesh_height,
         num_token_slots=num_token_slots,
+        stage_latency_weight=stage_latency_weight,
+        communication_weight=communication_weight,
         progress=None,
     )
     execution_tokens, runtime_inputs = _prepare_runtime_inputs(bundle, inputs)
@@ -389,6 +395,8 @@ def build_application(
         )
     finally:
         shutil.rmtree(staging_parent, ignore_errors=True)
+    if execution_plan_output is not None:
+        write_execution_plan(bundle.execution_plan, execution_plan_output)
     return output
 
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass
 
+from .dma import DMARuntimeCost
 from .memory import L2Memory
 from .noc import EndpointKind, NoC
 from .tile import Tile
@@ -19,6 +20,7 @@ class Mesh:
     l2_memory: L2Memory
     noc: NoC
     tiles: tuple[Tile, ...]
+    dma_runtime_cost: DMARuntimeCost = DMARuntimeCost()
 
     def __post_init__(self) -> None:
         # check for invalid sizes

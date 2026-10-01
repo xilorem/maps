@@ -1,5 +1,6 @@
 """Reusable physical hardware and tile-execution contracts."""
 
+from .dma import DMARuntimeCost
 from .device import (
     CollectiveCost,
     DMADevice,
@@ -33,6 +34,7 @@ from .tile import Tile
 
 __all__ = [
     "CollectiveCost",
+    "DMARuntimeCost",
     "DMADevice",
     "DMAJob",
     "Device",

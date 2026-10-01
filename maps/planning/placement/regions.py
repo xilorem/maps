@@ -49,12 +49,10 @@ def build_initial_stage_placements(
                 remaining_tile_counts=remaining_tile_counts,
             )
         except ValueError:
-            if sum(tile_counts.values()) != mesh.num_tiles:
-                raise
             # Any consecutive interval of a serpentine mesh traversal is
             # connected.  It is therefore a complete feasibility fallback
             # when communication-aware region growth paints itself into a
-            # corner on a densely allocated mesh.
+            # corner.  Unallocated tiles remain at the end of the traversal.
             placed_regions = snake_stage_regions(mesh, ordered_stage_ids, tile_counts)
             _debug(debug, "[placement] initial growth used serpentine fallback")
             return placements_from_regions(mesh, stage_plans, placed_regions)
@@ -91,8 +89,8 @@ def snake_stage_regions(
         next_offset = offset + tile_counts[stage_id]
         regions[stage_id] = set(traversal[offset:next_offset])
         offset = next_offset
-    if offset != mesh.num_tiles:
-        raise ValueError("serpentine fallback requires full-mesh allocation")
+    if offset > mesh.num_tiles:
+        raise ValueError("serpentine fallback exceeds available mesh tiles")
     return regions
 
 

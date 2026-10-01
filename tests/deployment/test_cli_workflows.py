@@ -11,6 +11,39 @@ import maps.cli as cli_module
 from maps.cli import main
 
 
+def test_build_command_forwards_allocation_weights(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[Path, Path | None, dict[str, object]]] = []
+    application = tmp_path / "application"
+
+    monkeypatch.setattr(
+        cli_module,
+        "build_application",
+        lambda model, output, **options: calls.append((model, output, options))
+        or application,
+    )
+    monkeypatch.setattr(cli_module, "application_build_summary", lambda path: path)
+
+    assert main(
+        [
+            "build",
+            str(tmp_path / "model.onnx"),
+            "--stage-latency-weight",
+            "1.5",
+            "--communication-weight",
+            "2.5",
+            "--execution-plan",
+            str(tmp_path / "execution-plan.json"),
+        ]
+    ) == 0
+
+    assert calls[0][2]["stage_latency_weight"] == 1.5
+    assert calls[0][2]["communication_weight"] == 2.5
+    assert calls[0][2]["execution_plan_output"] == tmp_path / "execution-plan.json"
+
+
 @pytest.mark.parametrize(
     ("target_name", "target_module", "mesh_shape"),
     (("magia-v2", "magia", (2, 3)), ("n300d", "n300d", (8, 8))),
@@ -79,6 +112,10 @@ def test_plan_command_composes_the_selected_target_workflow(
             f"{mesh_shape[0]}x{mesh_shape[1]}",
             "--output",
             str(output),
+            "--stage-latency-weight",
+            "1.5",
+            "--communication-weight",
+            "2.5",
         ]
     ) == 0
 
@@ -88,6 +125,9 @@ def test_plan_command_composes_the_selected_target_workflow(
         ("rewrite", imported),
     ]
     assert calls[-1] == ("write", execution_plan, output)
+    planning_options = next(call[3] for call in calls if call[0] == "plan")
+    assert planning_options.allocation.stage_latency_weight == 1.5
+    assert planning_options.allocation.communication_weight == 2.5
 
 
 def test_plan_command_defaults_to_normalized_build_path(

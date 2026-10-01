@@ -68,6 +68,41 @@ def test_build_application_publishes_a_named_magia_application(
     assert ".num_token_slots = THREE_STAGE_DEMO_NUM_TOKEN_SLOTS" in tile_text
 
 
+def test_build_exports_the_generated_plan_without_replanning(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from maps.deployment.serialization import execution_plan_payload
+
+    bundles = []
+    build_bundle = application_module.build_magia_deployment_bundle
+
+    def capture_bundle(*args, **kwargs):
+        bundle = build_bundle(*args, **kwargs)
+        bundles.append(bundle)
+        return bundle
+
+    monkeypatch.setattr(
+        application_module, "build_magia_deployment_bundle", capture_bundle
+    )
+    output = tmp_path / "application"
+    plan_output = tmp_path / "metadata" / "execution-plan.json"
+    model = _write_two_input_model(tmp_path / "runtime-inputs.onnx")
+
+    assert main(
+        [
+            "build", str(model), "--mesh", "4x4",
+            "--output", str(output), "--execution-plan", str(plan_output),
+        ]
+    ) == 0
+
+    assert len(bundles) == 1
+    assert json.loads(plan_output.read_text()) == execution_plan_payload(
+        bundles[0].execution_plan
+    )
+    validate_application(output)
+
+
 def test_validate_application_checks_generated_files_but_permits_user_work(
     tmp_path: Path,
 ) -> None:
@@ -544,6 +579,8 @@ def test_build_application_leaves_no_partial_output_after_backend_failure(
 ) -> None:
     repository = Path(__file__).parents[2]
     output = tmp_path / "failed-application"
+    plan_output = tmp_path / "execution-plan.json"
+    plan_output.write_text("existing plan\n")
 
     def fail_backend(*args, **kwargs):
         raise subprocess.CalledProcessError(1, args[0], stderr="backend failed")
@@ -556,9 +593,11 @@ def test_build_application_leaves_no_partial_output_after_backend_failure(
             output,
             mesh_width=4,
             mesh_height=4,
+            execution_plan_output=plan_output,
         )
 
     assert not output.exists()
+    assert plan_output.read_text() == "existing plan\n"
     assert not list(tmp_path.glob(".failed-application.staging-*"))
 
 

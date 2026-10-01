@@ -141,7 +141,7 @@ def test_mobilevit_slice_uses_the_ordinary_8x8_application_workflow(
     manifest = validate_application(application)
     assert manifest["planned_mesh"] == {"width": 8, "height": 8}
     assert manifest["execution"] == {"tokens": 1, "token_slots": 1}
-    assert len(manifest["active_physical_tiles"]) == 64
+    assert len(manifest["active_physical_tiles"]) == 26
     assert manifest["abi"] == {
         "descriptor": 1,
         "kernel": 2,

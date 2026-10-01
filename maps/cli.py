@@ -21,6 +21,7 @@ from maps.deployment import (
 )
 from maps.graph import import_onnx_model, run_graph_rewrites
 from maps.planning import (
+    AllocationOptions,
     ExecutionContract,
     PlacementOptions,
     PlanningOptions,
@@ -70,6 +71,8 @@ def _add_planning_arguments(parser: argparse.ArgumentParser) -> None:
     _add_target(parser)
     parser.add_argument("--mesh", type=_mesh)
     parser.add_argument("--token-slots", type=int, default=2)
+    parser.add_argument("--stage-latency-weight", type=float, default=1.0)
+    parser.add_argument("--communication-weight", type=float, default=1.0)
     parser.add_argument("--output", type=Path)
 
 
@@ -90,8 +93,15 @@ def _build_application_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--mesh", type=_mesh)
     parser.add_argument("--token-slots", type=int, default=2)
+    parser.add_argument("--stage-latency-weight", type=float, default=1.0)
+    parser.add_argument("--communication-weight", type=float, default=1.0)
     parser.add_argument("--name")
     parser.add_argument("--output", type=Path)
+    parser.add_argument(
+        "--execution-plan",
+        type=Path,
+        help="export the application's Execution Plan as JSON without replanning",
+    )
     parser.add_argument(
         "--input",
         action="append",
@@ -134,7 +144,10 @@ def _run_build(arguments: list[str]) -> int:
         mesh_width=dimensions.get("width", _TARGETS[options.target].MESH_WIDTH),
         mesh_height=dimensions.get("height", _TARGETS[options.target].MESH_HEIGHT),
         num_token_slots=options.token_slots,
+        stage_latency_weight=options.stage_latency_weight,
+        communication_weight=options.communication_weight,
         inputs=tuple(_input_assignment(value) for value in options.input),
+        execution_plan_output=options.execution_plan,
         progress=lambda message: print(message, flush=True),
     )
     print(application_build_summary(output))
@@ -171,11 +184,15 @@ def _run_plan(arguments: list[str]) -> int:
         PlanningOptions(
             target=options.target,
             execution=ExecutionContract(num_token_slots=options.token_slots),
+            allocation=AllocationOptions(
+                stage_latency_weight=options.stage_latency_weight,
+                communication_weight=options.communication_weight,
+            ),
             stage_formation=StageFormationOptions(
                 max_stage_operations=options.max_stage_operations
             ),
-            placement=PlacementOptions(print_placement=False),
-            print_execution_plan_cost=False,
+            placement=PlacementOptions(print_placement=True),
+            print_execution_plan_cost=True,
         ),
     )
     output = options.output or Path("build") / (

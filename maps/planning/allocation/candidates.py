@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import cached_property
 from typing import cast
 
 from maps.hardware import Mesh, Tile, WorkSignature
@@ -52,7 +53,7 @@ class StageTileFacts:
 
 @dataclass(frozen=True)
 class StageCandidate:
-    """The best feasible intrinsic configuration at one fixed tile count."""
+    """One feasible logical layout at a fixed tile count."""
 
     plan: StagePlan
     tile_facts: tuple[StageTileFacts, ...]
@@ -83,21 +84,28 @@ class StageCandidateAnalyzer:
         self._mesh = mesh
         self._initializer_tensors = initializer_tensors
         self._num_token_slots = num_token_slots
-        self._cache: dict[tuple[int, int], StageCandidate | None] = {}
+        self._cache: dict[tuple[int, int], tuple[StageCandidate, ...]] = {}
 
     def candidate(
         self,
         stage_id: int,
         tile_count: int,
     ) -> StageCandidate | None:
-        """Return the cached best feasible candidate for one Stage size."""
+        """Return the intrinsic minimum for seeding and compatibility callers."""
+
+        return min(
+            self.candidates(stage_id, tile_count),
+            key=lambda candidate: (candidate.stage_latency, candidate.plan.logical_shape[1]),
+            default=None,
+        )
+
+    def candidates(self, stage_id: int, tile_count: int) -> tuple[StageCandidate, ...]:
+        """Retain every L1-feasible layout until whole-plan evaluation."""
 
         key = (stage_id, tile_count)
         if key not in self._cache:
             self._cache[key] = self._analyze(
-                stage_id,
-                self._stage_formation[stage_id],
-                tile_count,
+                stage_id, self._stage_formation[stage_id], tile_count,
             )
         return self._cache[key]
 
@@ -106,13 +114,13 @@ class StageCandidateAnalyzer:
         stage_id: int,
         stage_nodes: tuple[Node, ...],
         tile_count: int,
-    ) -> StageCandidate | None:
+    ) -> tuple[StageCandidate, ...]:
         submesh = representative_connected_submesh(
             self._mesh,
             stage_id,
             tile_count,
         )
-        best_candidate: StageCandidate | None = None
+        candidates: list[StageCandidate] = []
         payloads = tuple(cast(OpPayload, node.payload) for node in stage_nodes)
         device_names = self._device_names[stage_id]
         for logical_shape in logical_shape_options(tile_count):
@@ -207,15 +215,8 @@ class StageCandidateAnalyzer:
                     node_tile_work=node_tile_work,
                 ),
             )
-            if best_candidate is None or (
-                candidate.stage_latency,
-                candidate.plan.logical_shape[1],
-            ) < (
-                best_candidate.stage_latency,
-                best_candidate.plan.logical_shape[1],
-            ):
-                best_candidate = candidate
-        return best_candidate
+            candidates.append(candidate)
+        return tuple(candidates)
 
 
 def _stage_collective_groups(
@@ -601,11 +602,20 @@ class ConnectedSubmesh:
 
         return len(self.tile_ids)
 
-    @property
+    @cached_property
     def tiles(self) -> tuple[Tile, ...]:
         """Resolve tile ids to mesh tile objects in logical order."""
 
         return tuple(self.mesh.tile_by_id(tile_id) for tile_id in self.tile_ids)
+
+    @cached_property
+    def _tile_ordinals(self) -> dict[int, int]:
+        return {tile_id: ordinal for ordinal, tile_id in enumerate(self.tile_ids)}
+
+    def tile_ordinal(self, tile_id: int) -> int:
+        """Return one tile's ordinal in the logical ownership order."""
+
+        return self._tile_ordinals[tile_id]
 
     @property
     def tile_mask(self) -> int:
@@ -631,7 +641,7 @@ class ConnectedSubmesh:
 
         if tile_id not in self.tile_ids:
             raise ValueError(f"tile_id {tile_id} is not inside submesh {self.submesh_id}")
-        ordinal = self.tile_ids.index(tile_id)
+        ordinal = self.tile_ordinal(tile_id)
         return ordinal % self.width, ordinal // self.width
 
     def local_to_global(self, local_x: int, local_y: int) -> int:

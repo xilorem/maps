@@ -35,15 +35,58 @@ def test_serpentine_fallback_partitions_a_full_mesh_into_connected_regions() -> 
     assert _share_boundary(mesh, regions[7], regions[9])
 
 
-def test_serpentine_fallback_rejects_sparse_allocations() -> None:
+def test_serpentine_fallback_leaves_unused_tiles_after_sparse_allocations() -> None:
     mesh = _test_mesh(4, 2)
 
-    with pytest.raises(ValueError, match="full-mesh allocation"):
-        placement_topology.snake_stage_regions(
-            mesh,
-            ordered_stage_ids=(0, 1),
-            tile_counts={0: 2, 1: 2},
-        )
+    regions = placement_topology.snake_stage_regions(
+        mesh,
+        ordered_stage_ids=(0, 1),
+        tile_counts={0: 2, 1: 2},
+    )
+
+    assert regions == {0: {0, 1}, 1: {2, 3}}
+    assert set.union(*regions.values()) == {0, 1, 2, 3}
+
+
+def test_initial_placement_uses_serpentine_fallback_for_sparse_allocation(
+    monkeypatch,
+) -> None:
+    mesh = _test_mesh(3, 2)
+    nodes = (_gemm_node("stage_0"), _gemm_node("stage_1"))
+    stage_plans = {
+        stage_id: _single_node_stage_plan(mesh, stage_id, node, {0, 1})
+        for stage_id, node in enumerate(nodes)
+    }
+    traffic = VirtualTraffic(
+        stage_comm={},
+        edge_matrices={},
+        input_weights={},
+        output_weights={},
+        l2_read_weights={},
+        l2_write_weights={},
+        communication_degree={},
+        bottleneck_risk={},
+        l2_pressure={},
+    )
+
+    def fail_growth(**kwargs) -> set[int]:
+        del kwargs
+        raise ValueError("heuristic growth failed")
+
+    monkeypatch.setattr(placement_topology, "grow_stage_region", fail_growth)
+
+    placements = placement_topology.build_initial_stage_placements(
+        mesh=mesh,
+        stage_plans=stage_plans,
+        tile_counts={0: 2, 1: 2},
+        traffic=traffic,
+        debug=False,
+    )
+
+    placed_tile_ids = set().union(
+        *(placement.physical_submesh.tile_ids for placement in placements.values())
+    )
+    assert len(placed_tile_ids) == 4
 
 
 def _test_mesh(width: int, height: int) -> Mesh:

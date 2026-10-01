@@ -25,7 +25,9 @@ def build_magia_deployment_bundle(
     mesh_width: int,
     mesh_height: int,
     num_token_slots: int,
-    progress: Callable[[str], None] | None,
+    stage_latency_weight: float = 1.0,
+    communication_weight: float = 1.0,
+    progress: Callable[[str], None] | None = None,
 ) -> DeploymentBundle:
     """Compose rewriting, Target Specialization, Planning, and bundling."""
 
@@ -45,13 +47,17 @@ def build_magia_deployment_bundle(
         PlanningOptions(
             execution=ExecutionContract(num_token_slots=num_token_slots),
             target=target,
-            allocation=AllocationOptions(print_progress=progress is not None),
-            placement=PlacementOptions(
-                print_progress=progress is not None,
-                print_placement=False,
-                print_costs=False,
+            allocation=AllocationOptions(
+                stage_latency_weight=stage_latency_weight,
+                communication_weight=communication_weight,
+                print_progress=True,
             ),
-            print_execution_plan_cost=False,
+            placement=PlacementOptions(
+                print_progress=True,
+                print_placement=True,
+                print_costs=True,
+            ),
+            print_execution_plan_cost=True,
         ),
     )
     return build_deployment_bundle(

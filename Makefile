@@ -7,6 +7,8 @@ TARGET ?= magia-v2
 MESH ?=
 MESH_OPTION = $(if $(strip $(MESH)),--mesh $(MESH))
 TOKEN_SLOTS ?= 2
+STAGE_LATENCY_WEIGHT ?= 1.0
+COMMUNICATION_WEIGHT ?= 1.0
 NAME ?=
 NAME_OPTION = $(if $(strip $(NAME)),--name $(NAME))
 INPUT ?=
@@ -14,6 +16,7 @@ INPUT_OPTION = $(if $(strip $(INPUT)),--input $(INPUT))
 MAX_STAGE_OPERATIONS ?= 0
 EXECUTION_PLAN ?=
 EXECUTION_PLAN_OPTION = $(if $(strip $(EXECUTION_PLAN)),--output $(EXECUTION_PLAN))
+BUILD_EXECUTION_PLAN_OPTION = $(if $(strip $(EXECUTION_PLAN)),--execution-plan $(EXECUTION_PLAN))
 APPLICATION ?= $(BUILD_DIR)/application
 
 .PHONY: all test build plan inspect verify maps-ir clean-generated
@@ -28,6 +31,8 @@ plan:
 		--target $(TARGET) \
 		$(MESH_OPTION) \
 		--token-slots $(TOKEN_SLOTS) \
+		--stage-latency-weight $(STAGE_LATENCY_WEIGHT) \
+		--communication-weight $(COMMUNICATION_WEIGHT) \
 		--max-stage-operations $(MAX_STAGE_OPERATIONS) \
 		$(EXECUTION_PLAN_OPTION)
 
@@ -36,8 +41,11 @@ build:
 		--target $(TARGET) \
 		$(MESH_OPTION) \
 		--token-slots $(TOKEN_SLOTS) \
+		--stage-latency-weight $(STAGE_LATENCY_WEIGHT) \
+		--communication-weight $(COMMUNICATION_WEIGHT) \
 		$(NAME_OPTION) \
 		$(INPUT_OPTION) \
+		$(BUILD_EXECUTION_PLAN_OPTION) \
 		--output $(APPLICATION)
 
 inspect:

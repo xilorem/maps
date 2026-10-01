@@ -1,5 +1,6 @@
 """Focused behavior tests for virtual resource Allocation."""
 
+from dataclasses import replace
 from typing import ClassVar
 
 import pytest
@@ -616,7 +617,7 @@ def test_allocate_grows_an_improving_stage_past_two_tiles() -> None:
     assert plans[0].tile_count > 2
 
 
-def test_growth_prunes_stage_when_doubling_current_count_does_not_improve(
+def test_search_leaves_plateau_stages_at_smallest_useful_count(
     capsys,
 ) -> None:
     no_scale, no_scale_input = _plateau_node("no_scale", 30, 30)
@@ -640,8 +641,7 @@ def test_growth_prunes_stage_when_doubling_current_count_does_not_improve(
         0: 1,
         1: 2,
     }
-    assert "stage=0 doubled_current_tile_count=2 no_improvement prune_stage" in output
-    assert "stage=1 doubled_current_tile_count=4 no_improvement prune_stage" in output
+    assert "no_global_improvement_available" in output
 
 
 def test_stage_candidate_rejects_tile_work_that_does_not_fit() -> None:
@@ -825,3 +825,181 @@ def test_permanent_l1_allocation_aligns_each_slice_start() -> None:
         frozenset(),
         num_token_slots=1,
     ) == 33
+
+
+def test_growth_checks_smaller_step_when_doubling_adds_too_much_traffic(monkeypatch) -> None:
+    producer, producer_initializer = _plateau_node("producer", 50, 40)
+    other, other_initializer = _plateau_node("other", 10, 10)
+    graph = Graph(
+        "non_monotone_growth",
+        nodes=(producer, other),
+        initializers=(producer_initializer, other_initializer),
+    )
+    mesh = _mesh_with_l1(5, 1, l1_size=4096)
+
+    def evaluate_selection(
+        candidates: dict[int, StageCandidate], **kwargs: object,
+    ) -> SelectionEvaluation:
+        del kwargs
+        first_tiles = candidates[0].plan.tile_count
+        second_tiles = candidates[1].plan.tile_count
+        metrics = {0: {1: 50, 2: 40, 3: 30, 4: 60}.get(first_tiles, 80),
+                   1: 10 if second_tiles == 1 else 100}
+        return SelectionEvaluation({
+            stage: StageMetricBreakdown(0, 0, float(score))
+            for stage, score in metrics.items()
+        })
+
+    monkeypatch.setattr(allocation_module, "evaluate_candidate_selection", evaluate_selection)
+    plans = allocate(graph, mesh, {0: (producer,), 1: (other,)})
+
+    assert plans[0].tile_count == 3
+    assert plans[1].tile_count == 1
+
+
+def test_candidate_analyzer_retains_all_feasible_layouts() -> None:
+    node = _gemm_node("layouts", 16, 16, 16)
+    analyzer = StageCandidateAnalyzer({0: (node,)}, _mesh_with_l1(4, 1, 32768), frozenset())
+    candidates = analyzer.candidates(0, 4)
+    assert {c.plan.logical_shape for c in candidates} == {(4, 1), (2, 2), (1, 4)}
+    assert analyzer.candidates(0, 4) is candidates
+
+
+def test_communication_favorable_layout_wins(monkeypatch) -> None:
+    node = _gemm_node("layouts", 16, 16, 16)
+    mesh = _mesh_with_l1(2, 1, 32768)
+    graph = Graph("layouts", nodes=(node,))
+    # Equal count: the slightly slower intrinsic layout saves transfer service.
+    original = StageCandidateAnalyzer._analyze
+
+    def analyze(self, *args):
+        return tuple(replace(c, stage_latency=100 if c.plan.logical_shape[1] == 1 else 110)
+                     for c in original(self, *args))
+
+    def communication(graph, mesh, plans):
+        return {stage: {0: 1000 if plan.tile_count == 1 or plan.logical_shape[1] == 1 else 10}
+                for stage, plan in plans.items()}
+
+    monkeypatch.setattr(StageCandidateAnalyzer, "_analyze", analyze)
+    monkeypatch.setattr(allocation_module, "_virtual_communication_cycles", communication)
+    plans = allocate(graph, mesh, {0: (node,)})
+    assert plans[0].logical_shape == (1, 2)
+
+
+def test_harmful_tile_increase_leaves_tiles_unused(monkeypatch) -> None:
+    node = _gemm_node("harmful", 16, 16, 16)
+    graph = Graph("harmful", nodes=(node,))
+    mesh = _mesh_with_l1(2, 1, 32768)
+    monkeypatch.setattr(allocation_module, "_virtual_communication_cycles",
+                        lambda graph, mesh, plans: {0: {0: 0 if plans[0].tile_count == 1 else 10000}})
+    assert allocate(graph, mesh, {0: (node,)})[0].tile_count == 1
+
+
+def test_tile_exchange_improves_full_mesh_objective(monkeypatch) -> None:
+    first = _gemm_node("donor", 16, 16, 16)
+    second = _gemm_node("recipient", 16, 16, 16)
+    graph = Graph("exchange", nodes=(first, second))
+    mesh = _mesh_with_l1(3, 1, 32768)
+    context = allocation_module.build_allocation_context(graph, {0: (first,), 1: (second,)})
+    analyzer = StageCandidateAnalyzer(context.stage_formation, mesh, frozenset())
+    seeds = {0: analyzer.candidate(0, 2), 1: analyzer.candidate(1, 1)}
+
+    def evaluate(candidates, **kwargs):
+        counts = tuple(c.plan.tile_count for c in candidates.values())
+        metrics = {(2, 1): (5, 20), (1, 1): (21, 20), (1, 2): (10, 10)}[counts]
+        return SelectionEvaluation({s: StageMetricBreakdown(0, 0, float(m)) for s, m in enumerate(metrics)})
+
+    monkeypatch.setattr(allocation_module, "evaluate_candidate_selection", evaluate)
+    selected, evaluation = allocation_module.grow_stage_candidates(context, mesh, seeds, analyzer, 1, 1, False)
+    assert tuple(c.plan.tile_count for c in selected.values()) == (1, 2)
+    assert max(evaluation.metrics.values()) == 10
+
+
+def test_stage_service_adds_intrinsic_and_transfer_cycles(monkeypatch) -> None:
+    node = _gemm_node("service", 4, 4, 4)
+    mesh = _mesh_with_l1(1, 1, 32768)
+    candidate = StageCandidateAnalyzer({0: (node,)}, mesh, frozenset()).candidate(0, 1)
+    monkeypatch.setattr(allocation_module, "_virtual_communication_cycles", lambda *args: {0: {0: 40}})
+    evaluation = allocation_module.evaluate_candidate_selection({0: candidate}, mesh, 1, 1, Graph("service", nodes=(node,)))
+    assert evaluation.metrics[0] == candidate.stage_latency + 40
+
+
+def test_layout_selection_prices_real_graph_io_transfers() -> None:
+    node = _gemm_node("graph_io_layout", m=4, k=2, n=4)
+    graph = Graph("graph_io_layout", tensors=node.inputs + node.outputs,
+                  nodes=(node,), inputs=node.inputs, outputs=node.outputs)
+    mesh = _mesh_with_l1(4, 1, l1_size=32768)
+    analyzer = StageCandidateAnalyzer({0: (node,)}, mesh, frozenset())
+    intrinsic_minimum = analyzer.candidate(0, 4)
+    assert intrinsic_minimum.plan.logical_shape == (4, 1)
+    plans = allocate(graph, mesh, {0: (node,)})
+    assert plans[0].logical_shape == (2, 2)
+    # Actual transition compilation makes the balanced layout cheaper even
+    # though the intrinsic minimum's deterministic tie-break discarded it.
+    balanced = next(c for c in analyzer.candidates(0, 4) if c.plan.logical_shape == (2, 2))
+    evaluate = allocation_module.evaluate_candidate_selection
+    assert evaluate({0: balanced}, mesh, 1, 1, graph).metrics[0] == 32
+    assert evaluate({0: intrinsic_minimum}, mesh, 1, 1, graph).metrics[0] == 36
+
+
+def test_search_removes_tiles_from_an_overgrown_seed() -> None:
+    node, initializer = _plateau_node("plateau", 10, 10)
+    graph = Graph("plateau", nodes=(node,), initializers=(initializer,))
+    mesh = _mesh_with_l1(3, 1, l1_size=4096)
+    context = allocation_module.build_allocation_context(graph, {0: (node,)})
+    analyzer = StageCandidateAnalyzer(context.stage_formation, mesh, frozenset(graph.initializers))
+    selected, _ = allocation_module.grow_stage_candidates(
+        context, mesh, {0: analyzer.candidate(0, 3)}, analyzer, 1, 1, False,
+    )
+    assert selected[0].plan.tile_count == 1
+
+
+@pytest.mark.parametrize("physical", (False, True))
+def test_slice_lookup_does_not_resolve_the_whole_submesh_per_tile(
+    monkeypatch, physical: bool,
+) -> None:
+    from maps.planning.allocation.candidates import representative_connected_submesh
+    from maps.planning.mapping import tile_tensor_slice
+
+    mesh = _mesh_with_l1(4, 4, l1_size=32768)
+    submesh = (
+        Submesh(mesh, 0, tile_ids=frozenset(range(16)))
+        if physical else representative_connected_submesh(mesh, 0, 16)
+    )
+    node = _gemm_node("slice_lookup", 16, 16, 16)
+    layout = node.payload.output_layouts(submesh, logical_shape=(4, 4))[0]
+    tiles = submesh.tiles
+    original = Mesh.tile_by_id
+    calls = 0
+
+    def counted(self, tile_id):
+        nonlocal calls
+        calls += 1
+        return original(self, tile_id)
+
+    monkeypatch.setattr(Mesh, "tile_by_id", counted)
+    for tile in tiles:
+        tile_tensor_slice(node.outputs[0], layout, tile)
+    assert calls <= len(tiles)
+
+
+def test_large_mesh_probes_a_logarithmic_count_neighborhood(monkeypatch) -> None:
+    node, initializer = _plateau_node("count_search", 10, 10)
+    graph = Graph("count_search", nodes=(node,), initializers=(initializer,))
+    mesh = _mesh_with_l1(16, 16, l1_size=4096)
+    context = allocation_module.build_allocation_context(graph, {0: (node,)})
+    analyzer = StageCandidateAnalyzer(context.stage_formation, mesh, frozenset(graph.initializers))
+    seed = analyzer.candidate(0, 1)
+    probed = []
+
+    def candidates(stage, count):
+        probed.append(count)
+        return (seed,) if count == 1 else ()
+
+    monkeypatch.setattr(analyzer, "candidates", candidates)
+    selected, _ = allocation_module.grow_stage_candidates(
+        context, mesh, {0: seed}, analyzer, 1, 1, False,
+    )
+    assert selected[0] is seed
+    assert {1, 2, 3, 4, 8, 16, 32, 64, 128, 256} <= set(probed)
+    assert len(probed) <= 3 * mesh.num_tiles.bit_length() + 4

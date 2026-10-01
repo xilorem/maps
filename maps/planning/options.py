@@ -23,7 +23,7 @@ class AllocationOptions:
     """Control virtual tile allocation and its diagnostics."""
 
     stage_latency_weight: float = 1.0
-    communication_weight: float = 10.0
+    communication_weight: float = 1.0
     print_progress: bool = False
 
 
