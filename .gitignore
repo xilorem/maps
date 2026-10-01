@@ -33,9 +33,10 @@ build/
 Thumbs.db
 
 # dev files
-dev/
+docs/
 STATUS.md
 AGENTS.md
+CONTEXT.md
 .codex
 .agents/
 generated/
