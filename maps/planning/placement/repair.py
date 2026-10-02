@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from collections import deque
-
 from maps.hardware import Mesh
 from maps.planning.stages import StagePlacement, StagePlan
 from maps.planning.placement.evaluation import PlacementEvaluator
@@ -38,88 +36,100 @@ def improve_placement(
     max_iters: int = 32,
     max_repair_regions: int = 5,
 ) -> dict[int, StagePlacement]:
-    """Apply local region repairs until the exact IO objective stalls.
+    """Apply local region repairs until the analytical service objective stalls.
 
-    Each iteration blames the worst tile, ranks nearby stage unions that could
-    relieve its traffic, reconstructs each candidate union, reassigns ownership,
-    and evaluates the exact physical objective.  Only strict improvements are
-    accepted.  A short tabu queue avoids immediately revisiting the same union.
+    Each iteration sweeps all stages, ranks nearby stage unions, reconstructs
+    regions with and without unused tiles, and reassigns ownership. Only strict
+    improvements to the complete objective are accepted, preventing cycles
+    while permitting a stage group to be revisited after its neighbours move.
     """
 
     if evaluator is None:
         evaluator = PlacementEvaluator(mesh, stage_plans, virtual_transitions)
     current_placements = placements
     current_evaluation = initial_evaluation
-    tabu: deque[frozenset[int]] = deque(maxlen=10)
+    has_unused_tiles = sum(
+        placement.physical_submesh.num_tiles for placement in placements.values()
+    ) < mesh.num_tiles
     for iteration in range(max_iters):
         if current_evaluation.worst_tile_id is None:
             break
         worst_tile = current_evaluation.tile_scores[current_evaluation.worst_tile_id]
         if worst_tile.stage_id is None:
             break
-        candidates = choose_repair_regions(
-            mesh,
-            current_placements,
-            traffic,
-            current_evaluation,
-            worst_tile,
+        # Visit every stage, including stages below the current bottleneck.
+        # Strict objective descent prevents cycles without permanently excluding
+        # a pair after its neighbours have moved.
+        candidates: list[tuple[RepairCandidate, int]] = []
+        seen: set[tuple[frozenset[int], int]] = set()
+        ordered_stage_ids = sorted(
+            stage_plans,
+            key=lambda stage_id: (-current_evaluation.stage_breakdowns[stage_id].total, stage_id),
         )
-        _debug(
-            debug,
-            "[placement] "
-            f"iter={iteration} objective={current_evaluation.objective} "
-            f"worst_tile={worst_tile.tile_id} worst_stage={worst_tile.stage_id} "
-            f"repair_candidates={[(sorted(c.stages), c.reason) for c in candidates[:max_repair_regions]]}",
-        )
+        for stage_id in ordered_stage_ids:
+            stage_tiles = [score for score in current_evaluation.tile_scores.values()
+                           if score.stage_id == stage_id]
+            stage_worst = max(stage_tiles, key=lambda score: (score.score, -score.tile_id))
+            for candidate in choose_repair_regions(
+                mesh, current_placements, traffic, current_evaluation, stage_worst,
+            )[:max_repair_regions]:
+                key = (candidate.stages, stage_id)
+                if key not in seen:
+                    candidates.append((candidate, stage_id))
+                    seen.add(key)
+        _debug(debug, f"[placement] iter={iteration} objective={current_evaluation.objective} "
+               f"sweep_stages={ordered_stage_ids} repair_candidates={len(candidates)}")
 
         best_trial: PlacementEvaluation | None = None
         best_placements: dict[int, StagePlacement] | None = None
         best_candidate: RepairCandidate | None = None
-        for candidate in candidates[:max_repair_regions]:
-            if candidate.stages in tabu:
-                continue
-            trial = repair_region(
-                mesh,
-                stage_plans,
-                current_placements,
-                traffic,
-                candidate.stages,
-                worst_tile.stage_id,
-                debug,
-            )
-            if trial is None:
-                continue
-            trial = assign_stage_ownerships(
-                mesh,
-                stage_plans,
-                trial,
-                traffic,
-                stage_ids=candidate.stages,
-            )
-            evaluation = evaluator.evaluate(
-                trial,
-                previous=current_evaluation,
-                moved_stage_ids=candidate.stages,
-            )
-            _debug(
-                debug,
-                "[placement] "
-                f"iter={iteration} region={sorted(candidate.stages)} "
-                f"reason={candidate.reason} trial_objective={evaluation.objective}",
-            )
-            if evaluation.objective < current_evaluation.objective and (
-                best_trial is None or evaluation.objective < best_trial.objective
-            ):
-                best_trial = evaluation
-                best_placements = trial
-                best_candidate = candidate
+        for candidate, focus_stage_id in candidates:
+            for allow_unused_tiles in ((False, True) if has_unused_tiles else (False,)):
+                if len(candidate.stages) == 1 and not allow_unused_tiles:
+                    continue
+                trial = repair_region(
+                    mesh,
+                    stage_plans,
+                    current_placements,
+                    traffic,
+                    candidate.stages,
+                    focus_stage_id,
+                    debug,
+                    allow_unused_tiles=allow_unused_tiles,
+                )
+                if trial is None:
+                    continue
+                trial = assign_stage_ownerships(
+                    mesh,
+                    stage_plans,
+                    trial,
+                    traffic,
+                    stage_ids=candidate.stages,
+                )
+                evaluation = evaluator.evaluate(
+                    trial,
+                    previous=current_evaluation,
+                    moved_stage_ids=candidate.stages,
+                )
+                _debug(
+                    debug,
+                    "[placement] "
+                    f"iter={iteration} region={sorted(candidate.stages)} "
+                    f"reason={candidate.reason} unused_tiles={allow_unused_tiles} "
+                    f"trial_objective={evaluation.objective}",
+                )
+                if evaluation.objective < current_evaluation.objective and (
+                    best_trial is None or evaluation.objective < best_trial.objective
+                ):
+                    best_trial = evaluation
+                    best_placements = trial
+                    best_candidate = candidate
 
         if best_trial is None or best_placements is None or best_candidate is None:
             _debug(debug, f"[placement] iter={iteration} no_improving_repair_found")
             break
         current_placements = best_placements
         current_evaluation = best_trial
-        tabu.append(best_candidate.stages)
         _debug(
             debug,
             "[placement] "
@@ -137,8 +147,14 @@ def repair_region(
     affected_stages: frozenset[int],
     focus_stage_id: int,
     debug: bool,
+    *,
+    allow_unused_tiles: bool = True,
 ) -> dict[int, StagePlacement] | None:
-    """Repartition a local stage set inside its existing physical-tile union."""
+    """Rebuild affected stages, optionally using unoccupied physical tiles.
+
+    Other stages remain fixed. Counts, connected regions and disjoint ownership
+    are preserved; moving into unused tiles releases the old occupied tiles.
+    """
 
     affected_tile_ids = {
         tile_id
@@ -150,6 +166,10 @@ def repair_region(
         for stage_id, placement in current_placements.items()
         if stage_id not in affected_stages
     }
+    if allow_unused_tiles:
+        affected_tile_ids = set(range(mesh.num_tiles)) - {
+            tile_id for region in fixed_regions.values() for tile_id in region
+        }
     local_tile_counts = {
         stage_id: stage_plans[stage_id].tile_count
         for stage_id in affected_stages
@@ -321,7 +341,7 @@ def choose_repair_regions(
                     float(left_blame + right_blame),
                     "balanced_multi_source",
                 )
-    return sorted(
+    ranked = sorted(
         candidates.values(),
         key=lambda candidate: (
             -candidate.priority,
@@ -329,6 +349,12 @@ def choose_repair_regions(
             tuple(sorted(candidate.stages)),
         ),
     )
+    if sum(placement.physical_submesh.num_tiles for placement in placements.values()) < mesh.num_tiles:
+        ranked.insert(
+            0,
+            RepairCandidate(frozenset({bottleneck_stage_id}), worst_tile.score, "unused_tiles"),
+        )
+    return ranked
 
 
 def _record_candidate(

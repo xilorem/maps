@@ -399,8 +399,12 @@ def test_imported_split_deploys_three_consumer_branches_deterministically(
                 TensorRange(0, 50),
             ),
         )
-        for source_tile_id, source_row in ((1, 0), (2, 1), (0, 2), (3, 3))
-        for destination_tile_id, destination_column in ((4, 0), (5, 1))
+        for source_tile_id, source_row in (
+            (split_stage.virtual_to_physical[v], v) for v in range(4)
+        )
+        for destination_tile_id, destination_column in (
+            (branch_stages[2].virtual_to_physical[v], v) for v in range(2)
+        )
     )
     assert tuple(
         first_execution_plan.tensors[transition.tensor_id]

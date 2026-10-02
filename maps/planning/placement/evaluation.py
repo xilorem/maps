@@ -180,8 +180,6 @@ class PlacementEvaluator:
         plan: StagePlan,
         placement: StagePlacement,
     ) -> int:
-        if not any(plan.virtual_collective_groups):
-            return 0
         return estimate_physical_stage_latency(plan, self._mesh, placement)
 
 
@@ -430,12 +428,12 @@ class TilePlacementScore:
 
     @property
     def score(self) -> float:
-        """Return the weighted Stage Latency/external-communication bottleneck."""
+        """Return the weighted compute-plus-transfer service estimate."""
 
-        return max(
-            self.stage_latency_weight * self.stage_latency,
-            self.communication_weight
-            * (self.tile_to_tile_writes + self.l2_reads + self.l2_writes),
+        return (
+            self.stage_latency_weight * self.stage_latency
+            + self.communication_weight
+            * (self.tile_to_tile_writes + self.l2_reads + self.l2_writes)
         )
 
 

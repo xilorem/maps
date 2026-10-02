@@ -18,6 +18,8 @@ def build_initial_stage_placements(
     tile_counts: dict[int, int],
     traffic: VirtualTraffic,
     debug: bool,
+    *,
+    allowed_tile_ids: frozenset[int] | None = None,
 ) -> dict[int, StagePlacement]:
     """Build the first feasible communication-aware stage placement.
 
@@ -27,7 +29,10 @@ def build_initial_stage_placements(
     Regions are disjoint and have exactly the requested tile counts.
     """
 
-    free_tile_ids = set(range(mesh.num_tiles))
+    domain = set(range(mesh.num_tiles)) if allowed_tile_ids is None else set(allowed_tile_ids)
+    if not domain <= set(range(mesh.num_tiles)) or len(domain) < sum(tile_counts.values()):
+        raise ValueError("initial placement domain must contain enough valid mesh tiles")
+    free_tile_ids = set(domain)
     placed_regions: dict[int, set[int]] = {}
     ordered_stage_ids = stage_order(tile_counts, traffic)
     _debug(debug, f"[placement] phase=initial_seeding stage_order={ordered_stage_ids}")
@@ -36,7 +41,7 @@ def build_initial_stage_placements(
             other_stage_id: tile_counts[other_stage_id]
             for other_stage_id in ordered_stage_ids[stage_idx + 1:]
         }
-        target = stage_target_point(stage_id, mesh, placed_regions, traffic)
+        target = stage_target_point(stage_id, mesh, placed_regions, traffic, anchor_tile_ids=domain)
         try:
             region = grow_stage_region(
                 stage_id=stage_id,
@@ -53,7 +58,7 @@ def build_initial_stage_placements(
             # connected.  It is therefore a complete feasibility fallback
             # when communication-aware region growth paints itself into a
             # corner.  Unallocated tiles remain at the end of the traversal.
-            placed_regions = snake_stage_regions(mesh, ordered_stage_ids, tile_counts)
+            placed_regions = snake_stage_regions(mesh, ordered_stage_ids, tile_counts, allowed_tile_ids=domain)
             _debug(debug, "[placement] initial growth used serpentine fallback")
             return placements_from_regions(mesh, stage_plans, placed_regions)
         placed_regions[stage_id] = region
@@ -71,6 +76,8 @@ def snake_stage_regions(
     mesh: Mesh,
     ordered_stage_ids: tuple[int, ...],
     tile_counts: dict[int, int],
+    *,
+    allowed_tile_ids: set[int] | None = None,
 ) -> dict[int, set[int]]:
     """Partition a serpentine Hamiltonian path into connected stage regions."""
 
@@ -82,6 +89,7 @@ def snake_stage_regions(
             if y % 2 == 0
             else range(mesh.width - 1, -1, -1)
         )
+        if allowed_tile_ids is None or mesh.tile(x, y).tile_id in allowed_tile_ids
     )
     regions: dict[int, set[int]] = {}
     offset = 0
@@ -89,7 +97,7 @@ def snake_stage_regions(
         next_offset = offset + tile_counts[stage_id]
         regions[stage_id] = set(traversal[offset:next_offset])
         offset = next_offset
-    if offset > mesh.num_tiles:
+    if offset > len(traversal):
         raise ValueError("serpentine fallback exceeds available mesh tiles")
     return regions
 
@@ -194,6 +202,8 @@ def stage_target_point(
     mesh: Mesh,
     placed_regions: dict[int, set[int]],
     traffic: VirtualTraffic,
+    *,
+    anchor_tile_ids: set[int] | None = None,
 ) -> tuple[float, float]:
     """Return the weighted peer-communication and L2 target for one stage."""
 
@@ -208,11 +218,17 @@ def stage_target_point(
             x, y = tile_set_center(mesh, placed_regions[destination_stage_id])
             weighted_points.append((x, y, float(weight)))
 
-    l2_points = tuple(sorted(l2_access_point_tile_ids(mesh)))
+    l2_points = tuple(sorted(
+        l2_access_point_tile_ids(mesh)
+        if anchor_tile_ids is None
+        else l2_access_point_tile_ids(mesh) & anchor_tile_ids
+    ))
     if l2_points and traffic.l2_pressure.get(stage_id, 0) > 0:
         x, y = tile_set_center(mesh, set(l2_points))
         weighted_points.append((x, y, float(traffic.l2_pressure[stage_id])))
     if not weighted_points:
+        if anchor_tile_ids is not None:
+            return tile_set_center(mesh, anchor_tile_ids)
         return ((mesh.width - 1) / 2.0, (mesh.height - 1) / 2.0)
     total_weight = sum(weight for _, _, weight in weighted_points)
     return (

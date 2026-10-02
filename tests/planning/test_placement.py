@@ -258,7 +258,8 @@ def test_placement_charges_l1_communication_to_the_producer_tile() -> None:
     assert consumer_score.tile_to_tile_writes == 0
     assert evaluation.stage_breakdowns[0].l1_write == producer_score.tile_to_tile_writes
     assert producer_score.score == (
-        producer_score.l2_reads + producer_score.l2_writes + producer_score.tile_to_tile_writes
+        producer_score.stage_latency
+        + producer_score.l2_reads + producer_score.l2_writes + producer_score.tile_to_tile_writes
     )
 
 
@@ -307,6 +308,96 @@ def test_repair_region_skips_an_infeasible_growth_attempt(monkeypatch) -> None:
         focus_stage_id=0,
         debug=False,
     ) is None
+
+
+@pytest.mark.parametrize("compute_weight", [1.0, 100.0])
+def test_repair_moves_an_isolated_stage_into_unused_tiles_nearer_l2(compute_weight) -> None:
+    mesh = _test_mesh(6, 3)
+    producer = _gemm_node("producer")
+    fixed = _gemm_node("fixed")
+    graph = Graph(
+        name="sparse",
+        tensors=producer.inputs + producer.outputs + fixed.inputs + fixed.outputs,
+        nodes=(producer, fixed),
+        inputs=producer.inputs,
+        outputs=producer.outputs,
+        initializers=(producer.inputs[1],) + fixed.inputs,
+    )
+    plans = {
+        0: _single_node_stage_plan(mesh, 0, producer, {0, 1}),
+        1: _single_node_stage_plan(mesh, 1, fixed, {0}),
+    }
+    placements = placement_topology.placements_from_regions(
+        mesh, plans, {0: {16, 17}, 1: {5}},
+    )
+    transitions = build_virtual_transitions(graph, plans)
+    traffic = build_virtual_traffic(transitions, plans)
+    evaluator = PlacementEvaluator(mesh, plans, transitions, stage_latency_weight=compute_weight)
+    initial = evaluator.evaluate(placements)
+    if compute_weight == 100.0:
+        # The worst stage has no traffic and cannot improve.
+        assert initial.tile_scores[initial.worst_tile_id].stage_id == 1
+
+    repaired = placement_repair.improve_placement(
+        mesh, plans, placements, traffic, transitions, initial, False,
+        evaluator=evaluator,
+    )
+
+    assert evaluator.evaluate(repaired).objective < initial.objective
+    assert repaired[1] is placements[1]
+    region = repaired[0].physical_submesh.tile_ids
+    assert len(region) == 2
+    assert region.isdisjoint(placements[1].physical_submesh.tile_ids)
+    assert region - placements[0].physical_submesh.tile_ids
+    left, right = sorted(region)
+    assert _share_boundary(mesh, {left}, {right})
+    assert set(repaired[0].virtual_to_physical) == {0, 1}
+    assert set(repaired[0].virtual_to_physical.values()) == set(region)
+    assert placement_repair.improve_placement(
+        mesh, plans, placements, traffic, transitions, initial, False,
+        evaluator=evaluator,
+    ) == repaired
+
+
+@pytest.mark.parametrize("allow_unused_tiles", (False, True))
+def test_region_repair_keeps_other_stages_reserved(allow_unused_tiles: bool) -> None:
+    mesh = _test_mesh(4, 1)
+    nodes = (_gemm_node("movable"), _gemm_node("fixed"))
+    plans = {
+        0: _single_node_stage_plan(mesh, 0, nodes[0], {0, 1}),
+        1: _single_node_stage_plan(mesh, 1, nodes[1], {0}),
+    }
+    placements = placement_topology.placements_from_regions(
+        mesh, plans, {0: {2, 3}, 1: {0}},
+    )
+    graph = Graph(
+        name="reserved",
+        tensors=nodes[0].inputs + nodes[0].outputs,
+        nodes=(nodes[0],),
+        inputs=nodes[0].inputs,
+        outputs=nodes[0].outputs,
+        initializers=(nodes[0].inputs[1],),
+    )
+    transitions = build_virtual_transitions(graph, plans)
+    traffic = build_virtual_traffic(transitions, plans)
+
+    repaired = placement_repair.repair_region(
+        mesh, plans, placements, traffic, frozenset({0}), 0, False,
+        allow_unused_tiles=allow_unused_tiles,
+    )
+
+    assert repaired is not None
+    assert repaired[1] is placements[1]
+    region = repaired[0].physical_submesh.tile_ids
+    assert 0 not in region
+    assert len(region) == 2
+    if allow_unused_tiles:
+        assert 1 in region
+        assert evaluate_placement(mesh, plans, repaired, transitions).objective < (
+            evaluate_placement(mesh, plans, placements, transitions).objective
+        )
+    else:
+        assert region == placements[0].physical_submesh.tile_ids
 
 
 def test_incremental_evaluation_rescores_moved_stages_and_predecessors() -> None:
@@ -411,7 +502,10 @@ def test_exact_placement_ignores_initializers_absent_from_virtual_transitions() 
     )
 
     assert virtual_transitions == ()
-    assert evaluation.tile_scores[0].score == 0
+    assert evaluation.tile_scores[0].l2_reads == 0
+    assert evaluation.tile_scores[0].l2_writes == 0
+    assert evaluation.tile_scores[0].stage_latency > 0
+    assert evaluation.tile_scores[0].score == evaluation.tile_scores[0].stage_latency
 
 
 def test_collective_stage_placement_prefers_nearer_physical_participants(
@@ -628,3 +722,43 @@ def test_non_exhaustive_future_feasibility_uses_component_sizes(monkeypatch) -> 
         (10, 10),
         exhaustive=False,
     )
+
+
+def test_compact_seeding_is_independent_of_extra_mesh_space() -> None:
+    from maps.planning.placement import compact_tile_domain
+    positions = []
+    for size in (8, 16):
+        mesh = _test_mesh(size, size)
+        nodes = (_gemm_node("a"), _gemm_node("b"))
+        plans = {i: _single_node_stage_plan(mesh, i, node, set(range(13)))
+                 for i, node in enumerate(nodes)}
+        traffic = build_virtual_traffic((), plans)
+        domain = compact_tile_domain(mesh, 26)
+        placements = placement_topology.build_initial_stage_placements(
+            mesh, plans, {0: 13, 1: 13}, traffic, False, allowed_tile_ids=domain,
+        )
+        occupied = set()
+        for p in placements.values():
+            assert p.physical_submesh.tile_ids <= domain
+            assert not occupied & p.physical_submesh.tile_ids
+            occupied.update(p.physical_submesh.tile_ids)
+            assert p.physical_submesh.num_tiles == 13
+        positions.append({i: {mesh.coords(t) for t in p.physical_submesh.tile_ids}
+                          for i, p in placements.items()})
+    assert positions[0] == positions[1]
+
+
+def test_compact_seed_handles_thin_mesh_and_constrained_fallback(monkeypatch) -> None:
+    from maps.planning.placement import compact_tile_domain
+    mesh = _test_mesh(1, 16)
+    plans = {0: _single_node_stage_plan(mesh, 0, _gemm_node("a"), {0, 1, 2})}
+    domain = compact_tile_domain(mesh, 3)
+    def fail_growth(**kwargs):
+        raise ValueError("force fallback")
+    monkeypatch.setattr(placement_topology, "grow_stage_region", fail_growth)
+    placed = placement_topology.build_initial_stage_placements(
+        mesh, plans, {0: 3}, build_virtual_traffic((), plans), False,
+        allowed_tile_ids=domain,
+    )
+    assert placed[0].physical_submesh.tile_ids <= domain
+    assert placed[0].physical_submesh.num_tiles == 3

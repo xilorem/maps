@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from math import ceil, sqrt
+
 from maps.hardware import Mesh
 from maps.planning.stages import StagePlacement, StagePlan
 from maps.planning.placement.evaluation import (
@@ -40,8 +42,8 @@ def place(
     Behavior:
         The pass analyzes virtual traffic, constructs a feasible initial set of
         connected regions, assigns communication-aware virtual ownership,
-        evaluates exact physical IO, and applies strictly improving local
-        repairs until the objective stalls.
+        compares compact and full-mesh seeds using analytical stage service
+        estimates, and sweeps strictly improving local repairs across all stages.
 
     Raises:
         ValueError: If requested stage tiles exceed the mesh or no connected
@@ -66,38 +68,36 @@ def place(
         f"l2_pressure={traffic.l2_pressure}",
     )
 
-    placements = build_initial_stage_placements(
-        mesh,
-        stage_plans,
-        tile_counts,
-        traffic,
-        show_progress,
-    )
-    placements = assign_stage_ownerships(mesh, stage_plans, placements, traffic)
     evaluator = PlacementEvaluator(
-        mesh,
-        stage_plans,
-        virtual_transitions,
-        stage_latency_weight,
-        communication_weight,
+        mesh, stage_plans, virtual_transitions,
+        stage_latency_weight, communication_weight,
     )
-    evaluation = evaluator.evaluate(placements)
-    _debug(
-        show_progress,
-        "[placement] "
-        f"phase=initial_placement objective={evaluation.objective} "
-        f"worst_tile={evaluation.worst_tile_id}",
-    )
-    placements = improve_placement(
-        mesh,
-        stage_plans,
-        placements,
-        traffic,
-        virtual_transitions,
-        evaluation,
-        show_progress,
-        evaluator=evaluator,
-    )
+    domains: dict[str, frozenset[int] | None] = {"native": None}
+    compact = compact_tile_domain(mesh, sum(tile_counts.values()))
+    if len(compact) < mesh.num_tiles:
+        domains["compact"] = compact
+    best_placements = None
+    best_evaluation = None
+    for label, domain in domains.items():
+        placements = build_initial_stage_placements(
+            mesh, stage_plans, tile_counts, traffic, show_progress,
+            allowed_tile_ids=domain,
+        )
+        placements = assign_stage_ownerships(mesh, stage_plans, placements, traffic)
+        evaluation = evaluator.evaluate(placements)
+        _debug(show_progress, f"[placement] seed={label} initial_objective={evaluation.objective}")
+        placements = improve_placement(
+            mesh, stage_plans, placements, traffic, virtual_transitions,
+            evaluation, show_progress, evaluator=evaluator,
+        )
+        evaluation = evaluator.evaluate(placements)
+        _debug(show_progress, f"[placement] seed={label} final_objective={evaluation.objective}")
+        if best_evaluation is None or evaluation.objective < best_evaluation.objective:
+            best_placements, best_evaluation = placements, evaluation
+            best_label = label
+    assert best_placements is not None and best_evaluation is not None
+    placements = best_placements
+    _debug(show_progress, f"[placement] selected_seed={best_label} objective={best_evaluation.objective}")
 
     if print_costs:
         print_placement_details(
@@ -110,6 +110,20 @@ def place(
     elif print_placement:
         print_placement_grid(mesh, placements)
     return placements
+
+
+def compact_tile_domain(mesh: Mesh, used_tiles: int) -> frozenset[int]:
+    """A left-edge rectangle with roughly twice the allocated area as slack.
+
+    Its dimensions depend on allocation, not total mesh area, so a larger mesh
+    can retain the same compact starting footprint. Thin meshes are supported.
+    """
+    side = max(1, ceil(sqrt(2 * used_tiles)))
+    width, height = min(mesh.width, side), min(mesh.height, side)
+    if width * height < used_tiles:
+        width = min(mesh.width, max(width, ceil(used_tiles / height)))
+        height = min(mesh.height, max(height, ceil(used_tiles / width)))
+    return frozenset(mesh.tile_id(x, y) for y in range(height) for x in range(width))
 
 
 def _debug(enabled: bool, message: str) -> None:
