@@ -140,6 +140,8 @@ def bounding_tensor_slice(slices: tuple[TensorSlice, ...]) -> TensorSlice:
     """Return the smallest rectangular Tensor Slice containing all inputs."""
 
     first = slices[0]
+    if len(slices) == 1:
+        return first
     return TensorSlice(
         rank=first.rank,
         dims=tuple(
@@ -251,14 +253,15 @@ def tile_tensor_slice(tensor: Tensor, layout: TensorLayout, tile: Tile) -> Tenso
     """Return the concrete tensor slice owned by one tile."""
 
     layout.validate_for(tensor)
-    if tile.tile_id not in layout.submesh.tile_ids:
+    try:
+        tile_ordinal = layout.submesh.tile_ordinal(tile.tile_id)
+    except KeyError:
         raise ValueError(
             f"tile {tile.tile_id} is not inside submesh {layout.submesh.submesh_id}"
-        )
+        ) from None
 
     logical_width = layout.effective_logical_width
     logical_height = layout.effective_logical_height
-    tile_ordinal = layout.submesh.tile_ordinal(tile.tile_id)
     logical_x = tile_ordinal % logical_width
     logical_y = tile_ordinal // logical_width
     dims = [TensorRange(start=0, length=dim) for dim in tensor.dims]

@@ -28,6 +28,7 @@ def estimate_stage_latency(
     ],
     node_tile_work: tuple[tuple[TileWork, ...], ...] | None = None,
     physical_tiles_by_virtual_id: dict[int, Tile] | None = None,
+    node_tile_cycles: tuple[tuple[int, ...], ...] | None = None,
 ) -> int:
     """Sum slowest-tile phases and synchronous collective Layer latencies."""
 
@@ -74,6 +75,11 @@ def estimate_stage_latency(
                 )
             latency += max(group_latencies, default=0)
             phase_cycles = dict.fromkeys(phase_cycles, 0)
+            continue
+
+        if node_tile_cycles is not None:
+            for tile, cycles in zip(virtual_tiles, node_tile_cycles[node_index]):
+                phase_cycles[tile.tile_id] += cycles
             continue
 
         placement_cycles = int(

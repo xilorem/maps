@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import cached_property
 from typing import cast
 
@@ -30,6 +30,8 @@ from maps.planning.stages import (
     derive_virtual_collective_groups,
 )
 from maps.planning.stage_latency import estimate_stage_latency
+from maps.planning.transitions.compile import StageDemands, stage_resident_demands
+from .equivalence import compute_equivalence_key, l1_equivalence_key
 
 
 @dataclass(frozen=True)
@@ -58,6 +60,7 @@ class StageCandidate:
     plan: StagePlan
     tile_facts: tuple[StageTileFacts, ...]
     stage_latency: int
+    resident_demands: StageDemands | None = field(default=None, compare=False, repr=False)
 
 
 class StageCandidateAnalyzer:
@@ -85,6 +88,24 @@ class StageCandidateAnalyzer:
         self._initializer_tensors = initializer_tensors
         self._num_token_slots = num_token_slots
         self._cache: dict[tuple[int, int], tuple[StageCandidate, ...]] = {}
+        self._initializer_identities = {id(tensor) for tensor in initializer_tensors}
+        self._scratch_by_stage: dict[int, tuple[int, ...]] = {}
+        self._compute_caches = {stage: [{} for _ in nodes] for stage, nodes in self._stage_formation.items()}
+        self._l1_caches = {stage: {} for stage in self._stage_formation}
+        for stage_id, nodes in self._stage_formation.items():
+            signatures = tuple(WorkSignature.from_node(node) for node in nodes)
+            scratch_by_device = {}
+            scratch_by_tile = []
+            for tile in mesh.tiles:
+                reservations = []
+                for signature, name in zip(signatures, self._device_names[stage_id]):
+                    device = tile.device_by_name(name)
+                    key = (id(device), signature)
+                    if key not in scratch_by_device:
+                        scratch_by_device[key] = device.temporary_l1_bytes(signature)
+                    reservations.append(scratch_by_device[key])
+                scratch_by_tile.append(max(reservations, default=0))
+            self._scratch_by_stage[stage_id] = tuple(scratch_by_tile)
 
     def candidate(
         self,
@@ -155,40 +176,41 @@ class StageCandidateAnalyzer:
                     cost_models,
                 )
             )
-            tile_facts = tuple(
-                StageTileFacts(
+            # Analyze one representative per compute or L1-equivalent geometry.
+            # Full work remains available for locality and collective evaluation.
+            compute_caches = self._compute_caches[stage_id]
+            l1_cache = self._l1_caches[stage_id]
+            node_tile_cycles = [[] for _ in stage_nodes]
+            tile_facts = []
+            for tile_index, tile in enumerate(submesh.tiles):
+                works = tuple(work_by_tile[tile_index] for work_by_tile in node_tile_work)
+                work_slices = tuple((work.input_slices, work.output_slices) for work in works)
+                for node_index, (work, (inputs, outputs)) in enumerate(zip(works, work_slices)):
+                    device = tile.device_by_name(device_names[node_index])
+                    key = compute_equivalence_key(
+                        cost_models[node_index], work, tile, device, inputs, outputs,
+                    )
+                    cache = compute_caches[node_index]
+                    if key is None:
+                        cycles = _node_cost(cost_models[node_index], work, tile, device_names[node_index])
+                    else:
+                        if key not in cache:
+                            cache[key] = _node_cost(cost_models[node_index], work, tile, device_names[node_index])
+                        cycles = cache[key]
+                    node_tile_cycles[node_index].append(cycles + placement_cycles[node_index])
+                memory_key = l1_equivalence_key(work_slices)
+                if memory_key not in l1_cache:
+                    l1_cache[memory_key] = permanent_l1_allocation_for_tile_work(
+                        works, self._initializer_tensors, self._num_token_slots,
+                    )
+                tile_facts.append(StageTileFacts(
                     tile_id=tile.tile_id,
-                    local_cycles=sum(
-                        _node_cost(
-                            cost_models[node_index],
-                            node_tile_work[node_index][tile_index],
-                            tile,
-                            device_names[node_index],
-                        )
-                        + placement_cycles[node_index]
-                        for node_index in range(len(stage_nodes))
-                    ),
-                    permanent_l1_bytes=permanent_l1_allocation_for_tile_work(
-                        tuple(
-                            work_by_tile[tile_index]
-                            for work_by_tile in node_tile_work
-                        ),
-                        self._initializer_tensors,
-                        self._num_token_slots,
-                    ),
-                    scratch_l1_bytes=max(
-                        (
-                            tile.device_by_name(device_names[node_index])
-                            .temporary_l1_bytes(
-                                WorkSignature.from_node(stage_nodes[node_index])
-                            )
-                            for node_index in range(len(stage_nodes))
-                        ),
-                        default=0,
-                    ),
-                )
-                for tile_index, tile in enumerate(submesh.tiles)
-            )
+                    local_cycles=sum(cycles[tile_index] for cycles in node_tile_cycles),
+                    permanent_l1_bytes=l1_cache[memory_key],
+                    scratch_l1_bytes=self._scratch_by_stage[stage_id][tile_index],
+                ))
+            tile_facts = tuple(tile_facts)
+            node_tile_cycles = tuple(tuple(cycles) for cycles in node_tile_cycles)
             if any(
                 fact.total_l1_bytes > tile.memory.size
                 for fact, tile in zip(tile_facts, submesh.tiles)
@@ -213,6 +235,10 @@ class StageCandidateAnalyzer:
                     device_names=device_names,
                     virtual_collective_groups=collective_groups,
                     node_tile_work=node_tile_work,
+                    node_tile_cycles=node_tile_cycles,
+                ),
+                resident_demands=stage_resident_demands(
+                    stage_nodes, layouts, self._initializer_identities, node_tile_work,
                 ),
             )
             candidates.append(candidate)
@@ -629,7 +655,7 @@ class ConnectedSubmesh:
     def contains_tile_id(self, tile_id: int) -> bool:
         """Return whether a physical tile belongs to this submesh."""
 
-        return tile_id in self.tile_ids
+        return tile_id in self._tile_ordinals
 
     def intersects_tile_ids(self, tile_ids: set[int]) -> bool:
         """Return whether this submesh intersects a supplied tile set."""
@@ -639,7 +665,7 @@ class ConnectedSubmesh:
     def global_to_local(self, tile_id: int) -> tuple[int, int]:
         """Translate a physical tile id to logical row-major coordinates."""
 
-        if tile_id not in self.tile_ids:
+        if not self.contains_tile_id(tile_id):
             raise ValueError(f"tile_id {tile_id} is not inside submesh {self.submesh_id}")
         ordinal = self.tile_ordinal(tile_id)
         return ordinal % self.width, ordinal // self.width

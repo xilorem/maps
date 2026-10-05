@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import isfinite
+from typing import Callable
 
 from maps.hardware import Mesh
 from maps.graph import Graph, Node
@@ -13,7 +15,7 @@ from maps.planning.stages import (
     virtual_submesh,
 )
 from maps.planning.allocation.candidates import StageCandidate, StageCandidateAnalyzer
-from maps.planning.transitions import build_virtual_transitions
+from maps.planning.transitions import VirtualTransition, build_virtual_transitions
 
 
 def seed_stage_candidates(
@@ -84,6 +86,7 @@ def grow_stage_candidates(
     stage_latency_weight: float,
     communication_weight: float,
     debug: bool,
+    prune_candidates: bool = True,
 ) -> tuple[dict[int, StageCandidate], SelectionEvaluation]:
     """Best-improvement local search over counts, layouts, and tile exchanges.
 
@@ -93,22 +96,37 @@ def grow_stage_candidates(
     to another stage atomically, so a full mesh can escape an overgrown stage.
     Stage formation stays fixed. Strict objective descent guarantees termination;
     this neighborhood search does not guarantee the global optimum.
+
+    Admissible communication floors stop trials that cannot strictly improve
+    the current best objective, including its preference for fewer tiles. The
+    candidate neighborhood and exact pricing of accepted trials stay the same.
     """
 
     selected_candidates = dict(selected_candidates)
     evaluations: dict[tuple[tuple[int, int, tuple[int, int]], ...], SelectionEvaluation] = {}
+    communication_cache = AllocationCommunicationCache(
+        context.graph, mesh, {stage: candidate.plan for stage, candidate in selected_candidates.items()},
+    )
 
-    def evaluate(selection: dict[int, StageCandidate]) -> SelectionEvaluation:
+    def evaluate(
+        selection: dict[int, StageCandidate],
+        objective_limit: tuple[tuple[float, ...], int] | None = None,
+    ) -> SelectionEvaluation | None:
         key = tuple(
             (stage, candidate.plan.tile_count, candidate.plan.logical_shape)
             for stage, candidate in selection.items()
         )
         if key not in evaluations:
-            evaluations[key] = evaluate_candidate_selection(
+            result = evaluate_candidate_selection(
                 selection, mesh=mesh, graph=context.graph,
                 stage_latency_weight=stage_latency_weight,
                 communication_weight=communication_weight,
+                communication_cache=communication_cache,
+                objective_limit=objective_limit if prune_candidates else None,
             )
+            if result is None:
+                return None  # Partial bounds are never cached as evaluations.
+            evaluations[key] = result
         return evaluations[key]
 
     def objective(
@@ -120,6 +138,7 @@ def grow_stage_candidates(
         return selection_objective(evaluation.metrics), _used_tile_count(selection)
 
     current_evaluation = evaluate(selected_candidates)
+    assert current_evaluation is not None
     sweep = 0
     while True:
         sweep += 1
@@ -136,7 +155,9 @@ def grow_stage_candidates(
         def consider(replacements: dict[int, StageCandidate]) -> None:
             nonlocal best_selection, best_evaluation, best_objective
             trial = selected_candidates | replacements
-            evaluation = evaluate(trial)
+            evaluation = evaluate(trial, best_objective)
+            if evaluation is None:
+                return
             trial_objective = objective(trial, evaluation)
             if trial_objective < best_objective:
                 best_selection, best_evaluation, best_objective = trial, evaluation, trial_objective
@@ -313,14 +334,48 @@ def evaluate_candidate_selection(
     stage_latency_weight: float,
     communication_weight: float,
     graph: Graph,
-) -> SelectionEvaluation:
-    """Evaluate one complete Stage Candidate selection."""
+    communication_cache: AllocationCommunicationCache | None = None,
+    objective_limit: tuple[tuple[float, ...], int] | None = None,
+) -> SelectionEvaluation | None:
+    """Evaluate a selection, or return None when it cannot beat objective_limit.
+
+    Rejection uses lower bounds only with supported integer transfer costs and
+    finite non-negative weights. Without a cache or limit, pricing is complete.
+    """
 
     plans = {
         stage_id: candidate.plan
         for stage_id, candidate in candidates.items()
     }
-    virtual_communication = _virtual_communication_cycles(graph, mesh, plans)
+    if communication_cache is not None:
+        for candidate in candidates.values():
+            if candidate.resident_demands is not None:
+                communication_cache.compiler.set_demands(candidate.plan, candidate.resident_demands)
+    reject = None
+    if (
+        objective_limit is not None and communication_cache is not None
+        and communication_cache.transfer_bounds.supported
+        and all(isfinite(weight) and weight >= 0 for weight in (stage_latency_weight, communication_weight))
+    ):
+        tile_count = _used_tile_count(candidates)
+
+        def reject(lower_cycles: dict[int, int]) -> bool:
+            metrics = {
+                stage: stage_latency_weight * candidate.stage_latency
+                + communication_weight * lower_cycles[stage]
+                for stage, candidate in candidates.items()
+            }
+            if not all(isfinite(metric) for metric in metrics.values()):
+                return False
+            return (selection_objective(metrics), tile_count) >= objective_limit
+
+    virtual_communication = (
+        _virtual_communication_cycles(graph, mesh, plans)
+        if communication_cache is None
+        else _virtual_communication_cycles(graph, mesh, plans, communication_cache, reject)
+    )
+    if virtual_communication is None:
+        return None
     return SelectionEvaluation(
         stage_breakdowns={
             stage_id: StageMetricBreakdown(
@@ -344,8 +399,23 @@ def _virtual_communication_cycles(
     graph: Graph,
     mesh: Mesh,
     plans: dict[int, StagePlan],
-) -> dict[int, dict[int, int]]:
+    cache: AllocationCommunicationCache | None = None,
+    reject: Callable[[dict[int, int]], bool] | None = None,
+) -> dict[int, dict[int, int]] | None:
     """Estimate communication service for each virtual tile."""
+    if cache is not None:
+        return cache.cycles(plans, reject)
+    return _communication_cycles_for_transitions(
+        mesh, plans, build_virtual_transitions(graph, plans),
+    )
+
+
+def _communication_cycles_for_transitions(
+    mesh: Mesh,
+    plans: dict[int, StagePlan],
+    transitions: tuple[VirtualTransition, ...],
+) -> dict[int, dict[int, int]]:
+    """Price a complete boundary or stage edge with the existing rounding rules."""
 
     runtime = mesh.dma_runtime_cost
     if any((runtime.submission_cycles, runtime.setup_cycles, runtime.publication_cycles)):
@@ -353,7 +423,7 @@ def _virtual_communication_cycles(
 
         return virtual_communication_cycles(
             mesh,
-            build_virtual_transitions(graph, plans),
+            transitions,
             {
                 stage_id: virtual_submesh(plan).tile_ids
                 for stage_id, plan in plans.items()
@@ -364,8 +434,7 @@ def _virtual_communication_cycles(
     # and Placement; it does not depend on physical mapping decisions.
     from maps.planning.placement.evaluation import build_virtual_traffic
 
-    virtual_transitions = build_virtual_transitions(graph, plans)
-    traffic = build_virtual_traffic(virtual_transitions, plans)
+    traffic = build_virtual_traffic(transitions, plans)
     communication = {
         stage_id: {
             tile.tile_id: 0
@@ -396,6 +465,113 @@ def _virtual_communication_cycles(
                 min(source_tile.memory.bandwidth, destination_tile.memory.bandwidth),
             )
     return communication
+
+
+class AllocationCommunicationCache:
+    """Cache per-tile service for boundaries and candidate pairs within one search.
+
+    Cache whole stage edges rather than individual tensors: bandwidth-only
+    scoring sums bytes on each edge before rounding to cycles. Tile costs must
+    also be summed before taking the stage maximum. Transfer lists are discarded
+    after pricing to keep the cache proportional to tile counts, not tile pairs.
+    """
+
+    def __init__(self, graph: Graph, mesh: Mesh, plans: dict[int, StagePlan]) -> None:
+        from maps.planning.transitions.compile import VirtualTransitionCompiler
+
+        self.mesh = mesh
+        self.compiler = VirtualTransitionCompiler(graph, plans)
+        self.boundaries: dict[int, dict[int, dict[int, int]]] = {}
+        self.edges: dict[tuple[int, int], dict[int, dict[int, int]]] = {}
+        from .bounds import TransferLowerBounds
+
+        self.transfer_bounds = TransferLowerBounds(mesh, self.compiler)
+        self.pruned_selections = 0
+        self.completed_selections = 0
+        self.priced_edges = 0
+
+    def _edge_cycles(self, source: StagePlan, destination: StagePlan):
+        key = (id(source), id(destination))
+        if key not in self.edges:
+            transitions = self.compiler.intermediates(source, destination)
+            self.edges[key] = _communication_cycles_for_transitions(
+                self.mesh, {source.stage_id: source, destination.stage_id: destination}, transitions,
+            )
+            self.priced_edges += 1
+        return self.edges[key]
+
+    @staticmethod
+    def _add(cycles, contribution):
+        for stage, tiles in contribution.items():
+            for tile, cost in tiles.items():
+                cycles[stage][tile] += cost
+
+    def cycles(
+        self, plans: dict[int, StagePlan],
+        reject: Callable[[dict[int, int]], bool] | None = None,
+    ) -> dict[int, dict[int, int]] | None:
+        if reject is not None and reject(dict.fromkeys(plans, 0)):
+            self.pruned_selections += 1
+            return None
+        cycles: dict[int, dict[int, int]] = {}
+        for stage, plan in plans.items():
+            key = id(plan)
+            if key not in self.boundaries:
+                transitions = self.compiler.inputs(plan) + self.compiler.outputs(plan)
+                self.boundaries[key] = _communication_cycles_for_transitions(
+                    self.mesh, {stage: plan}, transitions,
+                )
+            cycles[stage] = dict(self.boundaries[key][stage])
+        if reject is None:
+            for source, destination in self.compiler.edges:
+                self._add(cycles, self._edge_cycles(plans[source], plans[destination]))
+            self.completed_selections += 1
+            return cycles
+
+        missing = []
+        for source, destination in self.compiler.edges:
+            key = (id(plans[source]), id(plans[destination]))
+            if key in self.edges:
+                self._add(cycles, self.edges[key])
+            else:
+                missing.append((source, destination))
+        optimistic = {stage: dict(tiles) for stage, tiles in cycles.items()}
+        outgoing_totals = dict.fromkeys(plans, 0)
+        floors = {}
+        for source, destination in missing:
+            sender, receiver = self.transfer_bounds.edge(plans[source], plans[destination])
+            floors[source, destination] = sender, receiver
+            outgoing_totals[source] += sender
+            for tile, cost in receiver.items():
+                optimistic[destination][tile] += cost
+
+        def cannot_improve():
+            # A stage's true maximum is at least both its known per-tile floor
+            # and its total-service floor divided across all of its tiles.
+            lower = {
+                stage: max(
+                    max(tiles.values(), default=0),
+                    _ceil_div(sum(tiles.values()) + outgoing_totals[stage], len(tiles)),
+                ) for stage, tiles in optimistic.items()
+            }
+            return reject(lower)
+
+        if cannot_improve():
+            self.pruned_selections += 1
+            return None
+        for source, destination in missing:
+            contribution = self._edge_cycles(plans[source], plans[destination])
+            self._add(cycles, contribution)
+            self._add(optimistic, contribution)
+            sender, receiver = floors[source, destination]
+            outgoing_totals[source] -= sender
+            for tile, cost in receiver.items():
+                optimistic[destination][tile] -= cost
+            if cannot_improve():
+                self.pruned_selections += 1
+                return None
+        self.completed_selections += 1
+        return cycles
 
 
 def selection_objective(metrics: dict[int, float]) -> tuple[float, ...]:

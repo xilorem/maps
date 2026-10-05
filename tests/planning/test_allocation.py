@@ -876,7 +876,7 @@ def test_communication_favorable_layout_wins(monkeypatch) -> None:
         return tuple(replace(c, stage_latency=100 if c.plan.logical_shape[1] == 1 else 110)
                      for c in original(self, *args))
 
-    def communication(graph, mesh, plans):
+    def communication(graph, mesh, plans, cache=None, reject=None):
         return {stage: {0: 1000 if plan.tile_count == 1 or plan.logical_shape[1] == 1 else 10}
                 for stage, plan in plans.items()}
 
@@ -891,7 +891,7 @@ def test_harmful_tile_increase_leaves_tiles_unused(monkeypatch) -> None:
     graph = Graph("harmful", nodes=(node,))
     mesh = _mesh_with_l1(2, 1, 32768)
     monkeypatch.setattr(allocation_module, "_virtual_communication_cycles",
-                        lambda graph, mesh, plans: {0: {0: 0 if plans[0].tile_count == 1 else 10000}})
+                        lambda graph, mesh, plans, cache=None, reject=None: {0: {0: 0 if plans[0].tile_count == 1 else 10000}})
     assert allocate(graph, mesh, {0: (node,)})[0].tile_count == 1
 
 

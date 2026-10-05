@@ -14,7 +14,7 @@ from maps.planning.mapping import (
     bounding_tensor_slice,
     tile_tensor_slice,
 )
-from maps.operations.contracts import OpPayload, input_slices_for_tensor
+from maps.operations.contracts import OpPayload, TileWork, input_slices_for_tensor
 from maps.planning.stages import node_output_index, node_output_layouts
 from maps.planning.stages import StagePlacement, StagePlan
 
@@ -36,126 +36,158 @@ from .contracts import (
 )
 
 
+ResidentDestinations = tuple[tuple[Tile, TensorSlice], ...]
+StageDemands = tuple[tuple[Tensor, ResidentDestinations], ...]
+
+
+class VirtualTransitionCompiler:
+    """Reuse graph topology and resident demands across allocation trials.
+
+    The compiler belongs to one graph and fixed stage formation. Only resident
+    demands are retained; potentially large pairwise transfer lists are returned
+    to the caller rather than cached here.
+    """
+
+    def __init__(self, graph: Graph, stage_plans: dict[int, StagePlan]) -> None:
+        self.graph = graph
+        self.tensor_ids = {id(tensor): i for i, tensor in enumerate(graph.tensors)}
+        self.producers = {
+            id(tensor): node for node in graph.nodes for tensor in node.outputs
+        }
+        self.stage_ids = {
+            id(node): stage for stage, plan in stage_plans.items() for node in plan.nodes
+        }
+        self.runtime_inputs = {id(tensor) for tensor in graph.inputs}
+        self.initializers = {id(tensor) for tensor in graph.initializers} | {
+            id(tensor) for tensor in graph.tensors if tensor.is_initializer
+        }
+        self.edges = tuple(sorted({
+            (self.stage_ids[id(self.producers[id(tensor)])], stage)
+            for stage, plan in stage_plans.items()
+            for node in plan.nodes for tensor in node.inputs
+            if id(tensor) not in self.initializers and id(tensor) in self.producers
+            and self.stage_ids[id(self.producers[id(tensor)])] != stage
+        }))
+        # Retain each plan alongside its identity key to prevent id reuse.
+        self._demands: dict[int, tuple[StagePlan, StageDemands]] = {}
+
+    def set_demands(self, plan: StagePlan, demands: StageDemands) -> None:
+        """Accept resident demands already derived during candidate analysis."""
+        self._demands.setdefault(id(plan), (plan, demands))
+
+    def demands(self, plan: StagePlan) -> StageDemands:
+        """Return one resident bounding slice per external tensor and tile."""
+        key = id(plan)
+        if key not in self._demands:
+            self._demands[key] = (plan, stage_resident_demands(
+                plan.nodes, plan.node_output_layouts, self.initializers,
+            ))
+        return self._demands[key][1]
+
+    def inputs(self, plan: StagePlan) -> tuple[VirtualInputTransition, ...]:
+        return tuple(
+            VirtualInputTransition(
+                tensor=tensor,
+                tensor_id=self.tensor_ids[id(tensor)],
+                destination_stage_id=plan.stage_id,
+                destinations=tuple(
+                    VirtualInputDestination(virtual_tile_id=tile.tile_id, tensor_slice=slice_)
+                    for tile, slice_ in sorted(destinations, key=lambda item: item[0].tile_id)
+                ),
+            )
+            for tensor, destinations in self.demands(plan)
+            if id(tensor) not in self.producers and id(tensor) in self.runtime_inputs
+        )
+
+    def outputs(self, plan: StagePlan) -> tuple[VirtualOutputTransition, ...]:
+        return tuple(
+            _build_virtual_output_transition(
+                tensor, self.tensor_ids[id(tensor)], self.producers[id(tensor)],
+                self.stage_ids, {plan.stage_id: plan},
+            )
+            for tensor in self.graph.outputs
+            if self.stage_ids[id(self.producers[id(tensor)])] == plan.stage_id
+        )
+
+    def _intermediate(
+        self,
+        tensor: Tensor,
+        destinations: ResidentDestinations,
+        source_plan: StagePlan,
+        destination_plan: StagePlan,
+    ) -> VirtualIntermediateTransition:
+        producer = self.producers[id(tensor)]
+        layout = node_output_layouts(source_plan, producer)[
+            node_output_index(producer, tensor)
+        ]
+        return VirtualIntermediateTransition(
+            tensor=tensor, tensor_id=self.tensor_ids[id(tensor)],
+            source_stage_id=source_plan.stage_id,
+            destination_stage_id=destination_plan.stage_id,
+            transfers=_build_virtual_transfers(tensor, layout, destinations),
+        )
+
+    def intermediates(
+        self, source: StagePlan, destination: StagePlan,
+    ) -> tuple[VirtualIntermediateTransition, ...]:
+        """Compile all tensors on one stage edge together."""
+        return tuple(
+            self._intermediate(tensor, destinations, source, destination)
+            for tensor, destinations in self.demands(destination)
+            if id(tensor) in self.producers
+            and self.stage_ids[id(self.producers[id(tensor)])] == source.stage_id
+        )
+
+    def build(self, plans: dict[int, StagePlan]) -> tuple[VirtualTransition, ...]:
+        inputs: list[VirtualInputTransition] = []
+        intermediates: list[VirtualIntermediateTransition] = []
+        for stage in sorted(plans):
+            plan = plans[stage]
+            inputs.extend(self.inputs(plan))
+            for tensor, destinations in self.demands(plan):
+                producer = self.producers.get(id(tensor))
+                if producer is not None:
+                    intermediates.append(self._intermediate(
+                        tensor, destinations, plans[self.stage_ids[id(producer)]], plan,
+                    ))
+        outputs = tuple(
+            _build_virtual_output_transition(
+                tensor, self.tensor_ids[id(tensor)], self.producers[id(tensor)],
+                self.stage_ids, plans,
+            )
+            for tensor in self.graph.outputs
+        )
+        return tuple(inputs) + tuple(intermediates) + outputs
+
+
+def stage_resident_demands(
+    nodes: tuple[Node, ...],
+    layouts: tuple[tuple[TensorLayout, ...], ...],
+    initializer_identities: set[int],
+    node_tile_work: tuple[tuple[TileWork, ...], ...] | None = None,
+) -> StageDemands:
+    """Derive resident external inputs, optionally from existing tile work."""
+    local_outputs = {id(tensor) for node in nodes for tensor in node.outputs}
+    demanded: dict[int, tuple[Tensor, list[tuple[Tile, TensorSlice]]]] = {}
+    for index, (node, output_layouts) in enumerate(zip(nodes, layouts)):
+        for tensor in node.inputs:
+            identity = id(tensor)
+            if identity in initializer_identities or identity in local_outputs or tensor.is_initializer:
+                continue
+            _, slices = demanded.setdefault(identity, (tensor, []))
+            slices.extend(_required_input_slices(
+                tensor, node, output_layouts,
+                None if node_tile_work is None else node_tile_work[index],
+            ))
+    return tuple((tensor, _resident_destinations(slices)) for tensor, slices in demanded.values())
+
+
 def build_virtual_transitions(
     graph: Graph,
     stage_plans: dict[int, StagePlan],
 ) -> tuple[VirtualTransition, ...]:
     """Compile every graph boundary and cross-stage dependency."""
-
-    tensor_id_by_identity = {
-        id(tensor): tensor_id
-        for tensor_id, tensor in enumerate(graph.tensors)
-    }
-    producer_by_tensor_identity = {
-        id(tensor): node
-        for node in graph.nodes
-        for tensor in node.outputs
-    }
-    stage_id_by_node_identity = {
-        id(node): stage_id
-        for stage_id, plan in stage_plans.items()
-        for node in plan.nodes
-    }
-    runtime_input_identities = {id(tensor) for tensor in graph.inputs}
-    initializer_identities = {
-        id(tensor)
-        for tensor in graph.initializers
-    } | {
-        id(tensor)
-        for tensor in graph.tensors
-        if tensor.is_initializer
-    }
-
-    inputs: list[VirtualInputTransition] = []
-    intermediates: list[VirtualIntermediateTransition] = []
-    for destination_stage_id in sorted(stage_plans):
-        destination_plan = stage_plans[destination_stage_id]
-        demands_by_tensor_identity: dict[
-            int,
-            tuple[Tensor, list[tuple[Tile, TensorSlice]]],
-        ] = {}
-        for destination_node in destination_plan.nodes:
-            destination_layouts = node_output_layouts(
-                destination_plan,
-                destination_node,
-            )
-            for tensor in destination_node.inputs:
-                tensor_identity = id(tensor)
-                if tensor_identity in initializer_identities:
-                    continue
-                source_node = producer_by_tensor_identity.get(tensor_identity)
-                if (
-                    source_node is not None
-                    and stage_id_by_node_identity[id(source_node)] == destination_stage_id
-                ):
-                    continue
-                _, demanded_slices = demands_by_tensor_identity.setdefault(
-                    tensor_identity,
-                    (tensor, []),
-                )
-                demanded_slices.extend(
-                    _required_input_slices(
-                        tensor=tensor,
-                        destination_node=destination_node,
-                        destination_output_layouts=destination_layouts,
-                    )
-                )
-
-        for tensor_identity, (tensor, demanded_slices) in demands_by_tensor_identity.items():
-            destinations = _resident_destinations(demanded_slices)
-            source_node = producer_by_tensor_identity.get(tensor_identity)
-            if source_node is None:
-                if tensor_identity in runtime_input_identities:
-                    inputs.append(
-                        VirtualInputTransition(
-                            tensor=tensor,
-                            tensor_id=tensor_id_by_identity[tensor_identity],
-                            destination_stage_id=destination_stage_id,
-                            destinations=tuple(
-                                VirtualInputDestination(
-                                    virtual_tile_id=tile.tile_id,
-                                    tensor_slice=tensor_slice,
-                                )
-                                for tile, tensor_slice in sorted(
-                                    destinations,
-                                    key=lambda item: item[0].tile_id,
-                                )
-                            ),
-                        )
-                    )
-                continue
-
-            source_stage_id = stage_id_by_node_identity[id(source_node)]
-            source_output_index = node_output_index(source_node, tensor)
-            source_layout = node_output_layouts(
-                stage_plans[source_stage_id],
-                source_node,
-            )[source_output_index]
-            intermediates.append(
-                VirtualIntermediateTransition(
-                    tensor=tensor,
-                    tensor_id=tensor_id_by_identity[tensor_identity],
-                    source_stage_id=source_stage_id,
-                    destination_stage_id=destination_stage_id,
-                    transfers=_build_virtual_transfers(
-                        tensor,
-                        source_layout,
-                        destinations,
-                    ),
-                )
-            )
-
-    outputs = tuple(
-        _build_virtual_output_transition(
-            tensor,
-            tensor_id_by_identity[id(tensor)],
-            producer_by_tensor_identity[id(tensor)],
-            stage_id_by_node_identity,
-            stage_plans,
-        )
-        for tensor in graph.outputs
-    )
-    return tuple(inputs) + tuple(intermediates) + outputs
+    return VirtualTransitionCompiler(graph, stage_plans).build(stage_plans)
 
 
 def bind_transitions(
@@ -301,17 +333,18 @@ def _required_input_slices(
     tensor: Tensor,
     destination_node: Node,
     destination_output_layouts: tuple[TensorLayout, ...],
+    tile_work: tuple[TileWork, ...] | None = None,
 ) -> tuple[tuple[Tile, TensorSlice], ...]:
     payload = cast(OpPayload, destination_node.payload)
     destinations = []
-    for tile in destination_output_layouts[0].submesh.tiles:
-        tile_work = payload.build_tile_work(
-            output_layouts=destination_output_layouts,
-            tile=tile,
+    for index, tile in enumerate(destination_output_layouts[0].submesh.tiles):
+        work = (
+            tile_work[index] if tile_work is not None
+            else payload.build_tile_work(output_layouts=destination_output_layouts, tile=tile)
         )
         destinations.extend(
             (tile, tensor_slice)
-            for tensor_slice in input_slices_for_tensor(tile_work, tensor)
+            for tensor_slice in input_slices_for_tensor(work, tensor)
         )
     return tuple(destinations)
 

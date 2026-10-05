@@ -1,0 +1,39 @@
+Separate cached MobileViT slice profile, 16x16, two token slots.
+Instrumentation overhead included; not used for scaling-table timings.
+
+Mon Oct  5 13:46:53 2026    /tmp/maps-allocation-cached.prof
+
+         104085464 function calls (101739729 primitive calls) in 35.190 seconds
+
+   Ordered by: cumulative time
+   List reduced from 2414 to 28 due to restriction <28>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+    414/1    0.051    0.000   41.961   41.961 {built-in method builtins.exec}
+        1    0.000    0.000   41.961   41.961 allocation_scaling.py:1(<module>)
+        1    0.003    0.003   41.958   41.958 allocation_scaling.py:18(main)
+        1    0.013    0.013   41.643   41.643 selection.py:504(allocate)
+        1    0.006    0.006   41.595   41.595 selection.py:79(grow_stage_candidates)
+     2632    0.012    0.000   22.197    0.008 candidates.py:102(candidates)
+      225    0.077    0.000   22.185    0.099 candidates.py:112(_analyze)
+     6902    0.008    0.000   19.392    0.003 selection.py:140(consider)
+     6903    0.024    0.000   19.346    0.003 selection.py:104(evaluate)
+     6424    0.078    0.000   19.314    0.003 selection.py:314(evaluate_candidate_selection)
+     6425    0.031    0.000   19.178    0.003 selection.py:352(_virtual_communication_cycles)
+     6424    0.165    0.000   19.141    0.003 selection.py:440(cycles)
+   815762    3.461    0.000   10.759    0.000 mapping.py:250(tile_tensor_slice)
+    74524    0.297    0.000    8.303    0.000 candidates.py:158(<genexpr>)
+     3175    0.005    0.000    7.724    0.002 compile.py:139(intermediates)
+     6350    0.006    0.000    7.716    0.001 compile.py:143(<genexpr>)
+     3184    0.011    0.000    7.710    0.002 compile.py:121(_intermediate)
+     3184    0.319    0.000    7.688    0.002 compile.py:277(_build_virtual_transfers)
+     3397    0.033    0.000    6.359    0.002 candidates.py:128(<genexpr>)
+   210783    0.082    0.000    6.313    0.000 candidates.py:129(<genexpr>)
+     4060    0.015    0.000    6.125    0.002 selection.py:366(_communication_cycles_for_transitions)
+     4060    0.341    0.000    6.105    0.002 dma.py:183(virtual_communication_cycles)
+    73640    1.005    0.000    5.144    0.000 candidates.py:468(permanent_l1_allocation_for_tile_work)
+      892    0.006    0.000    4.979    0.006 compile.py:96(inputs)
+     4075    0.011    0.000    4.967    0.001 compile.py:74(demands)
+     1538    0.145    0.000    4.409    0.003 compile.py:319(_required_input_slices)
+  2267242    0.828    0.000    4.120    0.000 {built-in method builtins.max}
+      884    0.335    0.000    3.469    0.004 candidates.py:375(verify_stage_locality)
