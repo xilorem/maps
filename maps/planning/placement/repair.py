@@ -14,6 +14,7 @@ from maps.planning.placement.evaluation import (
 from maps.planning.placement.regions import assign_stage_ownerships
 from maps.planning.placement.regions import placements_from_regions
 from maps.planning.placement.regions import region_anchor_cost, sorted_candidate_tiles
+from maps.planning.placement.regions import stage_anchor_costs
 from maps.planning.placement.regions import grow_stage_region, local_stage_order, stage_target_point
 from maps.planning.placement.regions import (
     l2_access_point_tile_ids,
@@ -195,6 +196,7 @@ def repair_region(
                 for other_stage_id in ordered_stages[order_idx + 1:]
             }
             target = stage_target_point(stage_id, mesh, placed_regions, traffic)
+            anchor_costs = stage_anchor_costs(mesh, stage_id, traffic, placed_regions)
             seeds = sorted_candidate_tiles(
                 mesh,
                 free_tile_ids,
@@ -202,6 +204,7 @@ def repair_region(
                 stage_id,
                 traffic,
                 placed_regions,
+                anchor_costs=anchor_costs,
             )
             if not seeds:
                 feasible = False
@@ -219,6 +222,8 @@ def repair_region(
                     remaining_tile_counts=remaining_counts,
                     preferred_seed=preferred_seed,
                     exhaustive_future_feasibility=False,
+                    ranked_seed_tile_ids=seeds,
+                    anchor_costs=anchor_costs,
                 )
             except ValueError:
                 feasible = False

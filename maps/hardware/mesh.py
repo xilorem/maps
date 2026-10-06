@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
+from functools import cached_property
 
 from .dma import DMARuntimeCost
 from .memory import L2Memory
@@ -62,6 +63,45 @@ class Mesh:
     @property
     def num_tiles(self) -> int:
         return self.width * self.height
+
+    @cached_property
+    def neighbor_tile_ids(self) -> tuple[frozenset[int], ...]:
+        """Immutable four-neighbor geometry, computed once for this mesh."""
+        return tuple(
+            frozenset(
+                y * self.width + x
+                for x, y in (
+                    (tile.x + 1, tile.y), (tile.x - 1, tile.y),
+                    (tile.x, tile.y + 1), (tile.x, tile.y - 1),
+                )
+                if self.contains_coord(x, y)
+            )
+            for tile in self.tiles
+        )
+
+    @cached_property
+    def l2_access_tile_ids(self) -> frozenset[int]:
+        """Tiles whose NoC node also hosts an L2 endpoint."""
+        l2_nodes = {
+            endpoint.node_id
+            for endpoint in self.noc.endpoints_of_kind(EndpointKind.L2)
+        }
+        return frozenset(
+            endpoint.tile_id
+            for endpoint in self.noc.endpoints
+            if endpoint.kind is EndpointKind.L1
+            and endpoint.tile_id is not None
+            and endpoint.node_id in l2_nodes
+        )
+
+    @cached_property
+    def nearest_l2_distances(self) -> tuple[int, ...]:
+        """Manhattan distance to the nearest L2 access tile, or zero without L2."""
+        points = tuple(self.tile_by_id(tile_id) for tile_id in self.l2_access_tile_ids)
+        return tuple(
+            min((abs(tile.x - point.x) + abs(tile.y - point.y) for point in points), default=0)
+            for tile in self.tiles
+        )
 
     def contains_coord(self, x: int, y: int) -> bool:
         return 0 <= x < self.width and 0 <= y < self.height

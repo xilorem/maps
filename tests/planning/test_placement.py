@@ -21,6 +21,38 @@ from tests.noc_utils import rectangular_test_noc, rectangular_test_tiles
 from maps.target import magia
 
 
+def test_anchor_precomputation_preserves_scores_and_refreshes_after_peer_moves() -> None:
+    mesh = magia.build_mesh(width=4, height=4)
+    traffic = VirtualTraffic(
+        stage_comm={(0, 1): 7, (2, 0): 11, (0, 3): 0},
+        edge_matrices={}, input_weights={}, output_weights={},
+        l2_read_weights={}, l2_write_weights={}, communication_degree={},
+        bottleneck_risk={}, l2_pressure={0: 13},
+    )
+    placed = {1: {0, 1}, 2: {8, 12}}
+    before = placement_topology.stage_anchor_costs(mesh, 0, traffic, placed)
+    assert before == tuple(
+        placement_topology.stage_anchor_cost(mesh, 0, tile, traffic, placed)
+        for tile in mesh.tiles
+    )
+    placed[1] = {14, 15}
+    after = placement_topology.stage_anchor_costs(mesh, 0, traffic, placed)
+    assert after != before
+    assert after == tuple(
+        placement_topology.stage_anchor_cost(mesh, 0, tile, traffic, placed)
+        for tile in mesh.tiles
+    )
+    seeds = placement_topology.sorted_candidate_tiles(
+        mesh, range(mesh.num_tiles), (1.5, 1.5), 0, traffic, placed,
+        anchor_costs=after,
+    )
+    assert seeds == sorted(range(mesh.num_tiles), key=lambda tile_id: (
+        placement_topology._seed_tile_score(
+            0, mesh, mesh.tile_by_id(tile_id), (1.5, 1.5), traffic, placed,
+        ), mesh.tile_by_id(tile_id).y, mesh.tile_by_id(tile_id).x, tile_id,
+    ))
+
+
 def test_serpentine_fallback_partitions_a_full_mesh_into_connected_regions() -> None:
     mesh = _test_mesh(4, 2)
 

@@ -1,4 +1,5 @@
 import pytest
+from dataclasses import replace
 
 from maps.hardware import EndpointKind, L1Memory, L2Memory, Mesh, NoC, NoCChannel, NoCEndpoint, NoCLink, NoCNode
 from tests.noc_utils import rectangular_test_noc, rectangular_test_tiles
@@ -98,3 +99,28 @@ def test_mesh_rejects_attached_noc_endpoint_tile_id_outside_mesh() -> None:
 
     with pytest.raises(ValueError, match="NoC endpoint tile_id out of bounds"):
         Mesh(width=2, height=2, l2_memory=L2Memory(size=4096, bandwidth=1), noc=noc, tiles=rectangular_test_tiles(2, 2))
+
+
+def test_cached_geometry_handles_boundaries_and_is_owned_by_each_mesh() -> None:
+    mesh = Mesh(
+        width=3, height=2, l2_memory=L2Memory(size=4096, bandwidth=1),
+        noc=rectangular_test_noc(3, 2), tiles=rectangular_test_tiles(3, 2),
+    )
+    assert mesh.neighbor_tile_ids == (
+        frozenset({1, 3}), frozenset({0, 2, 4}), frozenset({1, 5}),
+        frozenset({0, 4}), frozenset({1, 3, 5}), frozenset({2, 4}),
+    )
+    assert mesh.neighbor_tile_ids is mesh.neighbor_tile_ids
+    # Equal geometry with different attached endpoints must not reuse L2 data.
+    no_l2 = replace(mesh, noc=replace(mesh.noc, endpoints=tuple(
+        endpoint for endpoint in mesh.noc.endpoints if endpoint.kind is not EndpointKind.L2
+    )))
+    assert no_l2.l2_access_tile_ids == frozenset()
+    assert no_l2.nearest_l2_distances == (0, 0, 0, 0, 0, 0)
+    l1 = next(endpoint for endpoint in no_l2.noc.endpoints if endpoint.tile_id == 0)
+    at_origin = replace(no_l2, noc=replace(no_l2.noc, endpoints=no_l2.noc.endpoints + (
+        NoCEndpoint(endpoint_id=max(e.endpoint_id for e in no_l2.noc.endpoints) + 1,
+                    kind=EndpointKind.L2, node_id=l1.node_id),
+    )))
+    assert at_origin.l2_access_tile_ids == frozenset({0})
+    assert at_origin.nearest_l2_distances == (0, 1, 2, 1, 2, 3)

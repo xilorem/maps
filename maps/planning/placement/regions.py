@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections import deque
 from collections.abc import Iterable, Iterator
 
-from maps.hardware import EndpointKind, Mesh, Tile
+from maps.hardware import Mesh, Tile
 from maps.planning.mapping import Submesh
 from maps.planning.stages import StagePlacement, StagePlan
 from maps.planning.stages import virtual_submesh
@@ -113,6 +113,9 @@ def grow_stage_region(
     remaining_tile_counts: dict[int, int],
     preferred_seed: int | None = None,
     exhaustive_future_feasibility: bool = True,
+    *,
+    ranked_seed_tile_ids: list[int] | None = None,
+    anchor_costs: tuple[float, ...] | None = None,
 ) -> set[int]:
     """Grow one connected region while protecting future feasibility.
 
@@ -121,14 +124,15 @@ def grow_stage_region(
     connected shapes.  Failure means no region was found under this heuristic.
     """
 
-    seed_candidates = sorted_candidate_tiles(
-        mesh,
-        allowed_tile_ids,
-        target,
-        stage_id,
-        traffic,
-        placed_regions,
-    )
+    if anchor_costs is None:
+        anchor_costs = stage_anchor_costs(mesh, stage_id, traffic, placed_regions)
+    if ranked_seed_tile_ids is None:
+        seed_candidates = sorted_candidate_tiles(
+            mesh, allowed_tile_ids, target, stage_id, traffic, placed_regions,
+            anchor_costs=anchor_costs,
+        )
+    else:
+        seed_candidates = list(ranked_seed_tile_ids)
     if preferred_seed is not None and preferred_seed in allowed_tile_ids:
         seed_candidates = [preferred_seed] + [
             tile_id
@@ -152,6 +156,7 @@ def grow_stage_region(
                 placed_regions,
                 remaining_tile_counts,
                 exhaustive_future_feasibility,
+                anchor_costs=anchor_costs,
             )
         except ValueError as exc:
             failures.append(str(exc))
@@ -165,6 +170,7 @@ def grow_stage_region(
         placed_regions,
         remaining_tile_counts,
         exhaustive_future_feasibility,
+        anchor_costs=anchor_costs,
     )
     if region is None:
         raise ValueError(
@@ -473,6 +479,7 @@ def free_component_sizes(mesh: Mesh, free_tile_ids: set[int]) -> tuple[int, ...]
 
     seen: set[int] = set()
     sizes: list[int] = []
+    neighbors = mesh.neighbor_tile_ids
     for start in sorted(free_tile_ids):
         if start in seen:
             continue
@@ -482,7 +489,7 @@ def free_component_sizes(mesh: Mesh, free_tile_ids: set[int]) -> tuple[int, ...]
         while stack:
             tile_id = stack.pop()
             size += 1
-            for neighbor_id in neighbor_ids(mesh, tile_id):
+            for neighbor_id in neighbors[tile_id]:
                 if neighbor_id in free_tile_ids and neighbor_id not in seen:
                     seen.add(neighbor_id)
                     stack.append(neighbor_id)
@@ -493,30 +500,14 @@ def free_component_sizes(mesh: Mesh, free_tile_ids: set[int]) -> tuple[int, ...]
 def neighbor_ids(mesh: Mesh, tile_id: int) -> set[int]:
     """Return the existing four-neighbor tile ids of one mesh tile."""
 
-    tile = mesh.tile_by_id(tile_id)
-    neighbors: set[int] = set()
-    for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
-        x = tile.x + dx
-        y = tile.y + dy
-        if mesh.contains_coord(x, y):
-            neighbors.add(mesh.tile_id(x, y))
-    return neighbors
+    mesh.tile_by_id(tile_id)  # Preserve validation for invalid tile IDs.
+    return set(mesh.neighbor_tile_ids[tile_id])
 
 
 def l2_access_point_tile_ids(mesh: Mesh) -> set[int]:
     """Return tiles sharing a NoC node with an L2 endpoint."""
 
-    l1_endpoints = tuple(
-        endpoint
-        for endpoint in mesh.noc.endpoints
-        if endpoint.kind is EndpointKind.L1 and endpoint.tile_id is not None
-    )
-    return {
-        endpoint.tile_id
-        for l2_endpoint in mesh.noc.endpoints_of_kind(EndpointKind.L2)
-        for endpoint in l1_endpoints
-        if endpoint.node_id == l2_endpoint.node_id
-    }
+    return set(mesh.l2_access_tile_ids)
 
 
 def remaining_counts_tuple(
@@ -540,22 +531,20 @@ def sorted_candidate_tiles(
     stage_id: int,
     traffic: VirtualTraffic,
     placed_regions: dict[int, set[int]],
+    *,
+    anchor_costs: tuple[float, ...] | None = None,
 ) -> list[int]:
     """Order candidate seeds by communication-aware target score."""
 
+    if anchor_costs is None:
+        anchor_costs = stage_anchor_costs(mesh, stage_id, traffic, placed_regions)
+    tiles = mesh.tiles
     return sorted(
         candidate_tile_ids,
         key=lambda tile_id: (
-            _seed_tile_score(
-                stage_id,
-                mesh,
-                mesh.tile_by_id(tile_id),
-                target,
-                traffic,
-                placed_regions,
-            ),
-            mesh.tile_by_id(tile_id).y,
-            mesh.tile_by_id(tile_id).x,
+            abs(tiles[tile_id].x - target[0]) + abs(tiles[tile_id].y - target[1]) + anchor_costs[tile_id],
+            tiles[tile_id].y,
+            tiles[tile_id].x,
             tile_id,
         ),
     )
@@ -571,6 +560,8 @@ def growth_candidate_score(
     placed_regions: dict[int, set[int]],
     allowed_tile_ids: set[int],
     remaining_tile_counts: dict[int, int],
+    *,
+    anchor_costs: tuple[float, ...] | None = None,
 ) -> tuple[float, float, float, int]:
     """Score one frontier tile for connected-region growth."""
 
@@ -578,7 +569,10 @@ def growth_candidate_score(
     candidate_region = chosen | {tile_id}
     target_cost = abs(tile.x - target[0]) + abs(tile.y - target[1])
     compactness_cost = region_compactness(mesh, candidate_region)
-    anchor_cost = stage_anchor_cost(mesh, stage_id, tile, traffic, placed_regions)
+    anchor_cost = (
+        stage_anchor_cost(mesh, stage_id, tile, traffic, placed_regions)
+        if anchor_costs is None else anchor_costs[tile_id]
+    )
     future_penalty = future_space_penalty(
         mesh,
         allowed_tile_ids - candidate_region,
@@ -601,12 +595,17 @@ def region_score(
     placed_regions: dict[int, set[int]],
     allowed_tile_ids: set[int],
     remaining_tile_counts: dict[int, int],
+    *,
+    anchor_costs: tuple[float, ...] | None = None,
 ) -> tuple[float, float, float, tuple[int, ...]]:
     """Score a complete region by target, anchors, shape, and future space."""
 
     center = tile_set_center(mesh, region)
     target_cost = abs(center[0] - target[0]) + abs(center[1] - target[1])
-    anchor_cost = region_anchor_cost(stage_id, mesh, region, traffic, placed_regions)
+    anchor_cost = (
+        region_anchor_cost(stage_id, mesh, region, traffic, placed_regions)
+        if anchor_costs is None else sum(anchor_costs[tile_id] for tile_id in region)
+    )
     compactness_cost = region_compactness(mesh, region)
     future_penalty = future_space_penalty(
         mesh,
@@ -619,6 +618,35 @@ def region_score(
         compactness_cost,
         tuple(sorted(region)),
     )
+
+
+def stage_anchor_costs(
+    mesh: Mesh,
+    stage_id: int,
+    traffic: VirtualTraffic,
+    placed_regions: dict[int, set[int]],
+) -> tuple[float, ...]:
+    """Precompute scores while peer regions stay fixed during one growth."""
+    anchors = []
+    for (source_stage_id, destination_stage_id), weight in traffic.stage_comm.items():
+        if weight <= 0:
+            continue
+        if source_stage_id == stage_id and destination_stage_id in placed_regions:
+            anchors.append((weight, tile_set_center(mesh, placed_regions[destination_stage_id])))
+        elif destination_stage_id == stage_id and source_stage_id in placed_regions:
+            anchors.append((weight, tile_set_center(mesh, placed_regions[source_stage_id])))
+    l2_weight = traffic.l2_pressure.get(stage_id, 0)
+    distances = mesh.nearest_l2_distances
+    divisor = max(1, len(traffic.stage_comm))
+    scores = []
+    for tile in mesh.tiles:
+        score = 0.0
+        for weight, center in anchors:
+            score += weight * tile_to_point_distance(tile, center)
+        if l2_weight > 0 and mesh.l2_access_tile_ids:
+            score += l2_weight * distances[tile.tile_id]
+        scores.append(score / divisor)
+    return tuple(scores)
 
 
 def stage_anchor_cost(
@@ -642,16 +670,8 @@ def stage_anchor_cost(
             score += weight * tile_to_point_distance(tile, center)
 
     l2_weight = traffic.l2_pressure.get(stage_id, 0)
-    if l2_weight > 0:
-        access_points = tuple(
-            (mesh.tile_by_id(tile_id).x, mesh.tile_by_id(tile_id).y)
-            for tile_id in l2_access_point_tile_ids(mesh)
-        )
-        if access_points:
-            score += l2_weight * min(
-                abs(tile.x - x) + abs(tile.y - y)
-                for x, y in access_points
-            )
+    if l2_weight > 0 and mesh.l2_access_tile_ids:
+        score += l2_weight * mesh.nearest_l2_distances[tile.tile_id]
     return score / max(1, len(traffic.stage_comm))
 
 
@@ -704,6 +724,8 @@ def greedy_connected_region(
     placed_regions: dict[int, set[int]],
     remaining_tile_counts: dict[int, int],
     exhaustive_future_feasibility: bool = True,
+    *,
+    anchor_costs: tuple[float, ...] | None = None,
 ) -> set[int]:
     """Grow a connected region from one seed using local best choices."""
 
@@ -725,6 +747,7 @@ def greedy_connected_region(
                 placed_regions,
                 allowed_tile_ids,
                 remaining_tile_counts,
+                anchor_costs=anchor_costs,
             ),
         )
         for candidate_tile_id in candidates:
@@ -757,6 +780,8 @@ def beam_connected_region(
     placed_regions: dict[int, set[int]],
     remaining_tile_counts: dict[int, int],
     exhaustive_future_feasibility: bool = True,
+    *,
+    anchor_costs: tuple[float, ...] | None = None,
 ) -> set[int] | None:
     """Search a wider set of regions when greedy growth gets boxed in."""
 
@@ -786,6 +811,7 @@ def beam_connected_region(
                     placed_regions,
                     allowed_tile_ids,
                     remaining_tile_counts,
+                    anchor_costs=anchor_costs,
                 ),
             )[:beam_width]
         )
@@ -815,6 +841,7 @@ def beam_connected_region(
             placed_regions,
             allowed_tile_ids,
             remaining_tile_counts,
+            anchor_costs=anchor_costs,
         ),
     )
 
@@ -1028,15 +1055,8 @@ def _virtual_assignment_cost(
         ):
             score += bytes_ * (abs(tile.x - x) + abs(tile.y - y))
 
-    l2_points = tuple(
-        (mesh.tile_by_id(tile_id).x, mesh.tile_by_id(tile_id).y)
-        for tile_id in l2_access_point_tile_ids(mesh)
-    )
-    if l2_points:
-        l2_distance = min(
-            abs(tile.x - x) + abs(tile.y - y)
-            for x, y in l2_points
-        )
+    if mesh.l2_access_tile_ids:
+        l2_distance = mesh.nearest_l2_distances[physical_tile_id]
         score += (
             traffic.l2_read_weights.get(stage_id, {}).get(virtual_tile_id, 0)
             * l2_distance
