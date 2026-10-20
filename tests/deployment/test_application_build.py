@@ -599,6 +599,12 @@ def test_build_application_leaves_no_partial_output_after_backend_failure(
     assert not output.exists()
     assert plan_output.read_text() == "existing plan\n"
     assert not list(tmp_path.glob(".failed-application.staging-*"))
+    diagnostics = list(tmp_path.glob("failed-application.generation-failure-*"))
+    assert len(diagnostics) == 1
+    failure = json.loads((diagnostics[0] / "backend-error.json").read_text())
+    assert failure["stderr"] == "backend failed"
+    assert (diagnostics[0] / "execution-plan.json").is_file()
+    assert (diagnostics[0] / "intermediates/deployment-bundle.json").is_file()
 
 
 def test_build_application_regenerates_owned_files_and_preserves_user_work(

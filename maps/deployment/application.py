@@ -393,6 +393,27 @@ def build_application(
             output,
             replace_existing=previous_manifest is not None,
         )
+    except RuntimeError as error:
+        backend = error.__cause__
+        if isinstance(backend, subprocess.CalledProcessError):
+            # Keep failed compiler inputs outside the atomic application output.
+            # They allow code generation to be retried without rerunning placement.
+            diagnostics = staging_parent.with_name(
+                output.name + ".generation-failure-" + staging_parent.name.rsplit("-", 1)[-1]
+            )
+            write_execution_plan(bundle.execution_plan,
+                                 staging_parent / "execution-plan.json")
+            (staging_parent / "backend-error.json").write_text(json.dumps({
+                "command": backend.cmd,
+                "returncode": backend.returncode,
+                "stdout": backend.stdout or "",
+                "stderr": backend.stderr or "",
+            }, indent=2) + "\n")
+            staging_parent.rename(diagnostics)
+            report(f"Application generation diagnostics: {diagnostics}")
+            if backend.stderr:
+                report(backend.stderr.rstrip())
+        raise
     finally:
         shutil.rmtree(staging_parent, ignore_errors=True)
     if execution_plan_output is not None:
