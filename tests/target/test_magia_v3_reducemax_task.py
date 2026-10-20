@@ -35,7 +35,7 @@ def test_generated_magia_v3_reducemax_bundles_its_tile_local_spatz_task(
 
     assert "reducemax_fp16_spatz_task" in validate_application(application)["tasks"]
     cmake = (application / "CMakeLists.txt").read_text()
-    assert "reducemax/spatz_task/reducemax_fp16_spatz_task.c" in cmake
+    assert "reducemax/fp16/spatz/spatz_task/reducemax_fp16_spatz_task.c" in cmake
     assert "MAPS_HAS_REDUCE_MAX_SPATZ_TASK=1" in cmake
     runner = (application / "src/reducemax_runner.c").read_text()
     assert "runtime.reducemax_fp16_task = REDUCEMAX_FP16_SPATZ_TASK" in runner

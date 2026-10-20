@@ -45,7 +45,7 @@ def test_generated_magia_v3_reducesum_bundles_its_tile_local_spatz_task(
     ) is magia_v3.SPATZ_DEVICE
     assert validate_application(application)["tasks"] == ["reducesum_fp16_spatz_task"]
     cmake = (application / "CMakeLists.txt").read_text()
-    assert "reducesum/spatz_task/reducesum_fp16_spatz_task.c" in cmake
+    assert "reducesum/fp16/spatz/spatz_task/reducesum_fp16_spatz_task.c" in cmake
     assert "MAPS_HAS_REDUCE_SUM_SPATZ_TASK=1" in cmake
     runner = (application / "src/reducesum_runner.c").read_text()
     assert "runtime.reducesum_fp16_task = REDUCESUM_FP16_SPATZ_TASK" in runner

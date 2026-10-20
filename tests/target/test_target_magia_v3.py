@@ -297,7 +297,7 @@ def test_magia_v3_identity_travels_through_the_ordinary_workflow(
     assert manifest["memory"]["initializers_region"] == "l2_bulk"
     assert manifest["memory"]["runtime_region"] == "l2_arena"
     assert manifest["memory"]["task_scratch_bytes"] == 65536
-    assert manifest["tasks"] == ["matmul_fp16_spatz_task"]
+    assert manifest["tasks"] == ["matmul_rows_fp16_spatz_task"]
     assert manifest["provenance"]["rewrite_report"][0]["rewrite_name"] == (
         "whole_graph_precision_specialization"
     )
@@ -350,8 +350,8 @@ def test_generated_magia_v3_add_application_bundles_its_spatz_task(
     assert manifest["memory"]["task_scratch_bytes"] == 65536
     assert manifest["memory"]["max_tile_l1_bytes"] == 65584
     cmake = (application / "CMakeLists.txt").read_text()
-    assert "add/spatz_task/add_fp16_spatz_task.c" in cmake
-    assert "add/src/add_fp16_spatz.c" not in cmake
+    assert "add/fp16/spatz/spatz_task/add_fp16_spatz_task.c" in cmake
+    assert "add/fp16/spatz/src/add_fp16_spatz.c" not in cmake
     assert "target_embed_spatz_task(" in cmake
     assert "add_bcast_fp16_spatz_task.c" not in cmake
     runner = (application / "src/add_runner.c").read_text()
@@ -426,7 +426,7 @@ def test_generated_magia_v3_broadcast_muls_share_the_spatz_task(
     manifest = validate_application(application)
     assert manifest["tasks"] == ["mul_bcast_fp16_spatz_task"]
     cmake = (application / "CMakeLists.txt").read_text()
-    assert cmake.count("mul/spatz_task/mul_bcast_fp16_spatz_task.c") == 1
+    assert cmake.count("mul/fp16/spatz/spatz_task/mul_bcast_fp16_spatz_task.c") == 1
     assert "MAPS_HAS_MUL_SPATZ_TASK=1" in cmake
     runner = (application / "src/mul_runner.c").read_text()
     assert (
@@ -456,7 +456,7 @@ def test_generated_magia_v3_im2col_preserves_complete_convolution_geometry(
     assert "OP_OUTPUT_REFORMAT" not in tile
     assert ".kind = OP_MATMUL" in tile
     manifest = validate_application(application)
-    assert manifest["tasks"] == ["matmul_fp16_spatz_task"]
+    assert manifest["tasks"] == ["matmul_rows_fp16_spatz_task"]
 
 
 def test_magia_v2_add_application_does_not_use_magia_v3_task_bundle(
