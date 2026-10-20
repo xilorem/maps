@@ -18,6 +18,40 @@ from maps.operations.convolution_transforms import ConvGemmPayload, Im2ColPayloa
 from maps.target import magia, magia_v3
 
 
+@pytest.mark.parametrize("transpose_w", [False, True])
+def test_magia_v3_gemm_output_columns(tmp_path: Path, transpose_w: bool) -> None:
+    weights = np.zeros((5, 3) if transpose_w else (3, 5), dtype=np.float16)
+    graph = helper.make_graph(
+        [helper.make_node("Gemm", ["x", "w", "bias"], ["y"], transB=int(transpose_w))],
+        "classifier",
+        [helper.make_tensor_value_info("x", TensorProto.FLOAT16, [1, 3])],
+        [helper.make_tensor_value_info("y", TensorProto.FLOAT16, [1, 5])],
+        [numpy_helper.from_array(weights, name="w"),
+         numpy_helper.from_array(np.zeros(5, dtype=np.float16), name="bias")],
+    )
+    path = tmp_path / "classifier.onnx"
+    onnx.save(helper.make_model(graph, opset_imports=[helper.make_opsetid("", 17)]), path)
+    app = build_application(path, tmp_path / "classifier", target="magia-v3",
+                            mesh_width=1, mesh_height=1, num_token_slots=1)
+    source = "\n".join(p.read_text() for p in (app / "src/tiles").glob("*.c"))
+    assert f".params = {{1u, 3u, 5u, 1u, 0u, 0u, 0u, {int(transpose_w)}u}}" in source
+
+
+def test_magia_v3_transpose_bundles_vector_task(tmp_path: Path) -> None:
+    model = helper.make_model(helper.make_graph(
+        [helper.make_node("Transpose", ["x"], ["y"], perm=[0, 2, 3, 1])],
+        "transpose", [helper.make_tensor_value_info("x", TensorProto.FLOAT16, [1, 2, 3, 4])],
+        [helper.make_tensor_value_info("y", TensorProto.FLOAT16, [1, 3, 4, 2])]),
+        opset_imports=[helper.make_opsetid("", 17)])
+    path = tmp_path / "transpose.onnx"
+    onnx.save(model, path)
+    app = build_application(path, tmp_path / "transpose", target="magia-v3",
+                            mesh_width=1, mesh_height=1, num_token_slots=1)
+    assert validate_application(app)["tasks"] == ["transpose_strided_fp16_spatz_task"]
+    assert "transpose/fp16/spatz/spatz_task/transpose_strided_fp16_spatz_task.c" in (app / "CMakeLists.txt").read_text()
+    assert "runtime.transpose_fp16_task = TRANSPOSE_STRIDED_FP16_SPATZ_TASK" in (app / "src/transpose_runner.c").read_text()
+
+
 def _write_float_model_with_integer_control(path: Path) -> Path:
     runtime_input = helper.make_tensor_value_info(
         "runtime_input", TensorProto.FLOAT, [2, 2]
