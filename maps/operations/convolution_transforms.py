@@ -147,6 +147,8 @@ class TransformTileWork(TileWork):
     inputs: tuple[Tensor, ...]
     input_tile_slices: tuple[TensorSlice, ...]
     work_kind: WorkKind
+    kernel_shape: tuple[int, int] | None = None
+    strides: tuple[int, int] = (1, 1)
 
     @property
     def input_slices(self) -> tuple[TensorSliceRef, ...]:
@@ -295,6 +297,8 @@ class Im2ColPayload(_TransformPayload):
             inputs=(self.x,),
             input_tile_slices=(input_slice,),
             work_kind=self.work_kind,
+            kernel_shape=self.kernel_shape,
+            strides=self.strides,
         )
 
     def _output_spatial_dims(self) -> tuple[int, int]:

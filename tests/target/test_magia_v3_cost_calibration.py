@@ -340,3 +340,37 @@ def test_magia_v3_singleton_collective_conservatively_tracks_movement_measuremen
     assert magia_v3.SPATZ_DEVICE.collective_cycles(
         work_kind, elements, (tile,)
     ) == pytest.approx(measured, rel=0.20)
+
+
+@pytest.mark.parametrize('channels,height,width,stride,measured', [
+    (192,8,8,2,263153), (64,16,16,2,492187),
+    (3,64,64,2,288524), (12,32,32,2,429969),
+    (256,8,8,1,373413), (64,16,16,1,537969),
+])
+def test_depthwise_dispatch_cost_tracks_measured_shapes(channels, height, width, stride, measured):
+    from types import SimpleNamespace
+    output = _slice_ref('output', (1,channels,height,width)).tensor_slice
+    input_slice = _slice_ref('input',(1,channels,height*stride,width*stride)).tensor_slice
+    work = SimpleNamespace(work_kind=WorkKind.DEPTHWISE_CONV,
+                           x=SimpleNamespace(elem_bytes=2), output_slice=output,
+                           input_slice=input_slice, kernel_shape=(3,3), strides=(stride,stride))
+    assert magia_v3.CORE_DEVICE.cycles(work) == pytest.approx(measured, rel=0.25)
+
+
+def test_depthwise_large_single_channel_retains_im2col_estimate():
+    from maps.target.magia_v3.depthwise_timing import depthwise_estimates
+    vector, im2col = depthwise_estimates(1,128,128,9,1)
+    assert vector > im2col * 10
+    assert im2col == pytest.approx(133000, rel=0.5)
+
+
+def test_transposed_classifier_cost_tracks_vector_kernel():
+    from types import SimpleNamespace
+
+    work = SimpleNamespace(
+        work_kind=WorkKind.GEMM, transpose_w=True,
+        y_slice=_slice_ref('bias', (1000,)).tensor_slice,
+        dimensions=lambda: (1, 1, 1000, 256),
+        operation_count=lambda: 2 * 1000 * 256,
+    )
+    assert magia_v3.SPATZ_DEVICE.cycles(work) == pytest.approx(243222, rel=0.20)

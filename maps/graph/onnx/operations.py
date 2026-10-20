@@ -24,6 +24,26 @@ from maps.operations.reduction import GlobalAveragePoolPayload, ReduceSumPayload
 from maps.operations.softmax import SoftmaxPayload
 from maps.operations.split import SplitPayload
 
+from maps.operations.maxpool import MaxPoolPayload
+
+def convert_maxpool(node_name, inputs, outputs, attributes):
+    _require_arity("MaxPool",node_name,inputs,outputs,input_count=1)
+    if attributes.get("storage_order",0)!=0:
+        raise NotImplementedError("MaxPool storage_order must be zero")
+    kernel=tuple(attributes["kernel_shape"])
+    strides=tuple(attributes.get("strides",(1,1)))
+    pads=tuple(attributes.get("pads",(0,0,0,0)))
+    auto=attributes.get("auto_pad","NOTSET")
+    if auto=="VALID": pads=(0,0,0,0)
+    elif auto in ("SAME_UPPER","SAME_LOWER"):
+        total=[max(0,((n+s-1)//s-1)*s+k-n) for n,s,k in zip(inputs[0].dims[2:],strides,kernel)]
+        begin=[t//2 if auto=="SAME_UPPER" else (t+1)//2 for t in total]
+        pads=tuple(begin+[t-b for t,b in zip(total,begin)])
+    elif auto not in ("NOTSET",""):
+        raise NotImplementedError("Unsupported MaxPool auto_pad")
+    return OpKind.CONV, MaxPoolPayload(inputs[0],outputs[0],kernel,strides,pads,
+        tuple(attributes.get("dilations",(1,1))),int(attributes.get("ceil_mode",0)))
+
 STATIC_INPUT_VALUES = "_static_input_values"
 
 _ONNX_DTYPES: dict[int, TensorDType] = {
@@ -535,6 +555,7 @@ ONNX_OPERATION_CONVERTERS: dict[str, OperationConversion] = {
     "Reshape": convert_reshape,
     "Softmax": convert_softmax,
     "Split": convert_split,
+    "MaxPool": convert_maxpool,
     "Transpose": convert_transpose,
     **{
         external_name: _unary_converter(operation_name, external_name)

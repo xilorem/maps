@@ -54,6 +54,7 @@ class WorkKind(Enum):
     OUTPUT_REFORMAT = auto()
     CAST = auto()
     DMA = auto()
+    MAX_POOL = auto()
 
 class DMAJob(Enum):
     READJOB = auto()

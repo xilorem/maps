@@ -188,6 +188,7 @@ def test_onnx_adapter_explicitly_maps_migrated_operation_families() -> None:
         "GroupNormalization",
         "Log",
         "MatMul",
+        "MaxPool",
         "Mul",
         "Neg",
         "Pow",

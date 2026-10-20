@@ -36,6 +36,7 @@ class DepthwiseConvTileWork(TileWork):
     bias_slice: TensorSlice | None
     output_slice: TensorSlice
     kernel_shape: tuple[int, int]
+    strides: tuple[int, int] = (1, 1)
     work_kind: WorkKind = WorkKind.DEPTHWISE_CONV
 
     @property
@@ -194,4 +195,5 @@ class DepthwiseConvPayload(OpPayload):
             bias_slice=bias_slice,
             output_slice=output_slice,
             kernel_shape=(self.w.dims[2], self.w.dims[3]),
+            strides=self.strides,
         )

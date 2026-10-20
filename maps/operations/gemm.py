@@ -33,6 +33,7 @@ class GemmTileWork(TileWork):
     w: Tensor
     output: Tensor
     y: Tensor | None = None
+    transpose_w: bool = False
 
     @property
     def work_kind(self) -> WorkKind:
@@ -200,6 +201,7 @@ class GemmPayload(OpPayload):
             w=self.w,
             y=self.y,
             output=self.output,
+            transpose_w=self.transpose_w,
         )
 
 

@@ -1,6 +1,6 @@
 """Concrete tile-local Devices owned by the MAGIA-v3 Target."""
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, fields, replace
 from math import ceil
 from types import MappingProxyType
 from typing import Any, Mapping
@@ -8,6 +8,8 @@ from typing import Any, Mapping
 from maps.graph import TensorDType
 from maps.hardware import (
     CollectiveCost,
+    ScalarDevice,
+    DMADevice,
     FixedDeviceAssignment,
     Tile,
     WorkKind,
@@ -30,12 +32,39 @@ _FP16_IM2COL = WorkSignature(
 _FP16_BITS = 16
 _SPATZ_KERNEL_LMUL = 8
 
+@dataclass(frozen=True)
+class MagiaV3DMADevice(DMADevice):
+    def cycles(self, work: Any) -> int:
+        kernel = getattr(work, "kernel_shape", None)
+        if work.work_kind is WorkKind.IM2COL and kernel and kernel != (1, 1):
+            k = work.output_slice.dims[0].length
+            per_element = 1.0 if work.strides[1] == 1 else 2.2
+            return 1800 + ceil(work.operation_count() * per_element) + k * 300
+        return super().cycles(work)
+
+
+@dataclass(frozen=True)
+class MagiaV3CoreDevice(ScalarDevice):
+    def cycles(self, work: Any) -> int:
+        if work.work_kind is WorkKind.MAX_POOL:
+            # Isolated ResNet 3x3/stride-2 shard: ~162 cycles/output.
+            return 6000 + work.operation_count() * 18
+        if work.work_kind is WorkKind.DEPTHWISE_CONV and work.x.elem_bytes == 2:
+            from .depthwise_timing import depthwise_cycles
+            return depthwise_cycles(work)
+        return super().cycles(work)
+
+
 IDMA_WRITE_DEVICE = replace(
     MAGIA_V2_IDMA_WRITE_DEVICE,
     throughput={**MAGIA_V2_IDMA_WRITE_DEVICE.throughput, WorkKind.IM2COL: 4.0},
     startup_cycles=1_800,
     capabilities=frozenset({_FP16_IM2COL}),
 )
+
+IDMA_WRITE_DEVICE = MagiaV3DMADevice(**{
+    f.name: getattr(IDMA_WRITE_DEVICE, f.name) for f in fields(DMADevice)
+})
 
 
 @dataclass(frozen=True)
@@ -95,7 +124,14 @@ class MagiaV3SpatzDevice(SpatzDevice):
             ) * _SPATZ_KERNEL_LMUL
             vector_blocks = ceil(n_size / vector_elements)
             loop_work = batch_size * m_size * k_size * vector_blocks
-            return self.kernel_startup_cycles[work_kind] + ceil(
+            bias = getattr(work, "y_slice", None) or getattr(work, "bias_slice", None)
+            bias_cycles = (ceil(batch_size * m_size * n_size * 13.4) if n_size % 2 else
+                           batch_size * m_size * ceil(n_size / vector_elements) * 37) if bias else 0
+            if getattr(work, "transpose_w", False):
+                compute = (batch_size * m_size * ceil(n_size / 64) * ceil(k_size / 2) * 110
+                           if k_size % 2 == 0 else ceil(operation_count * 11.2))
+                return self.kernel_startup_cycles[work_kind] + compute + bias_cycles
+            return self.kernel_startup_cycles[work_kind] + bias_cycles + ceil(
                 self.gemm_loop_cycles * loop_work + operation_count / throughput
             )
         elif work_kind in {WorkKind.MUL, WorkKind.SUB, WorkKind.DIV}:
@@ -284,11 +320,17 @@ REDMULE_DEVICE = replace(
 CORE_DEVICE = replace(
     MAGIA_V2_CORE_DEVICE,
     capabilities=(
-        MAGIA_V2_CORE_DEVICE.capabilities
+        (MAGIA_V2_CORE_DEVICE.capabilities | frozenset({
+            WorkSignature(WorkKind.MAX_POOL,
+                          (TensorDType.FLOAT16,), (TensorDType.FLOAT16,))
+        }))
         - SPATZ_DEVICE.capabilities
         - IDMA_WRITE_DEVICE.capabilities
     ),
 )
+CORE_DEVICE = MagiaV3CoreDevice(**{
+    f.name: getattr(CORE_DEVICE, f.name) for f in fields(ScalarDevice)
+})
 TILE_DEVICES = (
     IDMA_READ_DEVICE,
     IDMA_WRITE_DEVICE,
